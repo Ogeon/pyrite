@@ -1,0 +1,89 @@
+extern mod png;
+extern mod extra;
+extern mod nalgebra;
+use std::rand::{XorShiftRng, Rng};
+use std::vec;
+use std::num::min;
+use extra::time::precise_time_s;
+use nalgebra::na::Vec3;
+use core::{Tracer, Camera, Scene, SceneObject};
+use shapes::Sphere;
+mod core;
+mod shapes;
+
+fn main() {
+	let width = 512;
+	let height = 512;
+
+	let spheres = vec::from_fn(20, |i| {
+		let x = if i < 10 { -2.0 } else { 2.0 };
+		let z = (if i < 10 { i } else { i - 10 } as f32 * 5.0) + 3.0;
+		~Sphere::new(Vec3::new(x, 0.0, 1.0 + z), 1.0) as ~SceneObject: Send+Freeze
+	});
+
+	let scene = Scene {
+		camera: Camera::new(Vec3::new(5.0, -3.0, -4.0), Vec3::new(-0.3, -0.4, 0.0)),
+		objects: spheres
+	};
+
+	let mut tracer = Tracer::new();
+	tracer.samples = 50;
+	tracer.image_size = (width, height);
+	tracer.set_scene(scene);
+	tracer.bins = 3;
+
+
+
+	let mut tracers = ~[];
+
+	std::task::deschedule();
+	for n in std::iter::range(0, 4) {
+		println!("Starting task {}", n);
+		let rand = XorShiftRng::new();
+		tracers.push(tracer.spawn(rand));
+		std::task::deschedule();
+	}
+
+
+	let mut last_image_update = precise_time_s();
+	println!("Collecting data...");
+	while !tracer.done() {
+		//Don't be too eager!
+		if(!tracer.done()) {
+			std::rt::io::timer::sleep(500);
+		}
+
+		if last_image_update < precise_time_s() - 5.0 {
+			tracer.pixels.access(|&ref mut values| {
+				save_png(values, width, height);
+			});
+			last_image_update = precise_time_s();
+		}
+		std::task::deschedule();
+	}
+	println!("done!");
+
+	tracer.pixels.access(|&ref mut values| {
+		save_png(values, width, height);
+	});
+}
+	
+
+fn save_png(values: &~[~[f32]], width: u32, height: u32) {
+	println!("Saving PNG...");
+	let pixels: ~[~[u8]] = values.iter().map(|ref values| {
+		values.iter().map(|&v| {
+			(min(v, 1.0) * 255.0) as u8
+		}).collect()
+	}).collect();
+
+	let image = png::Image{
+		width: width,
+		height: height,
+		color_type: png::RGB8,
+		pixels: pixels.concat_vec()
+	};
+
+	png::store_png(&image, &Path::new("test.png"));
+	println!("PNG saved!");
+}
