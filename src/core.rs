@@ -127,7 +127,6 @@ impl Tracer {
 
 	pub fn spawn<R: Rng + Send/*, S: Sampler*/>(&mut self, random: R/*, sampler: S*/) -> TracerTask {
 		if self.done() {
-			println!("Generating new tiles");
 			let (image_w, image_h) = self.image_size;
 			self.tiles = ~MutexArc::new(generate_tiles(self.image_size, self.tile_size));
 			self.pixels = ~MutexArc::new(vec::from_elem((image_w * image_h) as uint, vec::from_elem(self.bins, 0.0f32)));
@@ -214,10 +213,6 @@ impl Tracer {
 								let mut closest_hit = None;
 
 								for &(ref object, d) in hits.iter() {
-									/*if closest_dist != std::f32::INFINITY {
-										println!("d: {}, closest_dist: {}.", d, closest_dist);
-									}*/
-
 									if d < closest_dist {
 										match object.intersect(ray) {
 											Some((hit, dist)) => {
@@ -277,7 +272,6 @@ impl Tracer {
 						task::deschedule();
 					}
 
-					//println!("{} sent some data!", id);
 					std::rt::io::timer::sleep(0);
 				},
 				None => {running = false;}
@@ -292,13 +286,10 @@ impl Tracer {
 
 		data.task_counter.access(|&ref mut num| {
 			**num -= 1;
-			println!("A thread is done!");
-			println!("Number of threads left: {}", **num);
 		});
 	}
 
 	fn get_tile(tiles: &mut ~[Tile]) -> Option<Tile> {
-		//println!("{} tiles left", tiles.len());
 		if(tiles.len() > 0) {
 			Some(tiles.shift())
 		} else {

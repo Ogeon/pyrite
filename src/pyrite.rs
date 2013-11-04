@@ -32,13 +32,12 @@ fn main() {
 	tracer.set_scene(scene);
 	tracer.bins = 3;
 
-
+	let render_started = precise_time_s();
 
 	let mut tracers = ~[];
-
 	std::task::deschedule();
 	for n in std::iter::range(0, 4) {
-		println!("Starting task {}", n);
+		println!("Starting render task {}", n);
 		let rand = XorShiftRng::new();
 		tracers.push(tracer.spawn(rand));
 		std::task::deschedule();
@@ -46,14 +45,13 @@ fn main() {
 
 
 	let mut last_image_update = precise_time_s();
-	println!("Collecting data...");
 	while !tracer.done() {
 		//Don't be too eager!
 		if(!tracer.done()) {
 			std::rt::io::timer::sleep(500);
 		}
 
-		if last_image_update < precise_time_s() - 5.0 {
+		if last_image_update < precise_time_s() - 10.0 {
 			tracer.pixels.access(|&ref mut values| {
 				save_png(values, width, height);
 			});
@@ -61,7 +59,8 @@ fn main() {
 		}
 		std::task::deschedule();
 	}
-	println!("done!");
+
+	println!("Render time: {}s", precise_time_s() - render_started);
 
 	tracer.pixels.access(|&ref mut values| {
 		save_png(values, width, height);
@@ -85,5 +84,4 @@ fn save_png(values: &~[~[f32]], width: u32, height: u32) {
 	};
 
 	png::store_png(&image, &Path::new("test.png"));
-	println!("PNG saved!");
 }
