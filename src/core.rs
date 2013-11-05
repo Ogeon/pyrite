@@ -1,5 +1,5 @@
 extern mod std;
-use std::rand::Rng;
+use std::rand::{XorShiftRng, Rng};
 use std::num::{exp, ln, min, max};
 use std::{task, fmt, vec};
 use std::comm::stream;
@@ -13,23 +13,25 @@ use nalgebra::na;
 
 struct RandomVariable {
 	values: ~[f32],
-	pos: uint
+	pos: uint,
+	random: XorShiftRng
 }
 
 impl RandomVariable {
-	pub fn new() -> RandomVariable {
+	pub fn new(random: XorShiftRng) -> RandomVariable {
 		RandomVariable{
 			values: ~[],
-			pos: 0
+			pos: 0,
+			random: random
 		}
 	}
 
-	pub fn next<T: Rng>(&mut self, random: &mut T) -> f32 {
+	pub fn next(&mut self) -> f32 {
 		let pos = self.pos;
 		self.pos += 1;
 
 		while pos >= self.values.len() {
-			self.values.push(random.gen());
+			self.values.push(self.random.gen());
 		}
 
 		self.values[pos]
@@ -125,7 +127,7 @@ impl Tracer {
 		}
 	}
 
-	pub fn spawn<R: Rng + Send/*, S: Sampler*/>(&mut self, random: R/*, sampler: S*/) -> TracerTask {
+	pub fn spawn(&mut self/*, sampler: S*/) -> TracerTask {
 		if self.done() {
 			let (image_w, image_h) = self.image_size;
 			self.tiles = ~MutexArc::new(generate_tiles(self.image_size, self.tile_size));
@@ -134,7 +136,6 @@ impl Tracer {
 
 		let (command_port, command_chan) = stream::<TracerCommands>();
 		let data = TracerData{
-			random: random,
 			command_port: command_port,
 			tiles: self.tiles.clone(),//generate_tiles(self.image_size, self.tile_size),
 			samples: self.samples,
@@ -170,11 +171,11 @@ impl Tracer {
 		self.scene = ~Arc::new(scene);
 	}
 
-	fn run<R: Rng + Send>(mut data: TracerData<R>) {
+	fn run(mut data: TracerData) {
 		task::deschedule();
 
 		let mut running = true;
-		let mut rand_var = RandomVariable::new();
+		let mut rand_var = RandomVariable::new(XorShiftRng::new());
 		//let id: u16 = data.random.gen();
 		let (image_w, _) = data.image_size;
 
@@ -196,24 +197,27 @@ impl Tracer {
 
 							while running && samples > 0 {
 								rand_var.clear();
-								let frequency = rand_var.next(&mut data.random);
-								let sample_x = cam_x + (x as f32 - 0.5 + rand_var.next(&mut data.random)) * pixel_size;
-								let sample_y = cam_y + (y as f32 - 0.5 + rand_var.next(&mut data.random)) * pixel_size;
+								let frequency = rand_var.next();
+								let sample_x = cam_x + (x as f32 - 0.5 + rand_var.next()) * pixel_size;
+								let sample_y = cam_y + (y as f32 - 0.5 + rand_var.next()) * pixel_size;
 								let mut ray = data.scene.get().camera.ray_to(sample_x, sample_y);
 
 								let mut bounces = vec::with_capacity(10);
 
 								for _ in range(0, 10) {
-									match Tracer::trace(ray, data.scene.get(), &mut rand_var, &mut data.random) {
+									match Tracer::trace(ray, data.scene.get(), &mut rand_var) {
 										Some(reflection) => {
 											ray = reflection.out;
 											bounces.push(reflection);
+											if(reflection.absorbation == 0.0) {
+												break;
+											}
 										},
 										None => {
 											bounces.push(Reflection {
 												out: ray,
 												absorbation: 0.0,
-												emission: frequency*2.0 //TODO: Background color
+												emission: frequency //TODO: Background color
 											});
 											break;
 										}
@@ -274,7 +278,7 @@ impl Tracer {
 		}
 	}
 
-	fn trace<R: Rng>(ray: Ray, scene: &Scene, rand_var: &mut RandomVariable, random: &mut R) -> Option<Reflection> {
+	fn trace(ray: Ray, scene: &Scene, rand_var: &mut RandomVariable) -> Option<Reflection> {
 		let mut hits = ~[];
 
 		//Find possible hits
@@ -306,43 +310,8 @@ impl Tracer {
 
 		match closest_hit {
 			Some((object, hit)) => {
-				//Use material to get emission, absorbation and reflected ray
-				//TODO: Actually use materials
-
-				let u = rand_var.next(random);
-				let v = rand_var.next(random);
-				let theta = 2.0 * std::f32::consts::PI * u;
-				let phi = std::num::acos(2.0 * v - 1.0);
-				let sphere_point = Vec3::new(
-					phi.sin() * theta.cos(),
-					phi.sin() * theta.sin(),
-					phi.cos().abs()
-					);
-
-				let mut bases = vec::with_capacity(3);
-
-				na::orthonormal_subspace_basis(&hit.direction, |base| {
-					bases.push(base);
-					true
-				});
-				bases.push(hit.direction);
-
-				let mut reflection: Vec3<f32> = na::zero();
-
-				unsafe {
-					for (i, base) in bases.iter().enumerate() {
-						reflection = reflection + base * sphere_point.at_fast(i);
-					}
-				}
-
-				let out = Ray::new(hit.origin, reflection);
-				let absorbation = 0.5;
-				let emission = 0.0;
-				Some(Reflection {
-					out: out,
-					absorbation: absorbation,
-					emission: emission
-				})
+				//Use object material to get emission, absorbation and reflected ray
+				Some(object.get_reflection(hit, ray, rand_var))
 			},
 			None => None
 		}
@@ -363,8 +332,7 @@ enum TracerCommands {
 	Stop
 }
 
-struct TracerData<R/*, S*/> {
-	random: R,
+struct TracerData {
 	command_port: Port<TracerCommands>,
 	tiles: ~MutexArc<~[Tile]>,
 	samples: u32,
@@ -378,7 +346,7 @@ struct TracerData<R/*, S*/> {
 
 
 //Reflection
-struct Reflection {
+pub struct Reflection {
     out: Ray,
     absorbation: f32,
     emission: f32
@@ -544,6 +512,7 @@ impl Eq for Quadrant {
 
 //Scene Object
 pub trait SceneObject: Send+Freeze {
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, rand_var: &mut RandomVariable) -> Reflection;
 	fn get_bounds(&self) -> BoundingBox;
 	fn intersect(&self, ray: Ray) -> Option<(Ray, f32)>;
 }
@@ -576,4 +545,9 @@ impl Camera {
 pub struct Scene {
 	camera: Camera,
 	objects: ~[~SceneObject: Send + Freeze]
+}
+
+//Material
+pub trait Material {
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, rand_var: &mut RandomVariable) -> Reflection;
 }

@@ -1,15 +1,15 @@
 extern mod png;
 extern mod extra;
 extern mod nalgebra;
-use std::rand::{XorShiftRng, Rng};
 use std::vec;
 use std::num::min;
 use extra::time::precise_time_s;
 use nalgebra::na::Vec3;
-use core::{Tracer, Camera, Scene, SceneObject};
+use core::{Tracer, Camera, Scene, SceneObject, Material};
 use shapes::Sphere;
 mod core;
 mod shapes;
+mod materials;
 
 fn main() {
 	let width = 512;
@@ -18,10 +18,19 @@ fn main() {
 	let mut spheres = vec::from_fn(20, |i| {
 		let x = if i < 10 { -2.0 } else { 2.0 };
 		let z = (if i < 10 { i } else { i - 10 } as f32 * 5.0) + 3.0;
-		~Sphere::new(Vec3::new(x, 0.0, 1.0 + z), 1.0) as ~SceneObject: Send+Freeze
+		let material = ~materials::Diffuse {
+			absorbation: 0.0,
+			emission: 2.0
+		};
+		~Sphere::new(Vec3::new(x, 0.0, 1.0 + z), 1.0, material as ~Material: Send+Freeze) as ~SceneObject: Send+Freeze
 	});
 
-	spheres.push(~Sphere::new(Vec3::new(0.0, 101.0, 5.0), 100.0) as ~SceneObject: Send+Freeze);
+	let material = ~materials::Diffuse {
+		absorbation: 0.5,
+		emission: 0.0
+	};
+
+	spheres.push(~Sphere::new(Vec3::new(0.0, 101.0, 5.0), 100.0, material as ~Material: Send+Freeze) as ~SceneObject: Send+Freeze);
 
 	let scene = Scene {
 		camera: Camera::new(Vec3::new(5.0, -3.0, -4.0), Vec3::new(-0.3, -0.4, 0.0)),
@@ -40,8 +49,7 @@ fn main() {
 	std::task::deschedule();
 	for n in std::iter::range(0, 4) {
 		println!("Starting render task {}", n);
-		let rand = XorShiftRng::new();
-		tracers.push(tracer.spawn(rand));
+		tracers.push(tracer.spawn());
 		std::task::deschedule();
 	}
 

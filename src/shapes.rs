@@ -1,27 +1,34 @@
+use std::rand::Rng;
 use nalgebra::na;
 use nalgebra::na::Vec3;
-use core::{BoundingBox, SceneObject, Ray};
+use core::{BoundingBox, SceneObject, Ray, Material, RandomVariable, Reflection};
 //Sphere
 struct Sphere {
 	position: Vec3<f32>,
 	radius: f32,
-	bounds: BoundingBox
+	bounds: BoundingBox,
+	material: ~Material: Send + Freeze
 }
 
 impl Sphere {
-	pub fn new(position: Vec3<f32>, radius: f32) -> Sphere {
+	pub fn new(position: Vec3<f32>, radius: f32, material: ~Material: Send+Freeze) -> Sphere {
 		Sphere {
 			position: position,
 			radius: radius,
 			bounds: BoundingBox {
 				from: Vec3::new(-radius, -radius, -radius) + position,
 				to: Vec3::new(radius, radius, radius) + position
-			}
+			},
+			material: material
 		}
 	}
 }
 
 impl SceneObject for Sphere {
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, rand_var: &mut RandomVariable) -> Reflection {
+		self.material.get_reflection(normal, ray_in, rand_var)
+	}
+
 	fn get_bounds(&self) -> BoundingBox {
 		self.bounds
 	}
