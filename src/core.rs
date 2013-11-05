@@ -549,7 +549,7 @@ pub trait SceneObject: Send+Freeze {
 }
 
 
-//
+//Camera
 pub struct Camera {
 	position: Vec3<f32>,
 	rotation: Rot3<f32>,
