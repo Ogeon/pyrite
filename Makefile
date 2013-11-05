@@ -3,3 +3,6 @@ bin/pyrite: bin src/pyrite.rs src/core.rs src/shapes.rs
 
 bin:
 	mkdir bin
+
+lint:
+	rustc -O --no-trans src/pyrite.rs
