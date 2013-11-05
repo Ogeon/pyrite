@@ -8,7 +8,7 @@ Pyrite is currently only tested on Linux, but it may work on other systems too.
 To download and build Pyrite to the `bin/` folder:
 
 
-    git clone git://github.com/Ogeon/pyrite.git
+    git clone https://github.com/Ogeon/pyrite.git
     cd pyrite
     make
 
