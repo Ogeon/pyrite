@@ -195,61 +195,38 @@ impl Tracer {
 							rand_var.clear();
 
 							while running && samples > 0 {
-								//rand_var.clear();
+								rand_var.clear();
+								let frequency = rand_var.next(&mut data.random);
 								let sample_x = cam_x + (x as f32 - 0.5 + rand_var.next(&mut data.random)) * pixel_size;
 								let sample_y = cam_y + (y as f32 - 0.5 + rand_var.next(&mut data.random)) * pixel_size;
-								let ray = data.scene.get().camera.ray_to(sample_x, sample_y);
+								let mut ray = data.scene.get().camera.ray_to(sample_x, sample_y);
 
-								let mut hits = ~[];
+								let mut bounces = vec::with_capacity(10);
 
-								for object in data.scene.get().objects.iter() {
-									match object.get_bounds().intersect(ray) {
-										Some(d) => hits.push((object, d)),
-										None => {}
+								for _ in range(0, 10) {
+									match Tracer::trace(ray, data.scene.get(), &mut rand_var, &mut data.random) {
+										Some(reflection) => {
+											ray = reflection.out;
+											bounces.push(reflection);
+										},
+										None => {
+											bounces.push(Reflection {
+												out: ray,
+												absorbation: 0.0,
+												emission: frequency*2.0 //TODO: Background color
+											});
+											break;
+										}
 									};
 								}
 
-								let mut closest_dist = std::f32::INFINITY;
-								let mut closest_hit = None;
+								let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
+									incoming * reflection.absorbation + reflection.emission
+								});
 
-								for &(ref object, d) in hits.iter() {
-									if d < closest_dist {
-										match object.intersect(ray) {
-											Some((hit, dist)) => {
-												if(dist < closest_dist) {
-													closest_dist = dist;
-													closest_hit = Some(hit);
-												}
-											},
-											None => {}
-										}
-									}
-								}
-
-								match closest_hit {
-									Some(hit) => {
-										let bin = min((0.0 * data.bins as f32).floor() as uint, data.bins-1);
-										values[bin] += hit.direction.x*0.5 + 0.5;
-										weights[bin] += 1.0;
-										let bin = min((0.5 * data.bins as f32).floor() as uint, data.bins-1);
-										values[bin] += hit.direction.y*0.5 + 0.5;
-										weights[bin] += 1.0;
-										let bin = min((1.0 * data.bins as f32).floor() as uint, data.bins-1);
-										values[bin] += hit.direction.z*0.5 + 0.5;
-										weights[bin] += 1.0;
-									},
-									None => {
-										let bin = min((0.0 * data.bins as f32).floor() as uint, data.bins-1);
-										values[bin] += 0.0;
-										weights[bin] += 1.0;
-										let bin = min((0.5 * data.bins as f32).floor() as uint, data.bins-1);
-										values[bin] += 0.0;
-										weights[bin] += 1.0;
-										let bin = min((1.0 * data.bins as f32).floor() as uint, data.bins-1);
-										values[bin] += 0.0;
-										weights[bin] += 1.0;
-									}
-								}
+								let bin = min((frequency * data.bins as f32).floor() as uint, data.bins-1);
+								values[bin] += value;
+								weights[bin] += 1.0;
 						
 								samples -= 1;
 							}
@@ -296,6 +273,80 @@ impl Tracer {
 			None
 		}
 	}
+
+	fn trace<R: Rng>(ray: Ray, scene: &Scene, rand_var: &mut RandomVariable, random: &mut R) -> Option<Reflection> {
+		let mut hits = ~[];
+
+		//Find possible hits
+		for object in scene.objects.iter() {
+			match object.get_bounds().intersect(ray) {
+				Some(d) => hits.push((object, d)),
+				None => {}
+			};
+		}
+
+
+		let mut closest_dist = std::f32::INFINITY;
+		let mut closest_hit = None;
+
+		//Find closest hit
+		for &(ref object, d) in hits.iter() {
+			if d < closest_dist {
+				match object.intersect(ray) {
+					Some((hit, dist)) => {
+						if(dist < closest_dist && dist > 0.0002) {
+							closest_dist = dist;
+							closest_hit = Some((object, Ray::new(hit.origin, hit.direction)));
+						}
+					},
+					None => {}
+				}
+			}
+		}
+
+		match closest_hit {
+			Some((object, hit)) => {
+				//Use material to get emission, absorbation and reflected ray
+				//TODO: Actually use materials
+
+				let u = rand_var.next(random);
+				let v = rand_var.next(random);
+				let theta = 2.0 * std::f32::consts::PI * u;
+				let phi = std::num::acos(2.0 * v - 1.0);
+				let sphere_point = Vec3::new(
+					phi.sin() * theta.cos(),
+					phi.sin() * theta.sin(),
+					phi.cos().abs()
+					);
+
+				let mut bases = vec::with_capacity(3);
+
+				na::orthonormal_subspace_basis(&hit.direction, |base| {
+					bases.push(base);
+					true
+				});
+				bases.push(hit.direction);
+
+				let mut reflection: Vec3<f32> = na::zero();
+
+				unsafe {
+					for (i, base) in bases.iter().enumerate() {
+						reflection = reflection + base * sphere_point.at_fast(i);
+					}
+				}
+
+				let out = Ray::new(hit.origin, reflection);
+				let absorbation = 0.5;
+				let emission = 0.0;
+				Some(Reflection {
+					out: out,
+					absorbation: absorbation,
+					emission: emission
+				})
+			},
+			None => None
+		}
+	}
 }
 
 struct TracerTask {
@@ -324,6 +375,15 @@ struct TracerData<R/*, S*/> {
 	pixels: ~MutexArc<~[~[f32]]>
 	//sampler: S
 }
+
+
+//Reflection
+struct Reflection {
+    out: Ray,
+    absorbation: f32,
+    emission: f32
+}
+
 
 //Tiles
 struct Tile {

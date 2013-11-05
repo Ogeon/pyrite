@@ -15,11 +15,13 @@ fn main() {
 	let width = 512;
 	let height = 512;
 
-	let spheres = vec::from_fn(20, |i| {
+	let mut spheres = vec::from_fn(20, |i| {
 		let x = if i < 10 { -2.0 } else { 2.0 };
 		let z = (if i < 10 { i } else { i - 10 } as f32 * 5.0) + 3.0;
 		~Sphere::new(Vec3::new(x, 0.0, 1.0 + z), 1.0) as ~SceneObject: Send+Freeze
 	});
+
+	spheres.push(~Sphere::new(Vec3::new(0.0, 101.0, 5.0), 100.0) as ~SceneObject: Send+Freeze);
 
 	let scene = Scene {
 		camera: Camera::new(Vec3::new(5.0, -3.0, -4.0), Vec3::new(-0.3, -0.4, 0.0)),
@@ -27,7 +29,7 @@ fn main() {
 	};
 
 	let mut tracer = Tracer::new();
-	tracer.samples = 50;
+	tracer.samples = 100;
 	tracer.image_size = (width, height);
 	tracer.set_scene(scene);
 	tracer.bins = 3;
@@ -51,7 +53,7 @@ fn main() {
 			std::rt::io::timer::sleep(500);
 		}
 
-		if last_image_update < precise_time_s() - 10.0 {
+		if last_image_update < precise_time_s() - 5.0 {
 			tracer.pixels.access(|&ref mut values| {
 				save_png(values, width, height);
 			});
