@@ -19,14 +19,14 @@ fn main() {
 		let x = if i < 10 { -2.0 } else { 2.0 };
 		let z = (if i < 10 { i } else { i - 10 } as f32 * 5.0) + 3.0;
 		let material = ~materials::Diffuse {
-			absorbation: 0.0,
+			color: 0.0,
 			emission: 2.0
 		};
 		~Sphere::new(Vec3::new(x, 0.0, 1.0 + z), 1.0, material as ~Material: Send+Freeze) as ~SceneObject: Send+Freeze
 	});
 
 	let material = ~materials::Diffuse {
-		absorbation: 0.5,
+		color: 0.5,
 		emission: 0.0
 	};
 

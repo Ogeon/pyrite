@@ -7,7 +7,7 @@ use core::{Ray, Material, RandomVariable, Reflection};
 
 //Diffuse
 struct Diffuse {
-	absorbation: f32,
+	color: f32,
 	emission: f32
 }
 
@@ -41,7 +41,7 @@ impl Material for Diffuse {
 
 		Reflection {
 			out: Ray::new(normal.origin, reflection),
-			absorbation: self.absorbation,
+			color: self.color,
 			emission: self.emission
 		}
 	}

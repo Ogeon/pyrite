@@ -209,14 +209,14 @@ impl Tracer {
 										Some(reflection) => {
 											ray = reflection.out;
 											bounces.push(reflection);
-											if(reflection.absorbation == 0.0) {
+											if(reflection.color == 0.0) {
 												break;
 											}
 										},
 										None => {
 											bounces.push(Reflection {
 												out: ray,
-												absorbation: 0.0,
+												color: 0.0,
 												emission: frequency //TODO: Background color
 											});
 											break;
@@ -225,7 +225,7 @@ impl Tracer {
 								}
 
 								let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
-									incoming * reflection.absorbation + reflection.emission
+									incoming * reflection.color + reflection.emission
 								});
 
 								let bin = min((frequency * data.bins as f32).floor() as uint, data.bins-1);
@@ -310,7 +310,7 @@ impl Tracer {
 
 		match closest_hit {
 			Some((object, hit)) => {
-				//Use object material to get emission, absorbation and reflected ray
+				//Use object material to get emission, color and reflected ray
 				Some(object.get_reflection(hit, ray, rand_var))
 			},
 			None => None
@@ -348,7 +348,7 @@ struct TracerData {
 //Reflection
 pub struct Reflection {
     out: Ray,
-    absorbation: f32,
+    color: f32,
     emission: f32
 }
 
