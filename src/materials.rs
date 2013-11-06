@@ -6,8 +6,7 @@ use core::{Ray, Material, RandomVariable, Reflection};
 
 //Diffuse
 struct Diffuse {
-	color: f32,
-	emission: f32
+	color: f32
 }
 
 impl Material for Diffuse {
@@ -41,7 +40,7 @@ impl Material for Diffuse {
 		Reflection {
 			out: Ray::new(normal.origin, reflection),
 			color: self.color,
-			emission: self.emission
+			emission: 0.0
 		}
 	}
 }
@@ -59,6 +58,23 @@ impl Material for Mirror {
 			out: Ray::new(normal.origin, ray_in.direction - (normal.direction * perp)),
 			color: self.color,
 			emission: 0.0
+		}
+	}
+}
+
+
+//Emission
+struct Emission {
+    color: f32,
+    luminance: f32
+}
+
+impl Material for Emission {
+	fn get_reflection(&self, _: Ray, _: Ray, _: &mut RandomVariable) -> Reflection {
+		Reflection {
+			out: Ray::new(na::zero(), na::zero()),
+			color: 0.0,
+			emission: self.color * self.luminance
 		}
 	}
 }

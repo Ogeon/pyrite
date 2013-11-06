@@ -23,17 +23,16 @@ fn main() {
 				color: 1.0
 			} as ~Material: Send+Freeze
 		} else {
-			~materials::Diffuse {
-				color: 0.0,
-				emission: 1.5
+			~materials::Emission {
+				color: 1.0,
+				luminance: 1.5
 			} as ~Material: Send+Freeze
 		};
 		~Sphere::new(Vec3::new(x, 0.0, 1.0 + z), 1.0, material) as ~SceneObject: Send+Freeze
 	});
 
 	let material = ~materials::Diffuse {
-		color: 0.5,
-		emission: 0.0
+		color: 0.5
 	};
 
 	spheres.push(~Sphere::new(Vec3::new(0.0, 101.0, 5.0), 100.0, material as ~Material: Send+Freeze) as ~SceneObject: Send+Freeze);
