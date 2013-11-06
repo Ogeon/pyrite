@@ -40,7 +40,8 @@ impl Material for Diffuse {
 		Reflection {
 			out: Ray::new(normal.origin, reflection),
 			color: self.color,
-			emission: 0.0
+			emission: 0.0,
+			dispersion: false
 		}
 	}
 }
@@ -57,7 +58,8 @@ impl Material for Mirror {
 		Reflection {
 			out: Ray::new(normal.origin, ray_in.direction - (normal.direction * perp)),
 			color: self.color,
-			emission: 0.0
+			emission: 0.0,
+			dispersion: false
 		}
 	}
 }
@@ -74,7 +76,8 @@ impl Material for Emission {
 		Reflection {
 			out: Ray::new(na::zero(), na::zero()),
 			color: 0.0,
-			emission: self.color * self.luminance
+			emission: self.color * self.luminance,
+			dispersion: false
 		}
 	}
 }
@@ -128,14 +131,16 @@ impl Material for Refractive {
 			return Reflection {
 				out: Ray::new(na::zero(), na::zero()),
 				color: 0.0,
-				emission: 0.0
+				emission: 0.0,
+				dispersion: false
 			}
 		}
 
 		return Reflection {
 			out: Ray::new(normal.origin, ray_in.direction*eta + norm*(eta*c1 - cs2.sqrt())),
 			color: self.color,
-			emission: 0.0
+			emission: 0.0,
+			dispersion: self.dispersion != 0.0
 		}
 	}
 }

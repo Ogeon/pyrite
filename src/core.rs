@@ -203,11 +203,13 @@ impl Tracer {
 								let mut ray = data.scene.get().camera.ray_to(sample_x, sample_y);
 
 								let mut bounces = vec::with_capacity(10);
+								let mut dispersion = false;
 
 								for _ in range(0, 10) {
 									match Tracer::trace(ray, frequency, data.scene.get(), &mut rand_var) {
 										Some(reflection) => {
 											ray = reflection.out;
+											dispersion = dispersion || reflection.dispersion;
 											bounces.push(reflection);
 											if(reflection.color == 0.0) {
 												break;
@@ -217,20 +219,35 @@ impl Tracer {
 											bounces.push(Reflection {
 												out: ray,
 												color: 0.0,
-												emission: 0.0//frequency * 0.5 + 0.5 //TODO: Background color
+												emission: 0.0,//frequency * 0.5 + 0.5 //TODO: Background color
+												dispersion: false
 											});
 											break;
 										}
 									};
 								}
 
-								let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
-									incoming * reflection.color + reflection.emission
-								});
+								if dispersion {
+									let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
+										incoming * reflection.color + reflection.emission
+									});
 
-								let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
-								values[bin] += value;
-								weights[bin] += 1.0;
+									let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
+									values[bin] += value;
+									weights[bin] += 1.0;
+								} else {
+									for bin in range(0, data.bins) {
+										//TODO: Use frequency to calculate pixel value
+										//TODO: Only change first value in rand_var
+										//let frequency = (bin as f32 + rand_var.next()) / data.bins as f32
+										let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
+											incoming * reflection.color + reflection.emission
+										});
+
+										values[bin] += value;
+										weights[bin] += 1.0;
+									}
+								}
 						
 								samples -= 1;
 							}
@@ -349,7 +366,8 @@ struct TracerData {
 pub struct Reflection {
     out: Ray,
     color: f32,
-    emission: f32
+    emission: f32,
+    dispersion: bool
 }
 
 
