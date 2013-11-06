@@ -1,4 +1,4 @@
-bin/pyrite: bin src/pyrite.rs src/core.rs src/shapes.rs
+bin/pyrite: bin src/*
 	rustc -O -o bin/pyrite src/pyrite.rs
 
 bin:
