@@ -205,7 +205,7 @@ impl Tracer {
 								let mut bounces = vec::with_capacity(10);
 
 								for _ in range(0, 10) {
-									match Tracer::trace(ray, data.scene.get(), &mut rand_var) {
+									match Tracer::trace(ray, frequency, data.scene.get(), &mut rand_var) {
 										Some(reflection) => {
 											ray = reflection.out;
 											bounces.push(reflection);
@@ -217,7 +217,7 @@ impl Tracer {
 											bounces.push(Reflection {
 												out: ray,
 												color: 0.0,
-												emission: frequency * 0.5 + 0.5 //TODO: Background color
+												emission: 0.0//frequency * 0.5 + 0.5 //TODO: Background color
 											});
 											break;
 										}
@@ -228,7 +228,7 @@ impl Tracer {
 									incoming * reflection.color + reflection.emission
 								});
 
-								let bin = min((frequency * data.bins as f32).floor() as uint, data.bins-1);
+								let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
 								values[bin] += value;
 								weights[bin] += 1.0;
 						
@@ -278,7 +278,7 @@ impl Tracer {
 		}
 	}
 
-	fn trace(ray: Ray, scene: &Scene, rand_var: &mut RandomVariable) -> Option<Reflection> {
+	fn trace(ray: Ray, frequency: f32, scene: &Scene, rand_var: &mut RandomVariable) -> Option<Reflection> {
 		let mut hits = ~[];
 
 		//Find possible hits
@@ -298,7 +298,7 @@ impl Tracer {
 			if d < closest_dist {
 				match object.intersect(ray) {
 					Some((hit, dist)) => {
-						if(dist < closest_dist && dist > 0.0002) {
+						if(dist < closest_dist && dist > 0.001) {
 							closest_dist = dist;
 							closest_hit = Some((object, Ray::new(hit.origin, hit.direction)));
 						}
@@ -311,7 +311,7 @@ impl Tracer {
 		match closest_hit {
 			Some((object, hit)) => {
 				//Use object material to get emission, color and reflected ray
-				Some(object.get_reflection(hit, ray, rand_var))
+				Some(object.get_reflection(hit, ray, frequency, rand_var))
 			},
 			None => None
 		}
@@ -512,7 +512,7 @@ impl Eq for Quadrant {
 
 //Scene Object
 pub trait SceneObject: Send+Freeze {
-	fn get_reflection(&self, normal: Ray, ray_in: Ray, rand_var: &mut RandomVariable) -> Reflection;
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection;
 	fn get_bounds(&self) -> BoundingBox;
 	fn intersect(&self, ray: Ray) -> Option<(Ray, f32)>;
 }
@@ -549,5 +549,5 @@ pub struct Scene {
 
 //Material
 pub trait Material {
-	fn get_reflection(&self, normal: Ray, ray_in: Ray, rand_var: &mut RandomVariable) -> Reflection;
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection;
 }

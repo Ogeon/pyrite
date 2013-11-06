@@ -24,8 +24,8 @@ impl Sphere {
 }
 
 impl SceneObject for Sphere {
-	fn get_reflection(&self, normal: Ray, ray_in: Ray, rand_var: &mut RandomVariable) -> Reflection {
-		self.material.get_reflection(normal, ray_in, rand_var)
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection {
+		self.material.get_reflection(normal, ray_in, frequency, rand_var)
 	}
 
 	fn get_bounds(&self) -> BoundingBox {

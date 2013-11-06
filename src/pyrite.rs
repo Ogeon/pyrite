@@ -19,16 +19,29 @@ fn main() {
 		let x = if i < 10 { -2.0 } else { 2.0 };
 		let z = (if i < 10 { i } else { i - 10 } as f32 * 5.0) + 3.0;
 		let material = if i % 2 == 0 {
-			~materials::Mirror {
+			/*let a = ~materials::Mirror {
 				color: 1.0
+			} as ~Material: Send+Freeze;
+			let b = ~materials::Diffuse {
+				color: 0.9
+			} as ~Material: Send+Freeze;
+			~materials::Mix {
+				material_a: a,
+				material_b: b,
+				factor: 0.9
+			} as ~Material: Send+Freeze*/
+			~materials::Refractive {
+				color: 1.0,
+				refractive_index: 1.5,
+				dispersion: 0.01
 			} as ~Material: Send+Freeze
 		} else {
 			~materials::Emission {
 				color: 1.0,
-				luminance: 1.5
+				luminance: 3.0
 			} as ~Material: Send+Freeze
 		};
-		~Sphere::new(Vec3::new(x, 0.0, 1.0 + z), 1.0, material) as ~SceneObject: Send+Freeze
+		~Sphere::new(Vec3::new(x, 0.0 - (2 * (i%10)) as f32, 1.0 + z), 1.0, material) as ~SceneObject: Send+Freeze
 	});
 
 	let material = ~materials::Diffuse {
