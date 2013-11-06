@@ -217,7 +217,7 @@ impl Tracer {
 											bounces.push(Reflection {
 												out: ray,
 												color: 0.0,
-												emission: frequency //TODO: Background color
+												emission: frequency * 0.5 + 0.5 //TODO: Background color
 											});
 											break;
 										}
