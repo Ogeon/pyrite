@@ -45,3 +45,20 @@ impl Material for Diffuse {
 		}
 	}
 }
+
+
+//Mirror
+struct Mirror {
+	color: f32
+}
+
+impl Material for Mirror {
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, _: &mut RandomVariable) -> Reflection {
+		let perp = na::dot(&ray_in.direction, &normal.direction) * 2.0;
+		Reflection {
+			out: Ray::new(normal.origin, ray_in.direction - (normal.direction * perp)),
+			color: self.color,
+			emission: 0.0
+		}
+	}
+}
