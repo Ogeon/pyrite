@@ -78,3 +78,22 @@ impl Material for Emission {
 		}
 	}
 }
+
+
+//Mix
+struct Mix {
+	material_a: ~Material: Send + Freeze,
+	material_b: ~Material: Send + Freeze,
+	factor: f32
+}
+
+
+impl Material for Mix {
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, rand_var: &mut RandomVariable) -> Reflection {
+		if rand_var.next() > self.factor {
+			self.material_a.get_reflection(normal, ray_in, rand_var)
+		} else {
+			self.material_b.get_reflection(normal, ray_in, rand_var)
+		}
+	}
+}
