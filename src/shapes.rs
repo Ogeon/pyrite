@@ -1,4 +1,3 @@
-use std::rand::Rng;
 use nalgebra::na;
 use nalgebra::na::Vec3;
 use core::{BoundingBox, SceneObject, Ray, Material, RandomVariable, Reflection};

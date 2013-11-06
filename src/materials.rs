@@ -1,5 +1,4 @@
 extern mod std;
-use std::rand::Rng;
 use std::vec;
 use nalgebra::na;
 use nalgebra::na::Vec3;
@@ -12,7 +11,7 @@ struct Diffuse {
 }
 
 impl Material for Diffuse {
-	fn get_reflection(&self, normal: Ray, ray_in: Ray, rand_var: &mut RandomVariable) -> Reflection {
+	fn get_reflection(&self, normal: Ray, _: Ray, rand_var: &mut RandomVariable) -> Reflection {
 		let u = rand_var.next();
 		let v = rand_var.next();
 		let theta = 2.0 * std::f32::consts::PI * u;

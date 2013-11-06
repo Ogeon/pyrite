@@ -171,7 +171,7 @@ impl Tracer {
 		self.scene = ~Arc::new(scene);
 	}
 
-	fn run(mut data: TracerData) {
+	fn run(data: TracerData) {
 		task::deschedule();
 
 		let mut running = true;
