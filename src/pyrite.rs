@@ -4,6 +4,7 @@ extern mod nalgebra;
 use std::vec;
 use std::num::min;
 use extra::time::precise_time_s;
+use nalgebra::na;
 use nalgebra::na::Vec3;
 use core::{Tracer, Camera, Scene, SceneObject, Material};
 use shapes::Sphere;
@@ -47,10 +48,13 @@ fn main() {
 
 	spheres.push(~Sphere::new(Vec3::new(0.0, 101.0, 5.0), 100.0, material as ~Material: Send+Freeze) as ~SceneObject: Send+Freeze);
 
-	let scene = Scene {
+	let mut scene = Scene {
 		camera: Camera::new(Vec3::new(5.0, -3.0, -4.0), Vec3::new(-0.3, -0.4, 0.0)),
 		objects: spheres
 	};
+
+	scene.camera.focal_distance = na::norm(&(scene.camera.position - Vec3::new(-2.0f32, 0.0, 4.0)));//7.0;
+	scene.camera.aperture = 0.02;
 
 	let mut tracer = Tracer::new();
 	tracer.samples = 500;

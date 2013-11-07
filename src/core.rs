@@ -1,6 +1,6 @@
 extern mod std;
 use std::rand::{XorShiftRng, Rng};
-use std::num::{exp, ln, min, max};
+use std::num::{exp, ln, min, max, sqrt};
 use std::{task, fmt, vec};
 use std::comm::stream;
 use std::iter::range;
@@ -200,7 +200,7 @@ impl Tracer {
 								let frequency = rand_var.next();
 								let sample_x = cam_x + (x as f32 - 0.5 + rand_var.next()) * pixel_size;
 								let sample_y = cam_y + (y as f32 - 0.5 + rand_var.next()) * pixel_size;
-								let mut ray = data.scene.get().camera.ray_to(sample_x, sample_y);
+								let mut ray = data.scene.get().camera.ray_to(sample_x, sample_y, &mut rand_var);
 
 								let mut bounces = vec::with_capacity(10);
 								let mut dispersion = false;
@@ -540,22 +540,50 @@ pub trait SceneObject: Send+Freeze {
 pub struct Camera {
 	position: Vec3<f32>,
 	rotation: Rot3<f32>,
-	lens: f32
+	lens: f32,
+	aperture: f32,
+	focal_distance: f32
 }
 
 impl Camera {
 	pub fn new(position: Vec3<f32>, rotation: Vec3<f32>) -> Camera {
-		Camera{position: position, rotation: Rot3::new(rotation), lens: 2.0}
+		Camera{
+			position: position,
+			rotation: Rot3::new(rotation),
+			lens: 2.0,
+			aperture: 0.0,
+			focal_distance: 0.0
+		}
 	}
 
 	pub fn look_at(from: Vec3<f32>, to: Vec3<f32>, up: Vec3<f32>) -> Camera {
 		let mut rot = Rot3::new(na::zero());
 		rot.look_at_z(&(to - from), &up);
-		Camera{position: from, rotation: rot, lens: 2.0}
+		Camera{
+			position: from,
+			rotation: rot,
+			lens: 2.0,
+			aperture: 0.0,
+			focal_distance: 0.0
+		}
 	}
 
-	fn ray_to(&self, x: f32, y: f32) -> Ray {
-		Ray::new(self.position, self.rotation.rotate(&Vec3::new(x, y, self.lens)))
+	fn ray_to(&self, x: f32, y: f32, rand_var: &mut RandomVariable) -> Ray {
+		if self.aperture == 0.0 {
+			Ray::new(self.position, self.rotation.rotate(&Vec3::new(x, y, self.lens)))
+		} else {
+			let base_dir = Vec3::new(x / self.lens, y / self.lens, 1.0);
+			let focal_point = base_dir * self.focal_distance;
+
+			let sqrt_r = sqrt(rand_var.next() * self.aperture);
+			let psi = rand_var.next() * 2.0 * std::f32::consts::PI;
+			let lens_x = sqrt_r * psi.cos();
+			let lens_y = sqrt_r * psi.sin();
+
+			let lens_point = Vec3::new(lens_x, lens_y, 0.0);
+			
+			Ray::new(self.rotation.rotate(&lens_point) + self.position, self.rotation.rotate(&(focal_point - lens_point)))
+		}
 	}
 }
 
