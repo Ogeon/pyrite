@@ -289,6 +289,7 @@ impl Tracer {
 
 	fn get_tile(tiles: &mut ~[Tile]) -> Option<Tile> {
 		if(tiles.len() > 0) {
+			println!("{} tiles left", tiles.len()-1);
 			Some(tiles.shift())
 		} else {
 			None
