@@ -19,33 +19,30 @@ fn main() {
 		let x = if i < 10 { -2.0 } else { 2.0 };
 		let z = (if i < 10 { i } else { i - 10 } as f32 * 5.0) + 3.0;
 		let material = if i % 2 == 0 {
-			/*let a = ~materials::Mirror {
+			let a = ~materials::Mirror {
 				color: 1.0
 			} as ~Material: Send+Freeze;
 			let b = ~materials::Diffuse {
-				color: 0.9
+				color: 1.0
 			} as ~Material: Send+Freeze;
-			~materials::Mix {
-				material_a: a,
-				material_b: b,
-				factor: 0.9
-			} as ~Material: Send+Freeze*/
-			~materials::Refractive {
-				color: 1.0,
+			~materials::FresnelMix {
+				reflection: a,
+				refraction: b,
 				refractive_index: 1.5,
-				dispersion: 0.01
+				dispersion: 0.0
 			} as ~Material: Send+Freeze
+			
 		} else {
 			~materials::Emission {
 				color: 1.0,
 				luminance: 3.0
 			} as ~Material: Send+Freeze
 		};
-		~Sphere::new(Vec3::new(x, 0.0 - (2 * (i%10)) as f32, 1.0 + z), 1.0, material) as ~SceneObject: Send+Freeze
+		~Sphere::new(Vec3::new(x, 0.0 - (0 * (i%10)) as f32, 1.0 + z), 1.0, material) as ~SceneObject: Send+Freeze
 	});
 
 	let material = ~materials::Diffuse {
-		color: 0.5
+		color: 0.7
 	};
 
 	spheres.push(~Sphere::new(Vec3::new(0.0, 101.0, 5.0), 100.0, material as ~Material: Send+Freeze) as ~SceneObject: Send+Freeze);
@@ -56,7 +53,7 @@ fn main() {
 	};
 
 	let mut tracer = Tracer::new();
-	tracer.samples = 100;
+	tracer.samples = 500;
 	tracer.image_size = (width, height);
 	tracer.set_scene(scene);
 	tracer.bins = 3;

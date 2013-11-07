@@ -102,6 +102,56 @@ impl Material for Mix {
 }
 
 
+//Fresnel mix
+struct FresnelMix {
+	reflection: ~Material: Send + Freeze,
+	refraction: ~Material: Send + Freeze,
+	refractive_index: f32,
+	dispersion: f32
+}
+
+impl Material for FresnelMix {
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection {
+		let ref_index = self.refractive_index + self.dispersion/frequency;
+
+		let factor = if na::dot(&ray_in.direction, &normal.direction) < 0.0 {
+			FresnelMix::schlick(1.0, ref_index, normal.direction, ray_in.direction)
+		} else {
+			FresnelMix::schlick(ref_index, 1.0, -normal.direction, ray_in.direction)
+		};
+
+		let mut reflection = if rand_var.next() < factor {
+			self.reflection.get_reflection(normal, ray_in, frequency, rand_var)
+		} else {
+			self.refraction.get_reflection(normal, ray_in, frequency, rand_var)
+		};
+
+		reflection.dispersion = reflection.dispersion || self.dispersion != 0.0;
+		return reflection;
+	}
+}
+
+impl FresnelMix {
+	fn schlick(ref_index1: f32, ref_index2: f32, normal: Vec3<f32>, incident: Vec3<f32>) -> f32 {
+		let mut cos_psi = -na::dot(&normal, &incident);
+		let r0 = (ref_index1 - ref_index2) / (ref_index1 + ref_index2);
+
+		if ref_index1 > ref_index2 {
+			let n = ref_index1 / ref_index2;
+			let sinT2 = n * n * (1.0 - cos_psi * cos_psi);
+			if sinT2 > 1.0 {
+				return 1.0;
+			}
+			cos_psi = (1.0 - sinT2).sqrt();
+		}
+
+		let inv_cos = 1.0 - cos_psi;
+
+		return r0 * r0 + (1.0 - r0 * r0) * inv_cos * inv_cos * inv_cos * inv_cos * inv_cos;
+	}
+}
+
+
 //Refractive
 struct Refractive {
 	color: f32,
