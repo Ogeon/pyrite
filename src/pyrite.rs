@@ -77,7 +77,7 @@ fn main() {
 	while !tracer.done() {
 		//Don't be too eager!
 		if(!tracer.done()) {
-			std::rt::io::timer::sleep(500);
+			std::io::timer::sleep(500);
 		}
 
 		if last_image_update < precise_time_s() - 5.0 {

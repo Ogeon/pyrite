@@ -269,8 +269,6 @@ impl Tracer {
 						});
 						task::deschedule();
 					}
-
-					std::rt::io::timer::sleep(0);
 				},
 				None => {running = false;}
 			};
