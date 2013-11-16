@@ -1,0 +1,53 @@
+{
+	"cameras": [
+		{
+			"label": "main",
+			"position": [0, 0, 0],
+			"rotation": [0, 0, 0]
+		}
+	],
+	"materials": [
+		{
+			"label": "diffuse",
+			"type": "Diffuse",
+			"color": 0.8
+		},
+		{
+			"label": "lamp",
+			"type": "Emission",
+			"color": 1,
+			"luminance": 2
+		},
+		{
+			"label": "shiny",
+			"type": "FresnelMix",
+			"ior": 0.5,
+			"dispersion": 0,
+			"reflection": {
+				"type": "Mirror",
+				"color": 1
+			},
+			"refraction": {
+				"type": "Diffuse",
+				"color": 0.8
+			}
+		},
+		{
+			"label": "floor",
+			"type": "Diffuse",
+			"color": 1
+		}
+	],
+	"objects": [],
+
+	"render": {
+		"camera": 0,
+		"width": 512,
+		"height": 256,
+		"samples": 300,
+		"tiles": {
+			"width": 32,
+			"height": 32
+		}
+	}
+}

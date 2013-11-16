@@ -3,7 +3,10 @@ extern mod extra;
 extern mod nalgebra;
 use std::vec;
 use std::num::min;
+use std::io::{File, io_error};
 use extra::time::precise_time_s;
+use extra::json;
+use extra::json::ToJson;
 use nalgebra::na;
 use nalgebra::na::Vec3;
 use core::{Tracer, Camera, Scene, SceneObject, Material};
@@ -15,6 +18,21 @@ mod materials;
 fn main() {
 	let width = 512;
 	let height = 512;
+	let mut render_only = false;
+	let mut project_file = ~"";
+
+	let args = std::os::args();
+	for arg in args.iter().skip(1) {
+		match arg {
+			&~"--render" | &~"-r" => render_only = true,
+			file_name => project_file = file_name.to_owned()
+		}
+	}
+
+	let project = load_project(project_file);
+
+	println!("Current project:\n{}", project.to_json().to_pretty_str());
+
 
 	let mut spheres = vec::from_fn(20, |i| {
 		let x = if i < 10 { -2.0 } else { 2.0 };
@@ -113,4 +131,53 @@ fn save_png(values: &~[~[f32]], width: u32, height: u32) {
 	};
 
 	png::store_png(&image, &Path::new("test.png"));
+}
+
+fn load_project(path: &str) -> ~json::Object {
+	let default = "{\"objects\": [], \"cameras\": [], \"materials\": [], \"render\": {}}";
+
+	let mut project = if path.len() == 0 {
+		//No file provided
+		println!("New project created");
+		json::from_str(default)
+	} else {
+		do io_error::cond.trap(|error| {
+			//Catching io_error
+			println!("Unable to open {}: {}", path, error.desc);
+		}).inside {
+			//Open provided file
+			match File::open(&Path::new(path)) {
+				//A valid path was provided
+				Some(mut file) => json::from_reader(&mut file as &mut std::io::Reader),
+
+				//An invalid path was provided
+				None => {
+					println!("New project created");
+					json::from_str(default)
+				}
+			}
+		}
+	};
+
+	if project.is_err() {
+		//Errors while parsing the JSON data
+		println!("Error parsing file: {}", project.unwrap_err().to_str());
+		project = json::from_str(default);
+	}
+
+	//Check if the root is an object and extract it
+	match project.unwrap() {
+		json::Object(result) => return result,
+		_ => println!("Project root must be an object")
+	}
+
+	//The root was something else
+	println!("New project created");
+	project = json::from_str(default);
+
+	//Extract the default root object
+	match project.unwrap() {
+		json::Object(result) => return result,
+		_ => fail!("This is a bug. The default project is invalid")
+	}
 }
