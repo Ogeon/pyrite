@@ -25,6 +25,14 @@ fn main() {
 		}
 	}
 
+	let project_dir = if project_file.len() == 0 {
+		Path::new("./")
+	} else {
+		Path::new(project_file.to_owned()).with_filename("")
+	};
+
+	println!("Project directory: {}", project_dir.display());
+
 	let project = load_project(project_file);
 
 	let mut tracer = build_project(project);
@@ -51,7 +59,7 @@ fn main() {
 		if last_image_update < precise_time_s() - 5.0 {
 			tracer.pixels.access(|&ref mut values| {
 				let (width, height) = tracer.image_size;
-				save_png(values, width, height);
+				save_png(project_dir.with_filename("render.png"), values, width, height);
 			});
 			last_image_update = precise_time_s();
 		}
@@ -62,12 +70,12 @@ fn main() {
 
 	tracer.pixels.access(|&ref mut values| {
 		let (width, height) = tracer.image_size;
-		save_png(values, width, height);
+		save_png(project_dir.with_filename("render.png"), values, width, height);
 	});
 }
 	
 
-fn save_png(values: &~[~[f32]], width: u32, height: u32) {
+fn save_png(path: Path, values: &~[~[f32]], width: u32, height: u32) {
 	println!("Saving PNG...");
 	let pixels: ~[~[u8]] = values.iter().map(|ref values| {
 		values.iter().map(|&v| {
@@ -82,7 +90,7 @@ fn save_png(values: &~[~[f32]], width: u32, height: u32) {
 		pixels: pixels.concat_vec()
 	};
 
-	png::store_png(&image, &Path::new("test.png"));
+	png::store_png(&image, &path);
 }
 
 fn load_project(path: &str) -> ~json::Object {
