@@ -44,10 +44,8 @@
 		"camera": 0,
 		"width": 512,
 		"height": 256,
-		"samples": 300,
-		"tiles": {
-			"width": 32,
-			"height": 32
-		}
+		"samples": 500,
+		"tile_width": 32,
+		"tile_height": 32
 	}
 }

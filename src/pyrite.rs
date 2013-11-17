@@ -16,8 +16,6 @@ mod shapes;
 mod materials;
 
 fn main() {
-	let width = 512;
-	let height = 512;
 	let mut render_only = false;
 	let mut project_file = ~"";
 
@@ -74,9 +72,7 @@ fn main() {
 	scene.camera.focal_distance = na::norm(&(scene.camera.position - Vec3::new(-2.0f32, 0.0, 4.0)));//7.0;
 	scene.camera.aperture = 0.02;
 
-	let mut tracer = Tracer::new();
-	tracer.samples = 500;
-	tracer.image_size = (width, height);
+	let mut tracer = build_project(project);
 	tracer.set_scene(scene);
 	tracer.bins = 3;
 
@@ -100,6 +96,7 @@ fn main() {
 
 		if last_image_update < precise_time_s() - 5.0 {
 			tracer.pixels.access(|&ref mut values| {
+				let (width, height) = tracer.image_size;
 				save_png(values, width, height);
 			});
 			last_image_update = precise_time_s();
@@ -110,6 +107,7 @@ fn main() {
 	println!("Render time: {}s", precise_time_s() - render_started);
 
 	tracer.pixels.access(|&ref mut values| {
+		let (width, height) = tracer.image_size;
 		save_png(values, width, height);
 	});
 }
@@ -179,5 +177,59 @@ fn load_project(path: &str) -> ~json::Object {
 	match project.unwrap() {
 		json::Object(result) => return result,
 		_ => fail!("This is a bug. The default project is invalid")
+	}
+}
+
+fn build_project(project: &json::Object) -> Tracer {
+	let mut tracer = Tracer::new();
+
+	match project.find(&~"render") {
+		Some(&json::Object(ref render_cfg)) => {
+			tracer_from_json(render_cfg, &mut tracer);
+		},
+		_ => println!("No valid render configurations provided")
+	}
+
+	tracer
+}
+
+fn tracer_from_json(config: &~json::Object, tracer: &mut Tracer) {
+	match config.find(&~"width") {
+		Some(&json::Number(width)) => {
+			let (_, height) = tracer.image_size;
+			tracer.image_size = (width as u32, height);
+		},
+		_ => {}
+	}
+
+	match config.find(&~"height") {
+		Some(&json::Number(height)) => {
+			let (width, _) = tracer.image_size;
+			tracer.image_size = (width, height as u32);
+		},
+		_ => {}
+	}
+	
+	match config.find(&~"samples") {
+		Some(&json::Number(samples)) => {
+			tracer.samples = samples as u32;
+		},
+		_ => {}
+	}
+	
+	match config.find(&~"tile_width") {
+		Some(&json::Number(width)) => {
+			let (_, height) = tracer.tile_size;
+			tracer.tile_size = (width as u32, height);
+		},
+		_ => {}
+	}
+
+	match config.find(&~"tile_height") {
+		Some(&json::Number(height)) => {
+			let (width, _) = tracer.tile_size;
+			tracer.tile_size = (width, height as u32);
+		},
+		_ => {}
 	}
 }
