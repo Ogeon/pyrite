@@ -94,7 +94,7 @@ fn save_png(path: Path, values: &~[~[f32]], width: u32, height: u32) {
 }
 
 fn load_project(path: &str) -> ~json::Object {
-	let default = "{\"objects\": [], \"cameras\": [], \"materials\": [], \"render\": {}}";
+	let default = "{\"objects\": [], \"camera\": {}, \"materials\": [], \"render\": {}}";
 
 	let mut project = if path.len() == 0 {
 		//No file provided
