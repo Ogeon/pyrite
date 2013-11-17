@@ -8,7 +8,7 @@ use extra::time::precise_time_s;
 use extra::json;
 use extra::json::ToJson;
 use nalgebra::na;
-use nalgebra::na::Vec3;
+use nalgebra::na::{Vec3, Rot3};
 use core::{Tracer, Camera, Scene, SceneObject, Material};
 use shapes::Sphere;
 mod core;
@@ -30,7 +30,6 @@ fn main() {
 	let project = load_project(project_file);
 
 	println!("Current project:\n{}", project.to_json().to_pretty_str());
-
 
 	let mut spheres = vec::from_fn(20, |i| {
 		let x = if i < 10 { -2.0 } else { 2.0 };
@@ -64,17 +63,13 @@ fn main() {
 
 	spheres.push(~Sphere::new(Vec3::new(0.0, 101.0, 5.0), 100.0, material as ~Material: Send+Freeze) as ~SceneObject: Send+Freeze);
 
-	let mut scene = Scene {
-		camera: Camera::new(Vec3::new(5.0, -3.0, -4.0), Vec3::new(-0.3, -0.4, 0.0)),
+	let mut tracer = build_project(project);
+	tracer.bins = 3;
+	let s = Scene {
+		camera: tracer.scene.get().camera,
 		objects: spheres
 	};
-
-	scene.camera.focal_distance = na::norm(&(scene.camera.position - Vec3::new(-2.0f32, 0.0, 4.0)));//7.0;
-	scene.camera.aperture = 0.02;
-
-	let mut tracer = build_project(project);
-	tracer.set_scene(scene);
-	tracer.bins = 3;
+	tracer.set_scene(s);
 
 	let render_started = precise_time_s();
 
@@ -187,8 +182,10 @@ fn build_project(project: &json::Object) -> Tracer {
 		Some(&json::Object(ref render_cfg)) => {
 			tracer_from_json(render_cfg, &mut tracer);
 		},
-		_ => println!("No valid render configurations provided")
+		_ => println!("Warning: No valid render configurations provided")
 	}
+
+	tracer.set_scene(scene_from_json(project));
 
 	tracer
 }
@@ -232,4 +229,107 @@ fn tracer_from_json(config: &~json::Object, tracer: &mut Tracer) {
 		},
 		_ => {}
 	}
+}
+
+fn scene_from_json(config: &json::Object) -> Scene {
+	Scene {
+		camera: camera_from_json(config),
+		objects: ~[]
+	}
+}
+
+fn camera_from_json(config: &json::Object) -> Camera {
+	let mut camera = Camera::new(na::zero(), na::zero());
+
+	match config.find(&~"camera") {
+		Some(&json::Object(ref camera_cfg)) => {
+			match camera_cfg.find(&~"position") {
+				Some(&json::List(ref position)) => {
+					if(position.len() == 3) {
+						match position[0] {
+							json::Number(x) => {
+								camera.position.x = x as f32;
+							},
+							_ => println!("Warning: Camera position must be a list of 3 numbers")
+						}
+
+						match position[1] {
+							json::Number(y) => {
+								camera.position.y = y as f32;
+							},
+							_ => println!("Warning: Camera position must be a list of 3 numbers")
+						}
+
+						match position[2] {
+							json::Number(z) => {
+								camera.position.z = z as f32;
+							},
+							_ => println!("Warning: Camera position must be a list of 3 numbers")
+						}
+					} else {
+						println!("Warning: Camera position must be a list of 3 numbers");
+					}
+				},
+				_ => {}
+			}
+
+			match camera_cfg.find(&~"rotation") {
+				Some(&json::List(ref rotation)) => {
+					let mut new_rotation: Vec3<f32> = na::zero();
+
+					if(rotation.len() == 3) {
+						match rotation[0] {
+							json::Number(x) => {
+								new_rotation.x = x as f32;
+							},
+							_ => println!("Warning: Camera rotation must be a list of 3 numbers")
+						}
+
+						match rotation[1] {
+							json::Number(y) => {
+								new_rotation.y = y as f32;
+							},
+							_ => println!("Warning: Camera rotation must be a list of 3 numbers")
+						}
+
+						match rotation[2] {
+							json::Number(z) => {
+								new_rotation.z = z as f32;
+							},
+							_ => println!("Warning: Camera rotation must be a list of 3 numbers")
+						}
+					} else {
+						println!("Warning: Camera rotation must be a list of 3 numbers");
+					}
+
+					camera.rotation = Rot3::new(new_rotation);
+				},
+				_ => {}
+			}
+
+			match camera_cfg.find(&~"lens") {
+				Some(&json::Number(lens)) => {
+					camera.lens = lens as f32;
+				},
+				_ => {}
+			}
+
+			match camera_cfg.find(&~"aperture") {
+				Some(&json::Number(aperture)) => {
+					camera.aperture = aperture as f32;
+				},
+				_ => {}
+			}
+
+			match camera_cfg.find(&~"focal_distance") {
+				Some(&json::Number(focal_distance)) => {
+					camera.focal_distance = focal_distance as f32;
+				},
+				_ => {}
+			}
+		},
+		_ => println!("Warning: No valid camera configuration provided")
+	}
+
+	camera
 }

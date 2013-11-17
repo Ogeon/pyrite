@@ -1,11 +1,12 @@
 {
-	"cameras": [
-		{
-			"label": "main",
-			"position": [0, 0, 0],
-			"rotation": [0, 0, 0]
-		}
-	],
+	"camera": {
+		"label": "main",
+		"position": [-1, -1, 0],
+		"rotation": [0, 0.3, 0],
+		"focal_distance": 10,
+		"aperture": 0.1
+	},
+
 	"materials": [
 		{
 			"label": "diffuse",
@@ -38,6 +39,7 @@
 			"color": 1
 		}
 	],
+
 	"objects": [],
 
 	"render": {
