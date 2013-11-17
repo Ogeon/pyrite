@@ -1,8 +1,47 @@
 extern mod std;
 use std::vec;
+use extra::json;
 use nalgebra::na;
 use nalgebra::na::Vec3;
 use core::{Ray, Material, RandomVariable, Reflection};
+
+
+pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
+	match config.find(&~"type") {
+
+		Some(&json::String(~"Diffuse")) => {
+			Diffuse::from_json(config)
+		},
+
+		Some(&json::String(~"Mirror")) => {
+			Mirror::from_json(config)
+		},
+
+		Some(&json::String(~"Emission")) => {
+			Emission::from_json(config)
+		},
+
+		Some(&json::String(~"Refractive")) => {
+			Refractive::from_json(config)
+		},
+
+		Some(&json::String(~"Mix")) => {
+			Mix::from_json(config)
+		},
+
+		Some(&json::String(~"FresnelMix")) => {
+			FresnelMix::from_json(config)
+		},
+
+		Some(&json::String(ref something)) => {
+			println!("Warning: Unknown material {}", something.to_owned());
+			None
+		},
+
+		_ => None
+	}
+}
+
 
 //Diffuse
 struct Diffuse {
@@ -44,6 +83,33 @@ impl Material for Diffuse {
 			dispersion: false
 		}
 	}
+
+	fn to_owned_material(&self) -> ~Material: Send+Freeze {
+		~Diffuse {
+			color: self.color
+		} as ~Material: Send+Freeze
+	}
+}
+
+impl Diffuse {
+	pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
+		let label = match config.find(&~"label") {
+			Some(&json::String(ref label)) => label.to_owned(),
+			_ => ~"<Diffuse>"
+		};
+
+		let color = match config.find(&~"color") {
+			Some(&json::Number(color)) => color as f32,
+			_ => {
+				println!("Warning: Color for {} is not set", label);
+				1.0
+			}
+		};
+
+		Some(~Diffuse {
+			color: color
+		} as ~Material: Send+Freeze)
+	}
 }
 
 
@@ -61,6 +127,33 @@ impl Material for Mirror {
 			emission: 0.0,
 			dispersion: false
 		}
+	}
+
+	fn to_owned_material(&self) -> ~Material: Send+Freeze {
+		~Mirror {
+			color: self.color
+		} as ~Material: Send+Freeze
+	}
+}
+
+impl Mirror {
+	pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
+		let label = match config.find(&~"label") {
+			Some(&json::String(ref label)) => label.to_owned(),
+			_ => ~"<Mirror>"
+		};
+
+		let color = match config.find(&~"color") {
+			Some(&json::Number(color)) => color as f32,
+			_ => {
+				println!("Warning: Color for {} is not set", label);
+				1.0
+			}
+		};
+
+		Some(~Mirror {
+			color: color
+		} as ~Material: Send+Freeze)
 	}
 }
 
@@ -80,6 +173,43 @@ impl Material for Emission {
 			dispersion: false
 		}
 	}
+
+	fn to_owned_material(&self) -> ~Material: Send+Freeze {
+		~Emission {
+			color: self.color,
+			luminance: self.luminance
+		} as ~Material: Send+Freeze
+	}
+}
+
+impl Emission {
+	pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
+		let label = match config.find(&~"label") {
+			Some(&json::String(ref label)) => label.to_owned(),
+			_ => ~"<Emission>"
+		};
+
+		let color = match config.find(&~"color") {
+			Some(&json::Number(color)) => color as f32,
+			_ => {
+				println!("Warning: Color for {} is not set", label);
+				1.0
+			}
+		};
+
+		let luminance = match config.find(&~"luminance") {
+			Some(&json::Number(luminance)) => luminance as f32,
+			_ => {
+				println!("Warning: Luminance for {} is not set", label);
+				1.0
+			}
+		};
+
+		Some(~Emission {
+			color: color,
+			luminance: luminance
+		} as ~Material: Send+Freeze)
+	}
 }
 
 
@@ -98,6 +228,61 @@ impl Material for Mix {
 		} else {
 			self.material_b.get_reflection(normal, ray_in, frequency, rand_var)
 		}
+	}
+
+	fn to_owned_material(&self) -> ~Material: Send+Freeze {
+		~Mix {
+			material_a: self.material_a.to_owned_material(),
+			material_b: self.material_b.to_owned_material(),
+			factor: self.factor
+		} as ~Material: Send+Freeze
+	}
+}
+
+impl Mix {
+	pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
+		let label = match config.find(&~"label") {
+			Some(&json::String(ref label)) => label.to_owned(),
+			_ => ~"<Mix>"
+		};
+
+		let factor = match config.find(&~"factor") {
+			Some(&json::Number(factor)) => factor as f32,
+			_ => {
+				println!("Warning: Factor for {} is not set", label);
+				0.5
+			}
+		};
+
+		let material_a = match config.find(&~"material_a") {
+			Some(&json::Object(ref material)) => from_json(material),
+			_ => {
+				println!("Warning: Invalid material_a for {}", label);
+				None
+			}
+		};
+
+		if material_a.is_none() {
+			return None;
+		}
+
+		let material_b = match config.find(&~"material_b") {
+			Some(&json::Object(ref material)) => from_json(material),
+			_ => {
+				println!("Warning: Invalid material_b for {}", label);
+				None
+			}
+		};
+
+		if material_b.is_none() {
+			return None;
+		}
+
+		Some(~Mix {
+			material_a: material_a.unwrap(),
+			material_b: material_b.unwrap(),
+			factor: factor
+		} as ~Material: Send+Freeze)
 	}
 }
 
@@ -129,6 +314,15 @@ impl Material for FresnelMix {
 		reflection.dispersion = reflection.dispersion || self.dispersion != 0.0;
 		return reflection;
 	}
+
+	fn to_owned_material(&self) -> ~Material: Send+Freeze {
+		~FresnelMix {
+			reflection: self.reflection.to_owned_material(),
+			refraction: self.refraction.to_owned_material(),
+			refractive_index: self.refractive_index,
+			dispersion: self.dispersion
+		} as ~Material: Send+Freeze
+	}
 }
 
 impl FresnelMix {
@@ -148,6 +342,62 @@ impl FresnelMix {
 		let inv_cos = 1.0 - cos_psi;
 
 		return r0 * r0 + (1.0 - r0 * r0) * inv_cos * inv_cos * inv_cos * inv_cos * inv_cos;
+	}
+
+	pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
+		let label = match config.find(&~"label") {
+			Some(&json::String(ref label)) => label.to_owned(),
+			_ => ~"<FresnelMix>"
+		};
+
+		let refractive_index = match config.find(&~"ior") {
+			Some(&json::Number(refractive_index)) => refractive_index as f32,
+			_ => {
+				println!("Warning: Index of refraction for {} is not set", label);
+				1.0
+			}
+		};
+
+		let dispersion = match config.find(&~"dispersion") {
+			Some(&json::Number(dispersion)) => dispersion as f32,
+			None => 0.0,
+			_ => {
+				println!("Warning: Invalid dispersion factor for {}", label);
+				0.0
+			}
+		};
+
+
+		let reflection = match config.find(&~"reflection") {
+			Some(&json::Object(ref material)) => from_json(material),
+			_ => {
+				println!("Warning: Invalid reflection material for {}", label);
+				None
+			}
+		};
+
+		if reflection.is_none() {
+			return None;
+		}
+
+		let refraction = match config.find(&~"refraction") {
+			Some(&json::Object(ref material)) => from_json(material),
+			_ => {
+				println!("Warning: Invalid refraction material for {}", label);
+				None
+			}
+		};
+
+		if refraction.is_none() {
+			return None;
+		}
+
+		Some(~FresnelMix {
+			reflection: reflection.unwrap(),
+			refraction: refraction.unwrap(),
+			refractive_index: refractive_index,
+			dispersion: dispersion
+		} as ~Material: Send+Freeze)
 	}
 }
 
@@ -192,5 +442,53 @@ impl Material for Refractive {
 			emission: 0.0,
 			dispersion: self.dispersion != 0.0
 		}
+	}
+
+	fn to_owned_material(&self) -> ~Material: Send+Freeze {
+		~Refractive {
+			color: self.color,
+			refractive_index: self.refractive_index,
+			dispersion: self.dispersion
+		} as ~Material: Send+Freeze
+	}
+}
+
+impl Refractive {
+	pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
+		let label = match config.find(&~"label") {
+			Some(&json::String(ref label)) => label.to_owned(),
+			_ => ~"<Refractive>"
+		};
+
+		let color = match config.find(&~"color") {
+			Some(&json::Number(color)) => color as f32,
+			_ => {
+				println!("Warning: Color for {} is not set", label);
+				1.0
+			}
+		};
+
+		let refractive_index = match config.find(&~"ior") {
+			Some(&json::Number(refractive_index)) => refractive_index as f32,
+			_ => {
+				println!("Warning: Index of refraction for {} is not set", label);
+				1.0
+			}
+		};
+
+		let dispersion = match config.find(&~"dispersion") {
+			Some(&json::Number(dispersion)) => dispersion as f32,
+			None => 0.0,
+			_ => {
+				println!("Warning: Invalid dispersion factor for {}", label);
+				0.0
+			}
+		};
+
+		Some(~Refractive {
+			color: color,
+			refractive_index: refractive_index,
+			dispersion: dispersion
+		} as ~Material: Send+Freeze)
 	}
 }

@@ -1,28 +1,26 @@
 {
 	"camera": {
 		"label": "main",
-		"position": [-1, -1, 0],
-		"rotation": [0, 0.3, 0],
-		"focal_distance": 10,
-		"aperture": 0.1
+		"position": [0, -1, 0],
+		"rotation": [0, 0, 0]
 	},
 
 	"materials": [
 		{
 			"label": "diffuse",
 			"type": "Diffuse",
-			"color": 0.8
+			"color": 0.6
 		},
 		{
 			"label": "lamp",
 			"type": "Emission",
 			"color": 1,
-			"luminance": 2
+			"luminance": 3
 		},
 		{
 			"label": "shiny",
 			"type": "FresnelMix",
-			"ior": 0.5,
+			"ior": 1.5,
 			"dispersion": 0,
 			"reflection": {
 				"type": "Mirror",
@@ -30,7 +28,7 @@
 			},
 			"refraction": {
 				"type": "Diffuse",
-				"color": 0.8
+				"color": 0.6
 			}
 		},
 		{
@@ -40,13 +38,42 @@
 		}
 	],
 
-	"objects": [],
+	"objects": [
+		{
+			"label": "floor",
+			"type": "Sphere",
+			"position": [0, 50, 10],
+			"radius": 50,
+			"material": 3
+		},
+		{
+			"label": "lamp",
+			"type": "Sphere",
+			"position": [0, -1, 10],
+			"radius": 1,
+			"material": 1
+		},
+		{
+			"label": "diffuse",
+			"type": "Sphere",
+			"position": [-3, -0.9, 10],
+			"radius": 1,
+			"material": 0
+		},
+		{
+			"label": "shiny",
+			"type": "Sphere",
+			"position": [3, -0.9, 10],
+			"radius": 1,
+			"material": 2
+		}
+	],
 
 	"render": {
 		"camera": 0,
 		"width": 512,
 		"height": 256,
-		"samples": 500,
+		"samples": 8000,
 		"tile_width": 32,
 		"tile_height": 32
 	}

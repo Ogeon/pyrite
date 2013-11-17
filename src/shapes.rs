@@ -1,3 +1,4 @@
+use extra::json;
 use nalgebra::na;
 use nalgebra::na::Vec3;
 use core::{SceneObject, Ray, Material, RandomVariable, Reflection};
@@ -113,6 +114,76 @@ impl Sphere {
 			},
 			material: material
 		}
+	}
+
+	pub fn from_json(config: &~json::Object, materials: &[~Material: Send + Freeze], default_material: &Material: Send + Freeze) -> Sphere {
+		let label = match config.find(&~"label") {
+			Some(&json::String(ref label)) => label.to_owned(),
+			_ => ~"<Sphere>"
+		};
+
+		let position = match config.find(&~"position") {
+			Some(&json::List(ref position)) => {
+				if(position.len() == 3) {
+					let mut new_position: Vec3<f32> = na::zero();
+					match position[0] {
+						json::Number(x) => {
+							new_position.x = x as f32;
+						},
+						_ => println!("Warning: Position for {} must be a list of 3 numbers", label)
+					}
+
+					match position[1] {
+						json::Number(y) => {
+							new_position.y = y as f32;
+						},
+						_ => println!("Warning: Position for {} must be a list of 3 numbers", label)
+					}
+
+					match position[2] {
+						json::Number(z) => {
+							new_position.z = z as f32;
+						},
+						_ => println!("Warning: Position for {} must be a list of 3 numbers", label)
+					}
+
+					new_position
+				} else {
+					println!("Warning: Position for {} must be a list of 3 numbers", label);
+					na::zero()
+				}
+			},
+			_ => {
+				println!("Warning: Position for {} must be a list of 3 numbers", label);
+				na::zero()
+			}
+		};
+
+		let radius = match config.find(&~"radius") {
+			Some(&json::Number(radius)) => radius as f32,
+			_ => {
+				println!("Warning: Radius for {} is not set", label);
+				1.0
+			}
+		};
+
+		let material = match config.find(&~"material") {
+			Some(&json::Number(i)) => {
+				let index = i as uint;
+				if index < materials.len() {
+					materials[index].to_owned_material()
+				} else {
+					println!("Warning: Unknown material for {}", label);
+					default_material.to_owned_material()
+				}
+			},
+			_ => {
+				println!("Warning: Material for {} is not set", label);
+				default_material.to_owned_material()
+			}
+		};
+
+		Sphere::new(position, radius, material)
 	}
 }
 

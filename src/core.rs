@@ -504,4 +504,5 @@ pub struct Scene {
 //Material
 pub trait Material {
 	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection;
+	fn to_owned_material(&self) -> ~Material: Send+Freeze;
 }

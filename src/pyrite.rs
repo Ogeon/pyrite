@@ -1,12 +1,10 @@
 extern mod png;
 extern mod extra;
 extern mod nalgebra;
-use std::vec;
 use std::num::min;
 use std::io::{File, io_error};
 use extra::time::precise_time_s;
 use extra::json;
-use extra::json::ToJson;
 use nalgebra::na;
 use nalgebra::na::{Vec3, Rot3};
 use core::{Tracer, Camera, Scene, SceneObject, Material};
@@ -29,45 +27,8 @@ fn main() {
 
 	let project = load_project(project_file);
 
-	let mut spheres = vec::from_fn(20, |i| {
-		let x = if i < 10 { -2.0 } else { 2.0 };
-		let z = (if i < 10 { i } else { i - 10 } as f32 * 5.0) + 3.0;
-		let material = if i % 2 == 0 {
-			let a = ~materials::Mirror {
-				color: 1.0
-			} as ~Material: Send+Freeze;
-			let b = ~materials::Diffuse {
-				color: 1.0
-			} as ~Material: Send+Freeze;
-			~materials::FresnelMix {
-				reflection: a,
-				refraction: b,
-				refractive_index: 1.5,
-				dispersion: 0.0
-			} as ~Material: Send+Freeze
-			
-		} else {
-			~materials::Emission {
-				color: 1.0,
-				luminance: 3.0
-			} as ~Material: Send+Freeze
-		};
-		~Sphere::new(Vec3::new(x, 0.0 - (0 * (i%10)) as f32, 1.0 + z), 1.0, material) as ~SceneObject: Send+Freeze
-	});
-
-	let material = ~materials::Diffuse {
-		color: 0.7
-	};
-
-	spheres.push(~Sphere::new(Vec3::new(0.0, 101.0, 5.0), 100.0, material as ~Material: Send+Freeze) as ~SceneObject: Send+Freeze);
-
 	let mut tracer = build_project(project);
 	tracer.bins = 3;
-	let s = Scene {
-		camera: tracer.scene.get().camera,
-		objects: spheres
-	};
-	tracer.set_scene(s);
 
 	let render_started = precise_time_s();
 
@@ -232,7 +193,7 @@ fn tracer_from_json(config: &~json::Object, tracer: &mut Tracer) {
 fn scene_from_json(config: &json::Object) -> Scene {
 	Scene {
 		camera: camera_from_json(config),
-		objects: ~[]
+		objects: objects_from_json(config)
 	}
 }
 
@@ -330,4 +291,43 @@ fn camera_from_json(config: &json::Object) -> Camera {
 	}
 
 	camera
+}
+
+fn objects_from_json(config: &json::Object) -> ~[~SceneObject: Send+Freeze] {
+	let default_material = ~materials::Diffuse{
+		color: 0.8
+	} as ~Material: Send+Freeze;
+
+	let materials = match config.find(&~"materials") {
+		Some(&json::List(ref materials)) => {
+			materials.iter().filter_map(|o| {
+				match o {
+					&json::Object(ref material) => {
+						materials::from_json(material)
+					},
+					_ => None
+				}
+			}).collect()
+		},
+		_ => ~[]
+	};
+
+	match config.find(&~"objects") {
+		Some(&json::List(ref objects)) => {
+			objects.iter().filter_map(|o| {
+				match o {
+					&json::Object(ref object) => {
+						match object.find(&~"type") {
+							Some(&json::String(~"Sphere")) => {
+								Some(~Sphere::from_json(object, materials, default_material) as ~SceneObject: Send+Freeze)
+							},
+							_ => None
+						}
+					},
+					_ => None
+				}
+			}).collect()
+		},
+		_ => ~[]
+	}
 }
