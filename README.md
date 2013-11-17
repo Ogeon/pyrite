@@ -16,9 +16,10 @@ To run Pyrite:
 
 
     cd bin/
-    ./pyrite
+    ./pyrite path/to/project.json
 
-This will currently result in an image called `test.png` in `bin/`.
+This will currently result in an image called `test.png` in `bin/`. Example
+projects can be found in `test/`.
 
 ## Dependencies
 Pyrite requires the following libraries:
