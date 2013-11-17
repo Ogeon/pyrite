@@ -29,8 +29,6 @@ fn main() {
 
 	let project = load_project(project_file);
 
-	println!("Current project:\n{}", project.to_json().to_pretty_str());
-
 	let mut spheres = vec::from_fn(20, |i| {
 		let x = if i < 10 { -2.0 } else { 2.0 };
 		let z = (if i < 10 { i } else { i - 10 } as f32 * 5.0) + 3.0;
