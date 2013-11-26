@@ -379,7 +379,7 @@ impl FresnelMix {
 				0.5
 			},
 			_ => {
-				println!("Warning: \"factor\" for material \"{}\" must be a number. Default will be used.", label);
+				println!("Warning: \"ior\" for material \"{}\" must be a number. Default will be used.", label);
 				0.5
 			}
 		};
