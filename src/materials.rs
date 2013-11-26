@@ -34,7 +34,7 @@ pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
 		},
 
 		Some(&json::String(ref something)) => {
-			println!("Warning: Unknown material {}", something.to_owned());
+			println!("Error: Unknown material type \"{}\".", something.to_owned());
 			None
 		},
 
@@ -100,8 +100,11 @@ impl Diffuse {
 
 		let color = match config.find(&~"color") {
 			Some(&json::Number(color)) => color as f32,
+			None => {
+				1.0
+			},
 			_ => {
-				println!("Warning: Color for {} is not set", label);
+				println!("Warning: \"color\" for material \"{}\" must be a number. Default will be used.", label);
 				1.0
 			}
 		};
@@ -145,8 +148,11 @@ impl Mirror {
 
 		let color = match config.find(&~"color") {
 			Some(&json::Number(color)) => color as f32,
+			None => {
+				1.0
+			},
 			_ => {
-				println!("Warning: Color for {} is not set", label);
+				println!("Warning: \"color\" for material \"{}\" must be a number. Default will be used.", label);
 				1.0
 			}
 		};
@@ -191,16 +197,22 @@ impl Emission {
 
 		let color = match config.find(&~"color") {
 			Some(&json::Number(color)) => color as f32,
+			None => {
+				1.0
+			},
 			_ => {
-				println!("Warning: Color for {} is not set", label);
+				println!("Warning: \"color\" for material \"{}\" must be a number. Default will be used.", label);
 				1.0
 			}
 		};
 
 		let luminance = match config.find(&~"luminance") {
 			Some(&json::Number(luminance)) => luminance as f32,
+			None => {
+				1.0
+			},
 			_ => {
-				println!("Warning: Luminance for {} is not set", label);
+				println!("Warning: \"luminance\" for material \"{}\" must be a number. Default will be used.", label);
 				1.0
 			}
 		};
@@ -248,16 +260,23 @@ impl Mix {
 
 		let factor = match config.find(&~"factor") {
 			Some(&json::Number(factor)) => factor as f32,
+			None => {
+				0.5
+			},
 			_ => {
-				println!("Warning: Factor for {} is not set", label);
+				println!("Warning: \"factor\" for material \"{}\" must be a number. Default will be used.", label);
 				0.5
 			}
 		};
 
 		let material_a = match config.find(&~"material_a") {
 			Some(&json::Object(ref material)) => from_json(material),
+			None => {
+				println!("Error: \"material_a\" for material \"{}\" is not set.", label);
+				None
+			},
 			_ => {
-				println!("Warning: Invalid material_a for {}", label);
+				println!("Error: \"material_a\" for material \"{}\" must be an object.", label);
 				None
 			}
 		};
@@ -268,8 +287,12 @@ impl Mix {
 
 		let material_b = match config.find(&~"material_b") {
 			Some(&json::Object(ref material)) => from_json(material),
+			None => {
+				println!("Error: \"material_b\" for material \"{}\" is not set.", label);
+				None
+			},
 			_ => {
-				println!("Warning: Invalid material_b for {}", label);
+				println!("Error: \"material_b\" for material \"{}\" must be an object.", label);
 				None
 			}
 		};
@@ -352,17 +375,22 @@ impl FresnelMix {
 
 		let refractive_index = match config.find(&~"ior") {
 			Some(&json::Number(refractive_index)) => refractive_index as f32,
+			None => {
+				0.5
+			},
 			_ => {
-				println!("Warning: Index of refraction for {} is not set", label);
-				1.0
+				println!("Warning: \"factor\" for material \"{}\" must be a number. Default will be used.", label);
+				0.5
 			}
 		};
 
 		let dispersion = match config.find(&~"dispersion") {
 			Some(&json::Number(dispersion)) => dispersion as f32,
-			None => 0.0,
+			None => {
+				0.0
+			},
 			_ => {
-				println!("Warning: Invalid dispersion factor for {}", label);
+				println!("Warning: \"dispersion\" for material \"{}\" must be a number. Default will be used.", label);
 				0.0
 			}
 		};
@@ -370,8 +398,12 @@ impl FresnelMix {
 
 		let reflection = match config.find(&~"reflection") {
 			Some(&json::Object(ref material)) => from_json(material),
+			None => {
+				println!("Error: \"reflection\" for material \"{}\" is not set.", label);
+				None
+			},
 			_ => {
-				println!("Warning: Invalid reflection material for {}", label);
+				println!("Error: \"reflection\" for material \"{}\" must be an object.", label);
 				None
 			}
 		};
@@ -382,8 +414,12 @@ impl FresnelMix {
 
 		let refraction = match config.find(&~"refraction") {
 			Some(&json::Object(ref material)) => from_json(material),
+			None => {
+				println!("Error: \"refraction\" for material \"{}\" is not set.", label);
+				None
+			},
 			_ => {
-				println!("Warning: Invalid refraction material for {}", label);
+				println!("Error: \"refraction\" for material \"{}\" must be an object.", label);
 				None
 			}
 		};
@@ -462,25 +498,33 @@ impl Refractive {
 
 		let color = match config.find(&~"color") {
 			Some(&json::Number(color)) => color as f32,
+			None => {
+				1.0
+			},
 			_ => {
-				println!("Warning: Color for {} is not set", label);
+				println!("Warning: \"color\" for material \"{}\" must be a number. Default will be used.", label);
 				1.0
 			}
 		};
 
 		let refractive_index = match config.find(&~"ior") {
 			Some(&json::Number(refractive_index)) => refractive_index as f32,
+			None => {
+				1.0
+			},
 			_ => {
-				println!("Warning: Index of refraction for {} is not set", label);
+				println!("Warning: \"ior\" for material \"{}\" must be a number. Default will be used.", label);
 				1.0
 			}
 		};
 
 		let dispersion = match config.find(&~"dispersion") {
 			Some(&json::Number(dispersion)) => dispersion as f32,
-			None => 0.0,
+			None => {
+				0.0
+			},
 			_ => {
-				println!("Warning: Invalid dispersion factor for {}", label);
+				println!("Warning: \"dispersion\" for material \"{}\" must be a number. Default will be used.", label);
 				0.0
 			}
 		};
