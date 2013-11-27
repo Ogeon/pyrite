@@ -8,7 +8,6 @@ use extra::json;
 use nalgebra::na;
 use nalgebra::na::{Vec3, Rot3};
 use core::{Tracer, Camera, Scene, SceneObject, Material};
-use shapes::Sphere;
 mod core;
 mod shapes;
 mod materials;
@@ -325,12 +324,7 @@ fn objects_from_json(config: &json::Object) -> ~[~SceneObject: Send+Freeze] {
 			objects.iter().filter_map(|o| {
 				match o {
 					&json::Object(ref object) => {
-						match object.find(&~"type") {
-							Some(&json::String(~"Sphere")) => {
-								Some(~Sphere::from_json(object, materials, default_material) as ~SceneObject: Send+Freeze)
-							},
-							_ => None
-						}
+						shapes::from_json(object, materials, default_material)
 					},
 					_ => None
 				}

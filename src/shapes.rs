@@ -3,6 +3,24 @@ use nalgebra::na;
 use nalgebra::na::Vec3;
 use core::{SceneObject, Ray, Material, RandomVariable, Reflection};
 
+pub fn from_json(config: &~json::Object, materials: &[~Material: Send + Freeze], default_material: &Material: Send + Freeze) -> Option<~SceneObject: Send+Freeze> {
+	match config.find(&~"type") {
+
+		Some(&json::String(~"Sphere")) => {
+			Some(Sphere::from_json(config, materials, default_material))
+		},
+
+		Some(&json::String(ref something)) => {
+			println!("Error: Unknown object type \"{}\".", something.to_owned());
+			None
+		},
+
+		_ => None
+	}
+}
+
+
+
 //Bounding Box
 priv struct BoundingBox {
 	from: Vec3<f32>,
@@ -116,7 +134,7 @@ impl Sphere {
 		}
 	}
 
-	pub fn from_json(config: &~json::Object, materials: &[~Material: Send + Freeze], default_material: &Material: Send + Freeze) -> Sphere {
+	pub fn from_json(config: &~json::Object, materials: &[~Material: Send + Freeze], default_material: &Material: Send + Freeze) -> ~SceneObject: Send+Freeze {
 		let label = match config.find(&~"label") {
 			Some(&json::String(ref label)) => label.to_owned(),
 			_ => ~"<Sphere>"
@@ -183,7 +201,7 @@ impl Sphere {
 			}
 		};
 
-		Sphere::new(position, radius, material)
+		~Sphere::new(position, radius, material) as ~SceneObject: Send+Freeze
 	}
 }
 
