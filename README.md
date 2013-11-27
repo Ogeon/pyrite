@@ -25,4 +25,4 @@ projects can be found in `test/`.
 Pyrite requires the following libraries:
 
 * [nalgebra](https://github.com/sebcrozet/nalgebra) for linear algebra.
-* [rust-png](https://github.com/mozilla-servo/rust-png) for saving and loading PNG images.
+* [Ogeon/rust-png](https://github.com/Ogeon/rust-png) for saving and loading PNG images. A fork of [mozilla-servo/rust-png](https://github.com/mozilla-servo/rust-png), but it will be compatible with the same version of Rust as Pyrite (usually master).
