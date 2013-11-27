@@ -27,7 +27,7 @@ fn main() {
 	let project_dir = if project_file.len() == 0 {
 		Path::new("./")
 	} else {
-		Path::new(project_file.to_owned()).with_filename("")
+		Path::new(project_file.to_owned())
 	};
 
 	println!("Project directory: {}", project_dir.display());
