@@ -148,39 +148,41 @@ impl Sphere {
 						json::Number(x) => {
 							new_position.x = x as f32;
 						},
-						_ => println!("Warning: Position for {} must be a list of 3 numbers", label)
+						_ => println!("Warning: \"position\" for object \"{}\" must be a list of 3 numbers. Default will be used.", label)
 					}
 
 					match position[1] {
 						json::Number(y) => {
 							new_position.y = y as f32;
 						},
-						_ => println!("Warning: Position for {} must be a list of 3 numbers", label)
+						_ => println!("Warning: \"position\" for object \"{}\" must be a list of 3 numbers. Default will be used.", label)
 					}
 
 					match position[2] {
 						json::Number(z) => {
 							new_position.z = z as f32;
 						},
-						_ => println!("Warning: Position for {} must be a list of 3 numbers", label)
+						_ => println!("Warning: \"position\" for object \"{}\" must be a list of 3 numbers. Default will be used.", label)
 					}
 
 					new_position
 				} else {
-					println!("Warning: Position for {} must be a list of 3 numbers", label);
+					println!("Warning: \"position\" for object \"{}\" must be a list of 3 numbers. Default will be used.", label);
 					na::zero()
 				}
 			},
 			_ => {
-				println!("Warning: Position for {} must be a list of 3 numbers", label);
 				na::zero()
 			}
 		};
 
 		let radius = match config.find(&~"radius") {
 			Some(&json::Number(radius)) => radius as f32,
+			None => {
+				1.0
+			},
 			_ => {
-				println!("Warning: Radius for {} is not set", label);
+				println!("Warning: \"radius\" for object \"{}\" must be a number. Default will be used.", label);
 				1.0
 			}
 		};
@@ -191,12 +193,12 @@ impl Sphere {
 				if index < materials.len() {
 					materials[index].to_owned_material()
 				} else {
-					println!("Warning: Unknown material for {}", label);
+					println!("Warning: Unknown material for object \"{}\". Default will be used.", label);
 					default_material.to_owned_material()
 				}
 			},
 			_ => {
-				println!("Warning: Material for {} is not set", label);
+				println!("Warning: \"material\" for object \"{}\" is not set. Default will be used.", label);
 				default_material.to_owned_material()
 			}
 		};
