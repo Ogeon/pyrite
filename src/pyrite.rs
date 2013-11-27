@@ -216,24 +216,24 @@ fn camera_from_json(config: &json::Object) -> Camera {
 							json::Number(x) => {
 								camera.position.x = x as f32;
 							},
-							_ => println!("Warning: Camera position must be a list of 3 numbers")
+							_ => println!("Warning: Camera position must be a list of 3 numbers. Default will be used.")
 						}
 
 						match position[1] {
 							json::Number(y) => {
 								camera.position.y = y as f32;
 							},
-							_ => println!("Warning: Camera position must be a list of 3 numbers")
+							_ => println!("Warning: Camera position must be a list of 3 numbers. Default will be used.")
 						}
 
 						match position[2] {
 							json::Number(z) => {
 								camera.position.z = z as f32;
 							},
-							_ => println!("Warning: Camera position must be a list of 3 numbers")
+							_ => println!("Warning: Camera position must be a list of 3 numbers. Default will be used.")
 						}
 					} else {
-						println!("Warning: Camera position must be a list of 3 numbers");
+						println!("Warning: Camera position must be a list of 3 numbers. Default will be used.");
 					}
 				},
 				_ => {}
@@ -248,24 +248,24 @@ fn camera_from_json(config: &json::Object) -> Camera {
 							json::Number(x) => {
 								new_rotation.x = x as f32;
 							},
-							_ => println!("Warning: Camera rotation must be a list of 3 numbers")
+							_ => println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.")
 						}
 
 						match rotation[1] {
 							json::Number(y) => {
 								new_rotation.y = y as f32;
 							},
-							_ => println!("Warning: Camera rotation must be a list of 3 numbers")
+							_ => println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.")
 						}
 
 						match rotation[2] {
 							json::Number(z) => {
 								new_rotation.z = z as f32;
 							},
-							_ => println!("Warning: Camera rotation must be a list of 3 numbers")
+							_ => println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.")
 						}
 					} else {
-						println!("Warning: Camera rotation must be a list of 3 numbers");
+						println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.");
 					}
 
 					camera.rotation = Rot3::new(new_rotation);
@@ -294,7 +294,7 @@ fn camera_from_json(config: &json::Object) -> Camera {
 				_ => {}
 			}
 		},
-		_ => println!("Warning: No valid camera configuration provided")
+		_ => {}
 	}
 
 	camera
