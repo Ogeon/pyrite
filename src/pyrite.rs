@@ -75,7 +75,7 @@ fn main() {
 	
 
 fn save_png(path: Path, values: &~[~[f32]], width: u32, height: u32) {
-	println!("Saving PNG...");
+	println!("Saving {}...", path.as_str().unwrap_or("rendered image"));
 	let pixels: ~[~[u8]] = values.iter().map(|ref values| {
 		values.iter().map(|&v| {
 			(min(v, 1.0) * 255.0) as u8
