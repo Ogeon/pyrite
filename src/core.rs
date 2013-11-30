@@ -211,17 +211,20 @@ impl Tracer {
 											ray = reflection.out;
 											dispersion = dispersion || reflection.dispersion;
 											bounces.push(reflection);
-											if(reflection.color == 0.0) {
+
+											//TODO: Detect end of reflections
+											/*if(reflection.color == 0.0) {
 												break;
-											}
+											}*/
 										},
 										None => {
-											bounces.push(Reflection {
+											//TODO: Background color
+											/*bounces.push(Reflection {
 												out: ray,
 												color: 0.0,
-												emission: 0.0,//frequency * 0.5 + 0.5 //TODO: Background color
+												emission: 0.0,//frequency * 0.5 + 0.5 
 												dispersion: false
-											});
+											});*/
 											break;
 										}
 									};
@@ -229,7 +232,7 @@ impl Tracer {
 
 								if dispersion {
 									let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
-										incoming * reflection.color + reflection.emission
+										incoming * reflection.color.get(0.0, 0.0, frequency) + reflection.emission
 									});
 
 									let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
@@ -239,9 +242,9 @@ impl Tracer {
 									for bin in range(0, data.bins) {
 										//TODO: Use frequency to calculate pixel value
 										//TODO: Only change first value in rand_var
-										//let frequency = (bin as f32 + rand_var.next()) / data.bins as f32
+										let frequency = (bin as f32 + rand_var.next()) / data.bins as f32;
 										let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
-											incoming * reflection.color + reflection.emission
+											incoming * reflection.color.get(0.0, 0.0, frequency) + reflection.emission
 										});
 
 										values[bin] += value;
@@ -362,9 +365,9 @@ struct TracerData {
 
 
 //Reflection
-pub struct Reflection {
+pub struct Reflection<'a> {
     out: Ray,
-    color: f32,
+    color: &'a ParametricValue,
     emission: f32,
     dispersion: bool
 }
@@ -505,4 +508,10 @@ pub struct Scene {
 pub trait Material {
 	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection;
 	fn to_owned_material(&self) -> ~Material: Send+Freeze;
+}
+
+//Parametric value
+pub trait ParametricValue {
+	fn get(&self, x: f32, y: f32, i: f32) -> f32;
+	fn clone_value(&self) -> ~ParametricValue;
 }

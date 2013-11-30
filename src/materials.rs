@@ -3,7 +3,7 @@ use std::vec;
 use extra::json;
 use nalgebra::na;
 use nalgebra::na::Vec3;
-use core::{Ray, Material, RandomVariable, Reflection};
+use core::{Ray, Material, RandomVariable, Reflection, ParametricValue};
 
 
 pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
@@ -45,7 +45,7 @@ pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
 
 //Diffuse
 struct Diffuse {
-	color: f32
+	color: ~ParametricValue
 }
 
 impl Material for Diffuse {
@@ -86,7 +86,7 @@ impl Material for Diffuse {
 
 	fn to_owned_material(&self) -> ~Material: Send+Freeze {
 		~Diffuse {
-			color: self.color
+			color: self.color.clone_value()
 		} as ~Material: Send+Freeze
 	}
 }
