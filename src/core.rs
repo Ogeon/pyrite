@@ -212,17 +212,16 @@ impl Tracer {
 											dispersion = dispersion || reflection.dispersion;
 											bounces.push(reflection);
 
-											//TODO: Detect end of reflections
-											/*if(reflection.color == 0.0) {
+											if(reflection.emission) {
 												break;
-											}*/
+											}
 										},
 										None => {
 											//TODO: Background color
 											/*bounces.push(Reflection {
 												out: ray,
 												color: 0.0,
-												emission: 0.0,//frequency * 0.5 + 0.5 
+												emission: true, 
 												dispersion: false
 											});*/
 											break;
@@ -232,7 +231,11 @@ impl Tracer {
 
 								if dispersion {
 									let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
-										incoming * reflection.color.get(0.0, 0.0, frequency) + reflection.emission
+										if reflection.emission {
+											reflection.color.get(0.0, 0.0, frequency)
+										} else {
+											incoming * reflection.color.get(0.0, 0.0, frequency)
+										}
 									});
 
 									let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
@@ -240,11 +243,15 @@ impl Tracer {
 									weights[bin] += 1.0;
 								} else {
 									for bin in range(0, data.bins) {
-										//TODO: Use frequency to calculate pixel value
 										//TODO: Only change first value in rand_var
 										let frequency = (bin as f32 + rand_var.next()) / data.bins as f32;
+
 										let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
-											incoming * reflection.color.get(0.0, 0.0, frequency) + reflection.emission
+											if reflection.emission {
+												reflection.color.get(0.0, 0.0, frequency)
+											} else {
+												incoming * reflection.color.get(0.0, 0.0, frequency)
+											}
 										});
 
 										values[bin] += value;
@@ -368,7 +375,7 @@ struct TracerData {
 pub struct Reflection<'a> {
     out: Ray,
     color: &'a ParametricValue,
-    emission: f32,
+    emission: bool,
     dispersion: bool
 }
 
@@ -513,5 +520,5 @@ pub trait Material {
 //Parametric value
 pub trait ParametricValue {
 	fn get(&self, x: f32, y: f32, i: f32) -> f32;
-	fn clone_value(&self) -> ~ParametricValue;
+	fn clone_value(&self) -> ~ParametricValue: Send+Freeze;
 }

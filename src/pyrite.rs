@@ -7,10 +7,11 @@ use extra::time::precise_time_s;
 use extra::json;
 use nalgebra::na;
 use nalgebra::na::{Vec3, Rot3};
-use core::{Tracer, Camera, Scene, SceneObject, Material};
+use core::{Tracer, Camera, Scene, SceneObject, Material, ParametricValue};
 mod core;
 mod shapes;
 mod materials;
+mod values;
 
 fn main() {
 	let mut render_only = false;
@@ -302,7 +303,7 @@ fn camera_from_json(config: &json::Object) -> Camera {
 
 fn objects_from_json(config: &json::Object) -> ~[~SceneObject: Send+Freeze] {
 	let default_material = ~materials::Diffuse{
-		color: 0.8
+		color: ~values::Number{value: 0.0} as ~ParametricValue: Send+Freeze
 	} as ~Material: Send+Freeze;
 
 	let materials = match config.find(&~"materials") {

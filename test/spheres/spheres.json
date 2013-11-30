@@ -9,7 +9,17 @@
 		{
 			"label": "diffuse",
 			"type": "Diffuse",
-			"color": 0.6
+			"color": {
+				"type": "Add",
+				"value_a": {
+					"type": "Multiply",
+					"value_a": -1.0,
+					"value_b": {
+						"type": "Echo"
+					}
+				},
+				"value_b": 1
+			}
 		},
 		{
 			"label": "lamp",
@@ -28,7 +38,9 @@
 			},
 			"refraction": {
 				"type": "Diffuse",
-				"color": 0.6
+				"color": {
+					"type": "Echo"
+				}
 			}
 		},
 		{
@@ -49,22 +61,22 @@
 		{
 			"label": "lamp",
 			"type": "Sphere",
-			"position": [0, -1, 10],
-			"radius": 1,
+			"position": [0, -1.5, 10],
+			"radius": 1.5,
 			"material": 1
 		},
 		{
 			"label": "diffuse",
 			"type": "Sphere",
-			"position": [-3, -0.9, 10],
-			"radius": 1,
+			"position": [-3, -1.4, 10],
+			"radius": 1.5,
 			"material": 0
 		},
 		{
 			"label": "shiny",
 			"type": "Sphere",
-			"position": [3, -0.9, 10],
-			"radius": 1,
+			"position": [3, -1.4, 10],
+			"radius": 1.5,
 			"material": 2
 		}
 	],
