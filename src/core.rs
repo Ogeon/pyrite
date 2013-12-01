@@ -229,23 +229,8 @@ impl Tracer {
 									};
 								}
 
-								if dispersion {
-									let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
-										if reflection.emission {
-											reflection.color.get(0.0, 0.0, frequency)
-										} else {
-											incoming * reflection.color.get(0.0, 0.0, frequency)
-										}
-									});
-
-									let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
-									values[bin] += value;
-									weights[bin] += 1.0;
-								} else {
-									for bin in range(0, data.bins) {
-										//TODO: Only change first value in rand_var
-										let frequency = (bin as f32 + rand_var.next()) / data.bins as f32;
-
+								if bounces.len() > 0 && bounces.last().emission {
+									if dispersion {
 										let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
 											if reflection.emission {
 												reflection.color.get(0.0, 0.0, frequency)
@@ -254,8 +239,34 @@ impl Tracer {
 											}
 										});
 
+										let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
 										values[bin] += value;
 										weights[bin] += 1.0;
+									} else {
+										for bin in range(0, data.bins) {
+											//TODO: Only change first value in rand_var
+											let frequency = 1.0 - (bin as f32 + rand_var.next()) / data.bins as f32;
+
+											let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
+												if reflection.emission {
+													reflection.color.get(0.0, 0.0, frequency)
+												} else {
+													incoming * reflection.color.get(0.0, 0.0, frequency)
+												}
+											});
+
+											values[bin] += value;
+											weights[bin] += 1.0;
+										}
+									}
+								} else {
+									if dispersion {
+										let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
+										weights[bin] += 1.0;
+									} else {
+										for bin in range(0, data.bins) {
+											weights[bin] += 1.0;
+										}
 									}
 								}
 						
@@ -305,32 +316,18 @@ impl Tracer {
 	}
 
 	fn trace(ray: Ray, frequency: f32, scene: &Scene, rand_var: &mut RandomVariable) -> Option<Reflection> {
-		let mut hits = ~[];
-
-		//Find possible hits
-		for object in scene.objects.iter() {
-			match object.get_proximity(ray) {
-				Some(d) => hits.push((object, d)),
-				None => {}
-			};
-		}
-
-
 		let mut closest_dist = std::f32::INFINITY;
 		let mut closest_hit = None;
 
-		//Find closest hit
-		for &(ref object, d) in hits.iter() {
-			if d < closest_dist {
-				match object.intersect(ray) {
-					Some((hit, dist)) => {
-						if(dist < closest_dist && dist > 0.001) {
-							closest_dist = dist;
-							closest_hit = Some((object, Ray::new(hit.origin, hit.direction)));
-						}
-					},
-					None => {}
-				}
+		for object in scene.objects.iter() {
+			match object.intersect(ray) {
+				Some((hit, dist)) => {
+					if(dist < closest_dist && dist > 0.001) {
+						closest_dist = dist;
+						closest_hit = Some((object, Ray::new(hit.origin, hit.direction)));
+					}
+				},
+				None => {}
 			}
 		}
 
