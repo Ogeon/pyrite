@@ -107,7 +107,7 @@ fn main() {
 			std::io::timer::sleep(500);
 		}
 
-		if last_image_update < precise_time_s() - 10.0 {
+		if last_image_update < precise_time_s() - 60.0 {
 			tracer.pixels.access(|&ref mut values| {
 				let (width, height) = tracer.image_size;
 				save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);

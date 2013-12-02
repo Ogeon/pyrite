@@ -210,11 +210,12 @@ impl Tracer {
 								for _ in range(0, 10) {
 									match Tracer::trace(ray, frequency, data.scene.get(), &mut rand_var) {
 										Some(reflection) => {
+											let emission = reflection.emission;
 											ray = reflection.out;
 											dispersion = dispersion || reflection.dispersion;
 											bounces.push(reflection);
 
-											if(reflection.emission) {
+											if(emission) {
 												break;
 											}
 										},
@@ -233,7 +234,7 @@ impl Tracer {
 
 								if bounces.len() > 0 && bounces.last().emission {
 									if dispersion {
-										let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
+										let value = bounces.iter().invert().fold(0.0, |incoming, ref reflection| {
 											if reflection.emission {
 												max(0.0, reflection.color.get(0.0, 0.0, frequency))
 											} else {
@@ -249,7 +250,7 @@ impl Tracer {
 											//TODO: Only change first value in rand_var
 											let frequency = min_freq + freq_diff * (bin as f32 + rand_var.next()) / data.bins as f32;
 
-											let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
+											let value = bounces.iter().invert().fold(0.0, |incoming, ref reflection| {
 												if reflection.emission {
 													max(0.0, reflection.color.get(0.0, 0.0, frequency))
 												} else {
@@ -371,9 +372,9 @@ struct TracerData {
 
 
 //Reflection
-pub struct Reflection<'a> {
+pub struct Reflection {
     out: Ray,
-    color: &'a ParametricValue,
+    color: ~ParametricValue,
     emission: bool,
     dispersion: bool
 }

@@ -14,266 +14,170 @@
 
 		{
 			"label": "400nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[370, 0],
-						[380, 1],
-						[420, 1],
-						[430, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[370, 0],
+					[380, 1],
+					[420, 1],
+					[430, 0]
+				]
 			}
 		},
 		{
 			"label": "430nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[400, 0],
-						[410, 1],
-						[450, 1],
-						[460, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[400, 0],
+					[410, 1],
+					[450, 1],
+					[460, 0]
+				]
 			}
 		},
 		{
 			"label": "461nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[431, 0],
-						[441, 1],
-						[481, 1],
-						[491, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[431, 0],
+					[441, 1],
+					[481, 1],
+					[491, 0]
+				]
 			}
 		},
 		{
 			"label": "492nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[462, 0],
-						[472, 1],
-						[512, 1],
-						[522, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[462, 0],
+					[472, 1],
+					[512, 1],
+					[522, 0]
+				]
 			}
 		},
 		{
 			"label": "523nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[493, 0],
-						[503, 1],
-						[543, 1],
-						[553, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[493, 0],
+					[503, 1],
+					[543, 1],
+					[553, 0]
+				]
 			}
 		},
 		{
 			"label": "554nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[524, 0],
-						[534, 1],
-						[574, 1],
-						[584, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[524, 0],
+					[534, 1],
+					[574, 1],
+					[584, 0]
+				]
 			}
 		},
 		{
 			"label": "585nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[555, 0],
-						[565, 1],
-						[605, 1],
-						[615, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[555, 0],
+					[565, 1],
+					[605, 1],
+					[615, 0]
+				]
 			}
 		},
 		{
 			"label": "616nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[586, 0],
-						[596, 1],
-						[636, 1],
-						[646, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[586, 0],
+					[596, 1],
+					[636, 1],
+					[646, 0]
+				]
 			}
 		},
 		{
 			"label": "647nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[615, 0],
-						[627, 1],
-						[667, 1],
-						[675, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[615, 0],
+					[627, 1],
+					[667, 1],
+					[675, 0]
+				]
 			}
 		},
 		{
 			"label": "678nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[648, 0],
-						[658, 1],
-						[698, 1],
-						[708, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[648, 0],
+					[658, 1],
+					[698, 1],
+					[708, 0]
+				]
 			}
 		},
 		{
 			"label": "709nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[689, 0],
-						[699, 1],
-						[719, 1],
-						[729, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[689, 0],
+					[699, 1],
+					[719, 1],
+					[729, 0]
+				]
 			}
 		},
 		{
 			"label": "740nm",
-			"type": "FresnelMix",
+			"type": "Refractive",
 			"ior": 1.5,
-			"reflection": {
-				"type": "Mirror",
-				"color": 1
-			},
-			"refraction": {
-				"type": "Refractive",
-				"ior": 1.5,
-				"color": {
-					"type": "Curve",
-					"points": [
-						[710, 0],
-						[720, 1],
-						[760, 1],
-						[770, 0]
-					]
-				}
+			"color": {
+				"type": "Curve",
+				"points": [
+					[710, 0],
+					[720, 1],
+					[760, 1],
+					[770, 0]
+				]
 			}
 		}
 	],
@@ -289,92 +193,92 @@
 		{
 			"label": "floor",
 			"type": "Sphere",
-			"radius": 50,
-			"position": [0, 0, 50],
+			"radius": 200,
+			"position": [0, 0, 200],
 			"material": 1
 		},
 		{
 			"label": "400nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [10, 0, -0.8],
+			"position": [10, 0, -1],
 			"material": 2
 		},
 		{
 			"label": "430nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [8.66, 5, -0.8],
+			"position": [8.66, 5, -1],
 			"material": 3
 		},
 		{
 			"label": "461nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [5, 8.66, -0.8],
+			"position": [5, 8.66, -1],
 			"material": 4
 		},
 		{
 			"label": "492nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [0, 10, -0.8],
+			"position": [0, 10, -1],
 			"material": 5
 		},
 		{
 			"label": "623nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-5, 8.66, -0.8],
+			"position": [-5, 8.66, -1],
 			"material": 6
 		},
 		{
 			"label": "654nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-8.66, 5, -0.8],
+			"position": [-8.66, 5, -1],
 			"material": 7
 		},
 		{
 			"label": "585nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-10, 0, -0.8],
+			"position": [-10, 0, -1],
 			"material": 8
 		},
 		{
 			"label": "616nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-8.66, -5, -0.8],
+			"position": [-8.66, -5, -1],
 			"material": 9
 		},
 		{
 			"label": "647nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-5, -8.66, -0.8],
+			"position": [-5, -8.66, -1],
 			"material": 10
 		},
 		{
 			"label": "678nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [0, -10, -0.8],
+			"position": [0, -10, -1],
 			"material": 11
 		},
 		{
 			"label": "709nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [5, -8.66, -0.8],
+			"position": [5, -8.66, -1],
 			"material": 11
 		},
 		{
 			"label": "740nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [8.66, -5, -0.8],
+			"position": [8.66, -5, -1],
 			"material": 11
 		}
 	],
@@ -386,7 +290,7 @@
 	"render": {
 		"width": 512,
 		"height": 512,
-		"samples": 20000,
+		"samples": 5000,
 		"tile_width": 32,
 		"tile_height": 32
 	},
