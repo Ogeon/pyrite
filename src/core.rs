@@ -107,7 +107,8 @@ struct Tracer {
 	tile_size: (u32, u32),
 	tiles: ~MutexArc<~[Tile]>,
 	bins: uint,
-	pixels: ~MutexArc<~[~[f32]]>
+	pixels: ~MutexArc<~[~[f32]]>,
+	freq_span: (f32, f32)
 }
 
 impl Tracer {
@@ -123,7 +124,8 @@ impl Tracer {
 			tile_size: (64, 64),
 			tiles: ~MutexArc::new(~[]),
 			bins: 3,
-			pixels: ~MutexArc::new(vec::from_elem(512 * 512, vec::from_elem(3, 0.0f32)))
+			pixels: ~MutexArc::new(vec::from_elem(512 * 512, vec::from_elem(3, 0.0f32))),
+			freq_span: (400.0, 740.0)
 		}
 	}
 
@@ -143,8 +145,8 @@ impl Tracer {
 			scene: self.scene.clone(),
 			bins: self.bins,
 			image_size: self.image_size,
-			pixels: self.pixels.clone()
-			//sampler: sampler
+			pixels: self.pixels.clone(),
+			freq_span: self.freq_span
 		};
 
 		let task_number = self.active_tasks.access(|&ref mut num| {
@@ -176,8 +178,9 @@ impl Tracer {
 
 		let mut running = true;
 		let mut rand_var = RandomVariable::new(XorShiftRng::new());
-		//let id: u16 = data.random.gen();
 		let (image_w, _) = data.image_size;
+		let (min_freq, max_freq) = data.freq_span;
+		let freq_diff = max_freq - min_freq;
 
 		while running {
 			let maybe_tile = data.tiles.access(Tracer::get_tile);
@@ -186,7 +189,6 @@ impl Tracer {
 				Some(tile) => {
 					let (pix_x, pix_y, pix_w, pix_h) = tile.screen;
 					let (cam_x, cam_y, pixel_size) = tile.world;
-					//let mut results = vec::with_capacity((pix_w*pix_h) as uint);
 					
 					for x in range(0, pix_w) {
 						let tile_column: ~[~[f32]] = range(0, pix_h).map(|y| {
@@ -197,7 +199,7 @@ impl Tracer {
 
 							while running && samples > 0 {
 								rand_var.clear();
-								let frequency = rand_var.next();
+								let frequency = min_freq + rand_var.next() * freq_diff;
 								let sample_x = cam_x + (x as f32 - 0.5 + rand_var.next()) * pixel_size;
 								let sample_y = cam_y + (y as f32 - 0.5 + rand_var.next()) * pixel_size;
 								let mut ray = data.scene.get().camera.ray_to(sample_x, sample_y, &mut rand_var);
@@ -233,25 +235,25 @@ impl Tracer {
 									if dispersion {
 										let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
 											if reflection.emission {
-												reflection.color.get(0.0, 0.0, frequency)
+												max(0.0, reflection.color.get(0.0, 0.0, frequency))
 											} else {
-												incoming * reflection.color.get(0.0, 0.0, frequency)
+												incoming * max(0.0, min(1.0, reflection.color.get(0.0, 0.0, frequency)))
 											}
 										});
 
-										let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
+										let bin = min(((frequency - min_freq) / freq_diff * data.bins as f32).floor() as uint, data.bins-1);
 										values[bin] += value;
 										weights[bin] += 1.0;
 									} else {
 										for bin in range(0, data.bins) {
 											//TODO: Only change first value in rand_var
-											let frequency = 1.0 - (bin as f32 + rand_var.next()) / data.bins as f32;
+											let frequency = min_freq + freq_diff * (bin as f32 + rand_var.next()) / data.bins as f32;
 
 											let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
 												if reflection.emission {
-													reflection.color.get(0.0, 0.0, frequency)
+													max(0.0, reflection.color.get(0.0, 0.0, frequency))
 												} else {
-													incoming * reflection.color.get(0.0, 0.0, frequency)
+													incoming * max(0.0, min(1.0, reflection.color.get(0.0, 0.0, frequency)))
 												}
 											});
 
@@ -261,7 +263,7 @@ impl Tracer {
 									}
 								} else {
 									if dispersion {
-										let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
+										let bin = min(((frequency - min_freq) / freq_diff * data.bins as f32).floor() as uint, data.bins-1);
 										weights[bin] += 1.0;
 									} else {
 										for bin in range(0, data.bins) {
@@ -363,8 +365,8 @@ struct TracerData {
 	scene: ~Arc<Scene>,
 	bins: uint,
 	image_size: (u32, u32),
-	pixels: ~MutexArc<~[~[f32]]>
-	//sampler: S
+	pixels: ~MutexArc<~[~[f32]]>,
+	freq_span: (f32, f32)
 }
 
 
