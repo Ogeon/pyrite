@@ -134,14 +134,14 @@ fn load_project(path: &str) -> ~json::Object {
 		println!("New project created");
 		json::from_str(default)
 	} else {
-		do io_error::cond.trap(|error| {
+		io_error::cond.trap(|error| {
 			//Catching io_error
 			println!("Unable to open {}: {}", path, error.desc);
-		}).inside {
+		}).inside(proc() {
 			//Open provided file
 			match File::open(&Path::new(path)) {
 				//A valid path was provided
-				Some(mut file) => json::from_reader(&mut file as &mut std::io::Reader),
+				Some(mut file) => json::from_reader(&mut file as &mut Reader),
 
 				//An invalid path was provided
 				None => {
@@ -149,7 +149,7 @@ fn load_project(path: &str) -> ~json::Object {
 					json::from_str(default)
 				}
 			}
-		}
+		})
 	};
 
 	if project.is_err() {

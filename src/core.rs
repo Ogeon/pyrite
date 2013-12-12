@@ -152,11 +152,10 @@ impl Tracer {
 			**num-1
 		});
 		let mut new_task = task::task();
-		//new_task.sched_mode(DefaultScheduler);
-		new_task.unlinked();
-		new_task.indestructible();
 		new_task.name(format!("Task {}", task_number));
-		new_task.spawn_with(data, Tracer::run);
+		new_task.spawn(proc(){
+			Tracer::run(data);
+		});
 
 		TracerTask {
 			command_chan: command_chan
