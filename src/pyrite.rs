@@ -2,7 +2,9 @@ extern mod png;
 extern mod extra;
 extern mod nalgebra;
 use std::num::min;
-use std::io::{File, io_error};
+use std::io::{File, io_error, stdio, Reader};
+use std::io::buffered::BufferedReader;
+use std::str::StrSlice;
 use extra::time::precise_time_s;
 use extra::json;
 use nalgebra::na;
@@ -30,14 +32,49 @@ fn main() {
 		Path::new(project_file.to_owned())
 	};
 
-	println!("Project directory: {}", project_dir.display());
+	println!("Project path: {}", project_dir.display());
 
 	let project = load_project(project_file);
 
-	let mut tracer = build_project(project);
-	tracer.bins = 3;
+	if render_only {
+		let tracer = render(project, &project_dir);
 
-	let render_started = precise_time_s();
+		tracer.pixels.access(|&ref mut values| {
+			let (width, height) = tracer.image_size;
+			save_png(project_dir.with_filename("render.png"), values, width, height);
+		});
+	} else {
+		let mut stdin = BufferedReader::new(stdio::stdin());
+
+		loop {
+			print!("> ");
+			stdio::flush();
+			match stdin.read_line() {
+				Some(line) => {
+					let args: ~[&str] = line.trim().splitn(' ', 1).collect();
+					match args {
+						[&"render"] => {
+							let tracer = render(project, &project_dir);
+
+							tracer.pixels.access(|&ref mut values| {
+								let (width, height) = tracer.image_size;
+								save_png(project_dir.with_filename("render.png"), values, width, height);
+							});
+						},
+						[&"quit"] => break,
+						[&"exit"] => break,
+						_ => println!("Unknown command \"{}\".", line)
+					}
+				},
+				None => break
+			}
+		}
+	}
+}
+
+fn render(project: &json::Object, path: &Path) -> ~Tracer {
+	let mut tracer = ~build_project(project);
+	tracer.bins = 3;
 
 	let mut tracers = ~[];
 	std::task::deschedule();
@@ -47,6 +84,7 @@ fn main() {
 		std::task::deschedule();
 	}
 
+	let render_started = precise_time_s();
 
 	let mut last_image_update = precise_time_s();
 	while !tracer.done() {
@@ -58,7 +96,7 @@ fn main() {
 		if last_image_update < precise_time_s() - 5.0 {
 			tracer.pixels.access(|&ref mut values| {
 				let (width, height) = tracer.image_size;
-				save_png(project_dir.with_filename("render.png"), values, width, height);
+				save_png(path.with_filename("render.png"), values, width, height);
 			});
 			last_image_update = precise_time_s();
 		}
@@ -67,12 +105,8 @@ fn main() {
 
 	println!("Render time: {}s", precise_time_s() - render_started);
 
-	tracer.pixels.access(|&ref mut values| {
-		let (width, height) = tracer.image_size;
-		save_png(project_dir.with_filename("render.png"), values, width, height);
-	});
+	tracer
 }
-	
 
 fn save_png(path: Path, values: &~[~[f32]], width: u32, height: u32) {
 	println!("Saving {}...", path.as_str().unwrap_or("rendered image"));
