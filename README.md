@@ -16,7 +16,16 @@ To run Pyrite:
 
 
     cd bin/
+    ./pyrite --render path/to/project.json
+
+To run Pyrite in CLI mode:
+
+
+    cd bin/
     ./pyrite path/to/project.json
+    > render
+    ...
+    > exit
 
 This will result in an image called `render.png` in `path/to/`. Example
 projects can be found in `test/`.
