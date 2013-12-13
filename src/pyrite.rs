@@ -61,9 +61,27 @@ fn main() {
 								save_png(project_dir.with_filename("render.png"), values, width, height);
 							});
 						},
+						[&"get"] => {
+							println!("Type \"get path.to.something\" to get the value of \"something\"")
+						},
+						[&"get", path] => {
+							let project_object = json::Object(project.clone());
+							match path.split('.').fold(Some(&project_object), |result, key| {
+								let k = key.to_owned();
+								match result {
+									Some(&json::Object(ref map)) => {
+										map.find(&k)
+									},
+									_ => None
+								}
+							}) {
+								Some(object) => println!("{}", object.to_pretty_str()),
+								None => println!("Could not find \"{}\" in the project", path)
+							}
+						},
 						[&"quit"] => break,
 						[&"exit"] => break,
-						_ => println!("Unknown command \"{}\".", line)
+						_ => println!("Unknown command \"{}\"", line.trim())
 					}
 				},
 				None => break
