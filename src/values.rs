@@ -10,9 +10,6 @@ pub fn from_json(config: &json::Json) -> Option<~ParametricValue: Send+Freeze> {
 		},
 		&json::Object(ref value_cfg) => {
 			match value_cfg.find(&~"type") {
-				Some(&json::String(~"Echo")) => {
-					Some(~Echo{a: 0.0} as ~ParametricValue: Send+Freeze)
-				},
 				Some(&json::String(~"Add")) => {
 					Add::from_json(value_cfg)
 				},
@@ -263,7 +260,6 @@ impl Curve {
 				list.iter().filter_map(|v| {
 					match v {
 						&json::List([json::Number(x), json::Number(y)]) => {
-							println!("x: {}, y: {}", x, y);
 							Some((x as f32, y as f32))
 						},
 						_ => None
@@ -274,22 +270,5 @@ impl Curve {
 		};
 
 		Some(~Curve::init(points) as ~ParametricValue: Send+Freeze)
-	}
-}
-
-
-
-//Test
-pub struct Echo {
-    a: f32
-}
-
-impl ParametricValue for Echo {
-	fn get(&self, _: f32, _: f32, i: f32) -> f32 {
-		(i - 400.0) / 340.0
-	}
-
-	fn clone_value(&self) -> ~ParametricValue: Send+Freeze {
-		~Echo{a: self.a} as ~ParametricValue: Send+Freeze
 	}
 }
