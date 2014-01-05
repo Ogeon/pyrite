@@ -2,7 +2,9 @@ extern mod png;
 extern mod extra;
 extern mod nalgebra;
 use std::num::{min, max};
-use std::io::{File, io_error};
+use std::io::{File, io_error, stdio, Reader};
+use std::io::buffered::BufferedReader;
+use std::str::StrSlice;
 use extra::time::precise_time_s;
 use extra::json;
 use nalgebra::na;
@@ -31,65 +33,69 @@ fn main() {
 		Path::new(project_file.to_owned())
 	};
 
-	println!("Project directory: {}", project_dir.display());
+	println!("Project path: {}", project_dir.display());
 
 	let project = load_project(project_file);
 
-	match project.find(&~"test") {
-		Some(test_value) => {
-			match values::from_json(test_value) {
-				Some(value) => {
-					let img = values::make_image(value, 400.0, 740.0, 512, 512);
-					save_png_u8(Path::new("/tmp/value.png"), img, 512, 512);
+	if render_only {
+		let tracer = render(project, &project_dir);
+		let response_curves = get_response_curves(project);
+
+		tracer.pixels.access(|&ref mut values| {
+			let (width, height) = tracer.image_size;
+			save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
+		});
+	} else {
+		let mut stdin = BufferedReader::new(stdio::stdin());
+
+		loop {
+			print!("> ");
+			stdio::flush();
+			match stdin.read_line() {
+				Some(line) => {
+					let args: ~[&str] = line.trim().splitn(' ', 1).collect();
+					match args {
+						[&"render"] => {
+							let tracer = render(project, &project_dir);
+							let response_curves = get_response_curves(project);
+
+							tracer.pixels.access(|&ref mut values| {
+								let (width, height) = tracer.image_size;
+								save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
+							});
+						},
+						[&"get"] => {
+							println!("Type \"get path.to.something\" to get the value of \"something\"")
+						},
+						[&"get", path] => {
+							let project_object = json::Object(project.clone());
+							match path.split('.').fold(Some(&project_object), |result, key| {
+								let k = key.to_owned();
+								match result {
+									Some(&json::Object(ref map)) => {
+										map.find(&k)
+									},
+									_ => None
+								}
+							}) {
+								Some(object) => println!("{}", object.to_pretty_str()),
+								None => println!("Could not find \"{}\" in the project", path)
+							}
+						},
+						[&"quit"] => break,
+						[&"exit"] => break,
+						_ => println!("Unknown command \"{}\"", line.trim())
+					}
 				},
-				_ => {println!("test could not be parsed");}
+				None => break
 			}
-		},
-		_ => {println!("test was not found");}
+		}
 	}
+}
 
-	let response_curves = match project.find(&~"response") {
-		Some(&json::Object(ref curves)) => {
-			let r = match curves.find(&~"red") {
-				Some(red_response) => {
-					match values::from_json(red_response) {
-						Some(value) => value,
-						None => ~values::Number{value: 1.0} as ~ParametricValue
-					}
-				},
-				None => ~values::Number{value: 1.0} as ~ParametricValue
-			};
-			let g = match curves.find(&~"green") {
-				Some(green_response) => {
-					match values::from_json(green_response) {
-						Some(value) => value,
-						None => ~values::Number{value: 1.0} as ~ParametricValue
-					}
-				},
-				None => ~values::Number{value: 1.0} as ~ParametricValue
-			};
-			let b = match curves.find(&~"blue") {
-				Some(blue_response) => {
-					match values::from_json(blue_response) {
-						Some(value) => value,
-						None => ~values::Number{value: 1.0} as ~ParametricValue
-					}
-				},
-				None => ~values::Number{value: 1.0} as ~ParametricValue
-			};
-			[r, g, b]
-		},
-		_ => [
-			~values::Number{value: 1.0} as ~ParametricValue,
-			~values::Number{value: 1.0} as ~ParametricValue,
-			~values::Number{value: 1.0} as ~ParametricValue
-		]
-	};
-
-	let mut tracer = build_project(project);
+fn render(project: &json::Object, path: &Path) -> ~Tracer {
+	let mut tracer = ~build_project(project);
 	tracer.bins = 40;
-
-	let render_started = precise_time_s();
 
 	let mut tracers = ~[];
 	std::task::deschedule();
@@ -99,6 +105,9 @@ fn main() {
 		std::task::deschedule();
 	}
 
+	let response_curves = get_response_curves(project);
+
+	let render_started = precise_time_s();
 
 	let mut last_image_update = precise_time_s();
 	while !tracer.done() {
@@ -110,7 +119,7 @@ fn main() {
 		if last_image_update < precise_time_s() - 60.0 {
 			tracer.pixels.access(|&ref mut values| {
 				let (width, height) = tracer.image_size;
-				save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
+				save_png(path.with_filename("render.png"), values, width, height, &response_curves);
 			});
 			last_image_update = precise_time_s();
 		}
@@ -119,10 +128,7 @@ fn main() {
 
 	println!("Render time: {}s", precise_time_s() - render_started);
 
-	tracer.pixels.access(|&ref mut values| {
-		let (width, height) = tracer.image_size;
-		save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
-	});
+	tracer
 }
 	
 
@@ -130,7 +136,7 @@ fn save_png(path: Path, values: &~[~[f32]], width: u32, height: u32, response: &
 	let min_freq = 400.0;
 	let max_freq = 740.0;
 
-	println!("Saving PNG...");
+	println!("Saving {}...", path.as_str().unwrap_or("rendered image"));
 	let pixels: ~[~[u8]] = values.iter().map(|values| {
 		freq_to_rgb((min_freq, max_freq), values, response)
 	}).collect();
@@ -202,14 +208,14 @@ fn load_project(path: &str) -> ~json::Object {
 		println!("New project created");
 		json::from_str(default)
 	} else {
-		do io_error::cond.trap(|error| {
+		io_error::cond.trap(|error| {
 			//Catching io_error
 			println!("Unable to open {}: {}", path, error.desc);
-		}).inside {
+		}).inside(proc() {
 			//Open provided file
 			match File::open(&Path::new(path)) {
 				//A valid path was provided
-				Some(mut file) => json::from_reader(&mut file as &mut std::io::Reader),
+				Some(mut file) => json::from_reader(&mut file as &mut Reader),
 
 				//An invalid path was provided
 				None => {
@@ -217,7 +223,7 @@ fn load_project(path: &str) -> ~json::Object {
 					json::from_str(default)
 				}
 			}
-		}
+		})
 	};
 
 	if project.is_err() {
@@ -256,6 +262,46 @@ fn build_project(project: &json::Object) -> Tracer {
 	tracer.set_scene(scene_from_json(project));
 
 	tracer
+}
+
+fn get_response_curves(project: &json::Object) -> [~ParametricValue, ..3] {
+	match project.find(&~"response") {
+		Some(&json::Object(ref curves)) => {
+			let r = match curves.find(&~"red") {
+				Some(red_response) => {
+					match values::from_json(red_response) {
+						Some(value) => value,
+						None => ~values::Number{value: 1.0} as ~ParametricValue
+					}
+				},
+				None => ~values::Number{value: 1.0} as ~ParametricValue
+			};
+			let g = match curves.find(&~"green") {
+				Some(green_response) => {
+					match values::from_json(green_response) {
+						Some(value) => value,
+						None => ~values::Number{value: 1.0} as ~ParametricValue
+					}
+				},
+				None => ~values::Number{value: 1.0} as ~ParametricValue
+			};
+			let b = match curves.find(&~"blue") {
+				Some(blue_response) => {
+					match values::from_json(blue_response) {
+						Some(value) => value,
+						None => ~values::Number{value: 1.0} as ~ParametricValue
+					}
+				},
+				None => ~values::Number{value: 1.0} as ~ParametricValue
+			};
+			[r, g, b]
+		},
+		_ => [
+			~values::Number{value: 1.0} as ~ParametricValue,
+			~values::Number{value: 1.0} as ~ParametricValue,
+			~values::Number{value: 1.0} as ~ParametricValue
+		]
+	}
 }
 
 fn tracer_from_json(config: &~json::Object, tracer: &mut Tracer) {

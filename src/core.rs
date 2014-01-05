@@ -2,16 +2,16 @@ extern mod std;
 use std::rand::{XorShiftRng, Rng};
 use std::num::{exp, ln, min, max, sqrt};
 use std::{task, fmt, vec};
-use std::comm::stream;
+use std::comm::Chan;
 use std::iter::range;
+use std::cmp::Ordering;
 use extra::arc::{MutexArc, Arc};
-use extra::sort::merge_sort;
 use nalgebra::na::{Vec3, Rot3, Rotate};
 use nalgebra::na;
 
 //Random variable
 
-struct RandomVariable {
+pub struct RandomVariable {
 	values: ~[f32],
 	pos: uint,
 	random: XorShiftRng
@@ -93,13 +93,13 @@ impl fmt::Default for Sample {
 }
 
 //Sampler
-trait Sampler {
+pub trait Sampler {
 	fn random_variable<T: Rng>(random: &mut T) -> RandomVariable;
 	fn sample(traced: Sample) -> Sample;
 }
 
 //Tracer
-struct Tracer {
+pub struct Tracer {
 	samples: u32,
 	active_tasks: ~MutexArc<~u16>,
 	scene: ~Arc<Scene>,
@@ -136,7 +136,7 @@ impl Tracer {
 			self.pixels = ~MutexArc::new(vec::from_elem((image_w * image_h) as uint, vec::from_elem(self.bins, 0.0f32)));
 		}
 
-		let (command_port, command_chan) = stream::<TracerCommands>();
+		let (command_port, command_chan) = Chan::<TracerCommands>::new();
 		let data = TracerData{
 			command_port: command_port,
 			tiles: self.tiles.clone(),//generate_tiles(self.image_size, self.tile_size),
@@ -154,11 +154,10 @@ impl Tracer {
 			**num-1
 		});
 		let mut new_task = task::task();
-		//new_task.sched_mode(DefaultScheduler);
-		new_task.unlinked();
-		new_task.indestructible();
 		new_task.name(format!("Task {}", task_number));
-		new_task.spawn_with(data, Tracer::run);
+		new_task.spawn(proc(){
+			Tracer::run(data);
+		});
 
 		TracerTask {
 			command_chan: command_chan
@@ -297,11 +296,10 @@ impl Tracer {
 				None => {running = false;}
 			};
 
-			if data.command_port.peek() {
-				match data.command_port.recv() {
-					Stop => running = false
-				}
-			}
+			match data.command_port.try_recv() {
+				Some(Stop) => running = false,
+				_=>{}
+			};
 		}
 
 		data.task_counter.access(|&ref mut num| {
@@ -422,15 +420,20 @@ pub fn generate_tiles(image_size: (u32, u32), tile_size: (u32, u32)) -> ~[Tile] 
 		y+= tile_h;
 	}
 
-	merge_sort(tiles, |&a, &b| {
+	tiles.sort_by(|&a, &b| {
 		let (a_x, a_y, _) = a.world;
 		let (b_x, b_y, _) = b.world;
-		(a_x * a_x + a_y * a_y) <= (b_x * b_x + b_y * b_y)
-	})
+		let a_dist = a_x * a_x + a_y * a_y;
+		let b_dist = b_x * b_x + b_y * b_y;
+		if a_dist < b_dist { Less }
+		else if a_dist > b_dist { Greater }
+		else { Equal }
+	});
+	tiles
 }
 
 //Ray
-struct Ray {
+pub struct Ray {
     origin: Vec3<f32>,
     direction: Vec3<f32>
 }

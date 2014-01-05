@@ -61,7 +61,7 @@ pub fn get_value(config: &~json::Object, default: f32, key: ~str, label: &str) -
 
 
 //Diffuse
-struct Diffuse {
+pub struct Diffuse {
 	color: ~ParametricValue: Send+Freeze
 }
 
@@ -125,7 +125,7 @@ impl Diffuse {
 
 
 //Mirror
-struct Mirror {
+pub struct Mirror {
 	color: ~ParametricValue: Send+Freeze
 }
 
@@ -164,7 +164,7 @@ impl Mirror {
 
 
 //Emission
-struct Emission {
+pub struct Emission {
     color: ~ParametricValue: Send+Freeze,
     luminance: f32
 }
@@ -219,7 +219,7 @@ impl Emission {
 
 
 //Mix
-struct Mix {
+pub struct Mix {
 	material_a: ~Material: Send + Freeze,
 	material_b: ~Material: Send + Freeze,
 	factor: f32
@@ -304,7 +304,7 @@ impl Mix {
 
 
 //Fresnel mix
-struct FresnelMix {
+pub struct FresnelMix {
 	reflection: ~Material: Send + Freeze,
 	refraction: ~Material: Send + Freeze,
 	refractive_index: f32,
@@ -432,7 +432,7 @@ impl FresnelMix {
 
 
 //Refractive
-struct Refractive {
+pub struct Refractive {
 	color: ~ParametricValue: Send+Freeze,
 	refractive_index: f32,
 	dispersion: f32

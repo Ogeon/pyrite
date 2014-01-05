@@ -61,7 +61,7 @@ pub fn make_image(value: &ParametricValue, from: f32, to: f32, width: uint, heig
 
 
 //A plain number
-struct Number {
+pub struct Number {
 	value: f32
 }
 
@@ -78,7 +78,7 @@ impl ParametricValue for Number {
 
 
 //Add
-struct Add {
+pub struct Add {
 	value_a: ~ParametricValue: Send+Freeze,
 	value_b: ~ParametricValue: Send+Freeze
 }
@@ -127,7 +127,7 @@ impl Add {
 
 
 //Multiply
-struct Multiply {
+pub struct Multiply {
 	value_a: ~ParametricValue: Send+Freeze,
 	value_b: ~ParametricValue: Send+Freeze
 }
@@ -176,7 +176,7 @@ impl Multiply {
 
 
 //Response curve
-struct Curve {
+pub struct Curve {
 	points: ~[(f32, f32)],
 	y_prim: ~[f32]
 }
@@ -280,7 +280,7 @@ impl Curve {
 
 
 //Test
-struct Echo {
+pub struct Echo {
     a: f32
 }
 
