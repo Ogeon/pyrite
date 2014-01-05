@@ -3,7 +3,8 @@ use std::vec;
 use extra::json;
 use nalgebra::na;
 use nalgebra::na::Vec3;
-use core::{Ray, Material, RandomVariable, Reflection};
+use core::{Ray, Material, RandomVariable, Reflection, ParametricValue};
+use values;
 
 
 pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
@@ -43,9 +44,25 @@ pub fn from_json(config: &~json::Object) -> Option<~Material: Send+Freeze> {
 }
 
 
+pub fn get_value(config: &~json::Object, default: f32, key: ~str, label: &str) -> ~ParametricValue: Send+Freeze {
+	match config.find(&key) {
+		Some(value_cfg) => match values::from_json(value_cfg) {
+			Some(value) => value,
+			None => {
+				println!("Warning: \"{}\" for material \"{}\" must be a parmetric value. Default will be used.", key, label);
+				~values::Number{value: default} as ~ParametricValue: Send+Freeze
+			}
+		},
+		None => {
+			~values::Number{value: default} as ~ParametricValue: Send+Freeze
+		}
+	}
+}
+
+
 //Diffuse
-struct Diffuse {
-	color: f32
+pub struct Diffuse {
+	color: ~ParametricValue: Send+Freeze
 }
 
 impl Material for Diffuse {
@@ -78,15 +95,15 @@ impl Material for Diffuse {
 
 		Reflection {
 			out: Ray::new(normal.origin, reflection),
-			color: self.color,
-			emission: 0.0,
+			color: self.color.clone_value(),
+			emission: false,
 			dispersion: false
 		}
 	}
 
 	fn to_owned_material(&self) -> ~Material: Send+Freeze {
 		~Diffuse {
-			color: self.color
+			color: self.color.clone_value()
 		} as ~Material: Send+Freeze
 	}
 }
@@ -98,16 +115,7 @@ impl Diffuse {
 			_ => ~"<Diffuse>"
 		};
 
-		let color = match config.find(&~"color") {
-			Some(&json::Number(color)) => color as f32,
-			None => {
-				1.0
-			},
-			_ => {
-				println!("Warning: \"color\" for material \"{}\" must be a number. Default will be used.", label);
-				1.0
-			}
-		};
+		let color = get_value(config, 1.0, ~"color", label);
 
 		Some(~Diffuse {
 			color: color
@@ -117,8 +125,8 @@ impl Diffuse {
 
 
 //Mirror
-struct Mirror {
-	color: f32
+pub struct Mirror {
+	color: ~ParametricValue: Send+Freeze
 }
 
 impl Material for Mirror {
@@ -126,15 +134,15 @@ impl Material for Mirror {
 		let perp = na::dot(&ray_in.direction, &normal.direction) * 2.0;
 		Reflection {
 			out: Ray::new(normal.origin, ray_in.direction - (normal.direction * perp)),
-			color: self.color,
-			emission: 0.0,
+			color: self.color.clone_value(),
+			emission: false,
 			dispersion: false
 		}
 	}
 
 	fn to_owned_material(&self) -> ~Material: Send+Freeze {
 		~Mirror {
-			color: self.color
+			color: self.color.clone_value()
 		} as ~Material: Send+Freeze
 	}
 }
@@ -146,16 +154,7 @@ impl Mirror {
 			_ => ~"<Mirror>"
 		};
 
-		let color = match config.find(&~"color") {
-			Some(&json::Number(color)) => color as f32,
-			None => {
-				1.0
-			},
-			_ => {
-				println!("Warning: \"color\" for material \"{}\" must be a number. Default will be used.", label);
-				1.0
-			}
-		};
+		let color = get_value(config, 1.0, ~"color", label);
 
 		Some(~Mirror {
 			color: color
@@ -165,8 +164,8 @@ impl Mirror {
 
 
 //Emission
-struct Emission {
-    color: f32,
+pub struct Emission {
+    color: ~ParametricValue: Send+Freeze,
     luminance: f32
 }
 
@@ -174,15 +173,15 @@ impl Material for Emission {
 	fn get_reflection(&self, _: Ray, _: Ray, _: f32, _: &mut RandomVariable) -> Reflection {
 		Reflection {
 			out: Ray::new(na::zero(), na::zero()),
-			color: 0.0,
-			emission: self.color * self.luminance,
+			color: self.color.clone_value(),
+			emission: true,
 			dispersion: false
 		}
 	}
 
 	fn to_owned_material(&self) -> ~Material: Send+Freeze {
 		~Emission {
-			color: self.color,
+			color: self.color.clone_value(),
 			luminance: self.luminance
 		} as ~Material: Send+Freeze
 	}
@@ -195,16 +194,7 @@ impl Emission {
 			_ => ~"<Emission>"
 		};
 
-		let color = match config.find(&~"color") {
-			Some(&json::Number(color)) => color as f32,
-			None => {
-				1.0
-			},
-			_ => {
-				println!("Warning: \"color\" for material \"{}\" must be a number. Default will be used.", label);
-				1.0
-			}
-		};
+		let color = get_value(config, 1.0, ~"color", label);
 
 		let luminance = match config.find(&~"luminance") {
 			Some(&json::Number(luminance)) => luminance as f32,
@@ -218,7 +208,10 @@ impl Emission {
 		};
 
 		Some(~Emission {
-			color: color,
+			color: ~values::Multiply {
+				value_a: color,
+				value_b: ~values::Number{value: luminance} as ~ParametricValue:Send+Freeze
+			} as ~ParametricValue:Send+Freeze,
 			luminance: luminance
 		} as ~Material: Send+Freeze)
 	}
@@ -226,7 +219,7 @@ impl Emission {
 
 
 //Mix
-struct Mix {
+pub struct Mix {
 	material_a: ~Material: Send + Freeze,
 	material_b: ~Material: Send + Freeze,
 	factor: f32
@@ -311,7 +304,7 @@ impl Mix {
 
 
 //Fresnel mix
-struct FresnelMix {
+pub struct FresnelMix {
 	reflection: ~Material: Send + Freeze,
 	refraction: ~Material: Send + Freeze,
 	refractive_index: f32,
@@ -439,50 +432,69 @@ impl FresnelMix {
 
 
 //Refractive
-struct Refractive {
-	color: f32,
+pub struct Refractive {
+	color: ~ParametricValue: Send+Freeze,
 	refractive_index: f32,
 	dispersion: f32
 }
 
 impl Material for Refractive {
-	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, _: &mut RandomVariable) -> Reflection {
-		let dot = na::dot(&ray_in.direction, &normal.direction);
-		let eta = if dot < 0.0 {
-			1.0/(self.refractive_index + self.dispersion/frequency)
-		} else {
-			(self.refractive_index + self.dispersion/frequency)
-		};
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection {
+		let perp = na::dot(&ray_in.direction, &normal.direction) * 2.0;
+		let refl_dir = ray_in.direction - (normal.direction * perp);
 
-		let norm = if dot < 0.0 {
-			normal.direction
-		} else {
-			-normal.direction
-		};
+		let ior = self.refractive_index + self.dispersion / frequency;
+		let nl = if na::dot(&normal.direction, &ray_in.direction) < 0.0 {normal.direction} else {-normal.direction};
+		let into = na::dot(&normal.direction, &nl) > 0.0;
+		let nc = 1.0;
+		let nnt = if into {nc / ior} else {ior / nc};
+		let ddn = na::dot(&ray_in.direction, &nl);
+		let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
 
-		let c1 = -na::dot(&ray_in.direction, &norm);
-
-		let cs2 = 1.0 - eta*eta*(1.0 - c1*c1);
-		if cs2 < 0.0 {
+		if cos2t < 0.0 {
 			return Reflection {
-				out: Ray::new(na::zero(), na::zero()),
-				color: 0.0,
-				emission: 0.0,
-				dispersion: false
+				out: Ray::new(normal.origin, refl_dir),
+				color: ~values::Number{value: 1.0} as ~ParametricValue: Send + Freeze,
+				emission: false,
+				dispersion: self.dispersion != 0.0
 			}
 		}
 
-		return Reflection {
-			out: Ray::new(normal.origin, ray_in.direction*eta + norm*(eta*c1 - cs2.sqrt())),
-			color: self.color,
-			emission: 0.0,
-			dispersion: self.dispersion != 0.0
+		let tvec = ray_in.direction * nnt - normal.direction * (if into {1.0} else {-1.0} * (ddn * nnt + cos2t.sqrt()));
+		let tdir = na::normalize(&tvec);
+		let a = ior - 1.0;
+		let b = ior + 1.0;
+		let R0 = (a * a) / (b * b);
+		let c = 1.0 - if into {-ddn} else {na::dot(&tdir, &normal.direction)};
+		let Re = R0 + (1.0 - R0) * c * c * c * c * c;
+		let Tr = 1.0 - Re;
+		let P = 0.25 + 0.5 * Re;
+		let RP = Re / P;
+		let TP = Tr / (1.0 - P);
+
+		if rand_var.next() < P {
+			return Reflection {
+				out: Ray::new(normal.origin, refl_dir),
+				color: values::Number{value: RP}.clone_value(),
+				emission: false,
+				dispersion: self.dispersion != 0.0
+			}
+		} else {
+			return Reflection {
+				out: Ray::new(normal.origin, tdir),
+				color: ~values::Multiply {
+					value_a: self.color.clone_value(),
+					value_b: ~values::Number{value: TP} as ~ParametricValue: Send + Freeze
+				} as ~ParametricValue,
+				emission: false,
+				dispersion: self.dispersion != 0.0
+			}
 		}
 	}
 
 	fn to_owned_material(&self) -> ~Material: Send+Freeze {
 		~Refractive {
-			color: self.color,
+			color: self.color.clone_value(),
 			refractive_index: self.refractive_index,
 			dispersion: self.dispersion
 		} as ~Material: Send+Freeze
@@ -496,16 +508,7 @@ impl Refractive {
 			_ => ~"<Refractive>"
 		};
 
-		let color = match config.find(&~"color") {
-			Some(&json::Number(color)) => color as f32,
-			None => {
-				1.0
-			},
-			_ => {
-				println!("Warning: \"color\" for material \"{}\" must be a number. Default will be used.", label);
-				1.0
-			}
-		};
+		let color = get_value(config, 1.0, ~"color", label);
 
 		let refractive_index = match config.find(&~"ior") {
 			Some(&json::Number(refractive_index)) => refractive_index as f32,

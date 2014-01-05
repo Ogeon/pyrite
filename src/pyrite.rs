@@ -1,7 +1,7 @@
 extern mod png;
 extern mod extra;
 extern mod nalgebra;
-use std::num::min;
+use std::num::{min, max};
 use std::io::{File, io_error, stdio, Reader};
 use std::io::buffered::BufferedReader;
 use std::str::StrSlice;
@@ -9,10 +9,11 @@ use extra::time::precise_time_s;
 use extra::json;
 use nalgebra::na;
 use nalgebra::na::{Vec3, Rot3};
-use core::{Tracer, Camera, Scene, SceneObject, Material};
+use core::{Tracer, Camera, Scene, SceneObject, Material, ParametricValue};
 mod core;
 mod shapes;
 mod materials;
+mod values;
 
 fn main() {
 	let mut render_only = false;
@@ -38,10 +39,11 @@ fn main() {
 
 	if render_only {
 		let tracer = render(project, &project_dir);
+		let response_curves = get_response_curves(project);
 
 		tracer.pixels.access(|&ref mut values| {
 			let (width, height) = tracer.image_size;
-			save_png(project_dir.with_filename("render.png"), values, width, height);
+			save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
 		});
 	} else {
 		let mut stdin = BufferedReader::new(stdio::stdin());
@@ -55,10 +57,11 @@ fn main() {
 					match args {
 						[&"render"] => {
 							let tracer = render(project, &project_dir);
+							let response_curves = get_response_curves(project);
 
 							tracer.pixels.access(|&ref mut values| {
 								let (width, height) = tracer.image_size;
-								save_png(project_dir.with_filename("render.png"), values, width, height);
+								save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
 							});
 						},
 						[&"get"] => {
@@ -92,7 +95,7 @@ fn main() {
 
 fn render(project: &json::Object, path: &Path) -> ~Tracer {
 	let mut tracer = ~build_project(project);
-	tracer.bins = 3;
+	tracer.bins = 40;
 
 	let mut tracers = ~[];
 	std::task::deschedule();
@@ -101,6 +104,8 @@ fn render(project: &json::Object, path: &Path) -> ~Tracer {
 		tracers.push(tracer.spawn());
 		std::task::deschedule();
 	}
+
+	let response_curves = get_response_curves(project);
 
 	let render_started = precise_time_s();
 
@@ -111,10 +116,10 @@ fn render(project: &json::Object, path: &Path) -> ~Tracer {
 			std::io::timer::sleep(500);
 		}
 
-		if last_image_update < precise_time_s() - 5.0 {
+		if last_image_update < precise_time_s() - 60.0 {
 			tracer.pixels.access(|&ref mut values| {
 				let (width, height) = tracer.image_size;
-				save_png(path.with_filename("render.png"), values, width, height);
+				save_png(path.with_filename("render.png"), values, width, height, &response_curves);
 			});
 			last_image_update = precise_time_s();
 		}
@@ -125,13 +130,15 @@ fn render(project: &json::Object, path: &Path) -> ~Tracer {
 
 	tracer
 }
+	
 
-fn save_png(path: Path, values: &~[~[f32]], width: u32, height: u32) {
+fn save_png(path: Path, values: &~[~[f32]], width: u32, height: u32, response: &[~ParametricValue, ..3]) {
+	let min_freq = 400.0;
+	let max_freq = 740.0;
+
 	println!("Saving {}...", path.as_str().unwrap_or("rendered image"));
-	let pixels: ~[~[u8]] = values.iter().map(|ref values| {
-		values.iter().map(|&v| {
-			(min(v, 1.0) * 255.0) as u8
-		}).collect()
+	let pixels: ~[~[u8]] = values.iter().map(|values| {
+		freq_to_rgb((min_freq, max_freq), values, response)
 	}).collect();
 
 	let image = png::Image{
@@ -139,6 +146,55 @@ fn save_png(path: Path, values: &~[~[f32]], width: u32, height: u32) {
 		height: height,
 		color_type: png::RGB8,
 		pixels: pixels.concat_vec()
+	};
+
+	png::store_png(&image, &path);
+}
+
+fn freq_to_rgb(freq_span: (f32, f32), color: &~[f32], response: &[~ParametricValue, ..3]) -> ~[u8] {
+	let (min_freq, max_freq) = freq_span;
+	let freq_diff = max_freq - min_freq;
+	let bin_width = freq_diff / color.len() as f32;
+
+	let (rv, rw) = color.iter().enumerate().fold((0.0, 0.0), |(sum_v, sum_w), (i, v)| {
+		let start = min_freq + i as f32 * bin_width;
+		let end = min_freq + (i + 1) as f32 * bin_width;
+		let w = (max(0.0, response[0].get(0.0, 0.0, start)) + max(0.0, response[0].get(0.0, 0.0, end))) / 2.0;
+		(v * w + sum_v, w + sum_w)
+	});
+
+	let r = min( 1.0, (if rw > 0.0 {rv / rw} else {0.0})) * 255.0;
+
+	let (gv, gw) = color.iter().enumerate().fold((0.0, 0.0), |(sum_v, sum_w), (i, v)| {
+		let start = min_freq + i as f32 * bin_width;
+		let end = min_freq + (i + 1) as f32 * bin_width;
+		let w = (max(0.0, response[1].get(0.0, 0.0, start)) + max(0.0, response[1].get(0.0, 0.0, end))) / 2.0;
+		(v * w + sum_v, w + sum_w)
+	});
+
+	let g = min( 1.0, (if gw > 0.0 {gv / gw} else {0.0})) * 255.0;
+
+	let (bv, bw) = color.iter().enumerate().fold((0.0, 0.0), |(sum_v, sum_w), (i, v)| {
+		let start = min_freq + i as f32 * bin_width;
+		let end = min_freq + (i + 1) as f32 * bin_width;
+		let w = (max(0.0, response[2].get(0.0, 0.0, start)) + max(0.0, response[2].get(0.0, 0.0, end))) / 2.0;
+		(v * w + sum_v, w + sum_w)
+	});
+
+	let b = min( 1.0, (if bw > 0.0 {bv / bw} else {0.0})) * 255.0;
+
+	~[r as u8, g as u8, b as u8]
+}
+	
+
+fn save_png_u8(path: Path, pixels: ~[u8], width: u32, height: u32) {
+	println!("Saving PNG...");
+
+	let image = png::Image{
+		width: width,
+		height: height,
+		color_type: png::RGB8,
+		pixels: pixels
 	};
 
 	png::store_png(&image, &path);
@@ -206,6 +262,46 @@ fn build_project(project: &json::Object) -> Tracer {
 	tracer.set_scene(scene_from_json(project));
 
 	tracer
+}
+
+fn get_response_curves(project: &json::Object) -> [~ParametricValue, ..3] {
+	match project.find(&~"response") {
+		Some(&json::Object(ref curves)) => {
+			let r = match curves.find(&~"red") {
+				Some(red_response) => {
+					match values::from_json(red_response) {
+						Some(value) => value,
+						None => ~values::Number{value: 1.0} as ~ParametricValue
+					}
+				},
+				None => ~values::Number{value: 1.0} as ~ParametricValue
+			};
+			let g = match curves.find(&~"green") {
+				Some(green_response) => {
+					match values::from_json(green_response) {
+						Some(value) => value,
+						None => ~values::Number{value: 1.0} as ~ParametricValue
+					}
+				},
+				None => ~values::Number{value: 1.0} as ~ParametricValue
+			};
+			let b = match curves.find(&~"blue") {
+				Some(blue_response) => {
+					match values::from_json(blue_response) {
+						Some(value) => value,
+						None => ~values::Number{value: 1.0} as ~ParametricValue
+					}
+				},
+				None => ~values::Number{value: 1.0} as ~ParametricValue
+			};
+			[r, g, b]
+		},
+		_ => [
+			~values::Number{value: 1.0} as ~ParametricValue,
+			~values::Number{value: 1.0} as ~ParametricValue,
+			~values::Number{value: 1.0} as ~ParametricValue
+		]
+	}
 }
 
 fn tracer_from_json(config: &~json::Object, tracer: &mut Tracer) {
@@ -354,7 +450,7 @@ fn camera_from_json(config: &json::Object) -> Camera {
 
 fn objects_from_json(config: &json::Object) -> ~[~SceneObject: Send+Freeze] {
 	let default_material = ~materials::Diffuse{
-		color: 0.8
+		color: ~values::Number{value: 0.0} as ~ParametricValue: Send+Freeze
 	} as ~Material: Send+Freeze;
 
 	let materials = match config.find(&~"materials") {

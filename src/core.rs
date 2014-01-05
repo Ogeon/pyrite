@@ -2,16 +2,16 @@ extern mod std;
 use std::rand::{XorShiftRng, Rng};
 use std::num::{exp, ln, min, max, sqrt};
 use std::{task, fmt, vec};
-use std::comm::stream;
+use std::comm::Chan;
 use std::iter::range;
+use std::cmp::Ordering;
 use extra::arc::{MutexArc, Arc};
-use extra::sort::merge_sort;
 use nalgebra::na::{Vec3, Rot3, Rotate};
 use nalgebra::na;
 
 //Random variable
 
-struct RandomVariable {
+pub struct RandomVariable {
 	values: ~[f32],
 	pos: uint,
 	random: XorShiftRng
@@ -93,13 +93,13 @@ impl fmt::Default for Sample {
 }
 
 //Sampler
-trait Sampler {
+pub trait Sampler {
 	fn random_variable<T: Rng>(random: &mut T) -> RandomVariable;
 	fn sample(traced: Sample) -> Sample;
 }
 
 //Tracer
-struct Tracer {
+pub struct Tracer {
 	samples: u32,
 	active_tasks: ~MutexArc<~u16>,
 	scene: ~Arc<Scene>,
@@ -107,7 +107,8 @@ struct Tracer {
 	tile_size: (u32, u32),
 	tiles: ~MutexArc<~[Tile]>,
 	bins: uint,
-	pixels: ~MutexArc<~[~[f32]]>
+	pixels: ~MutexArc<~[~[f32]]>,
+	freq_span: (f32, f32)
 }
 
 impl Tracer {
@@ -123,7 +124,8 @@ impl Tracer {
 			tile_size: (64, 64),
 			tiles: ~MutexArc::new(~[]),
 			bins: 3,
-			pixels: ~MutexArc::new(vec::from_elem(512 * 512, vec::from_elem(3, 0.0f32)))
+			pixels: ~MutexArc::new(vec::from_elem(512 * 512, vec::from_elem(3, 0.0f32))),
+			freq_span: (400.0, 740.0)
 		}
 	}
 
@@ -134,7 +136,7 @@ impl Tracer {
 			self.pixels = ~MutexArc::new(vec::from_elem((image_w * image_h) as uint, vec::from_elem(self.bins, 0.0f32)));
 		}
 
-		let (command_port, command_chan) = stream::<TracerCommands>();
+		let (command_port, command_chan) = Chan::<TracerCommands>::new();
 		let data = TracerData{
 			command_port: command_port,
 			tiles: self.tiles.clone(),//generate_tiles(self.image_size, self.tile_size),
@@ -143,8 +145,8 @@ impl Tracer {
 			scene: self.scene.clone(),
 			bins: self.bins,
 			image_size: self.image_size,
-			pixels: self.pixels.clone()
-			//sampler: sampler
+			pixels: self.pixels.clone(),
+			freq_span: self.freq_span
 		};
 
 		let task_number = self.active_tasks.access(|&ref mut num| {
@@ -175,8 +177,9 @@ impl Tracer {
 
 		let mut running = true;
 		let mut rand_var = RandomVariable::new(XorShiftRng::new());
-		//let id: u16 = data.random.gen();
 		let (image_w, _) = data.image_size;
+		let (min_freq, max_freq) = data.freq_span;
+		let freq_diff = max_freq - min_freq;
 
 		while running {
 			let maybe_tile = data.tiles.access(Tracer::get_tile);
@@ -185,7 +188,6 @@ impl Tracer {
 				Some(tile) => {
 					let (pix_x, pix_y, pix_w, pix_h) = tile.screen;
 					let (cam_x, cam_y, pixel_size) = tile.world;
-					//let mut results = vec::with_capacity((pix_w*pix_h) as uint);
 					
 					for x in range(0, pix_w) {
 						let tile_column: ~[~[f32]] = range(0, pix_h).map(|y| {
@@ -196,7 +198,7 @@ impl Tracer {
 
 							while running && samples > 0 {
 								rand_var.clear();
-								let frequency = rand_var.next();
+								let frequency = min_freq + rand_var.next() * freq_diff;
 								let sample_x = cam_x + (x as f32 - 0.5 + rand_var.next()) * pixel_size;
 								let sample_y = cam_y + (y as f32 - 0.5 + rand_var.next()) * pixel_size;
 								let mut ray = data.scene.get().camera.ray_to(sample_x, sample_y, &mut rand_var);
@@ -207,44 +209,66 @@ impl Tracer {
 								for _ in range(0, 10) {
 									match Tracer::trace(ray, frequency, data.scene.get(), &mut rand_var) {
 										Some(reflection) => {
+											let emission = reflection.emission;
 											ray = reflection.out;
 											dispersion = dispersion || reflection.dispersion;
 											bounces.push(reflection);
-											if(reflection.color == 0.0) {
+
+											if(emission) {
 												break;
 											}
 										},
 										None => {
-											bounces.push(Reflection {
+											//TODO: Background color
+											/*bounces.push(Reflection {
 												out: ray,
 												color: 0.0,
-												emission: 0.0,//frequency * 0.5 + 0.5 //TODO: Background color
+												emission: true, 
 												dispersion: false
-											});
+											});*/
 											break;
 										}
 									};
 								}
 
-								if dispersion {
-									let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
-										incoming * reflection.color + reflection.emission
-									});
-
-									let bin = min(((1.0-frequency) * data.bins as f32).floor() as uint, data.bins-1);
-									values[bin] += value;
-									weights[bin] += 1.0;
-								} else {
-									for bin in range(0, data.bins) {
-										//TODO: Use frequency to calculate pixel value
-										//TODO: Only change first value in rand_var
-										//let frequency = (bin as f32 + rand_var.next()) / data.bins as f32
-										let value = bounces.iter().invert().fold(0.0, |incoming, &reflection| {
-											incoming * reflection.color + reflection.emission
+								if bounces.len() > 0 && bounces.last().emission {
+									if dispersion {
+										let value = bounces.iter().invert().fold(0.0, |incoming, ref reflection| {
+											if reflection.emission {
+												max(0.0, reflection.color.get(0.0, 0.0, frequency))
+											} else {
+												incoming * max(0.0, min(1.0, reflection.color.get(0.0, 0.0, frequency)))
+											}
 										});
 
+										let bin = min(((frequency - min_freq) / freq_diff * data.bins as f32).floor() as uint, data.bins-1);
 										values[bin] += value;
 										weights[bin] += 1.0;
+									} else {
+										for bin in range(0, data.bins) {
+											//TODO: Only change first value in rand_var
+											let frequency = min_freq + freq_diff * (bin as f32 + rand_var.next()) / data.bins as f32;
+
+											let value = bounces.iter().invert().fold(0.0, |incoming, ref reflection| {
+												if reflection.emission {
+													max(0.0, reflection.color.get(0.0, 0.0, frequency))
+												} else {
+													incoming * max(0.0, min(1.0, reflection.color.get(0.0, 0.0, frequency)))
+												}
+											});
+
+											values[bin] += value;
+											weights[bin] += 1.0;
+										}
+									}
+								} else {
+									if dispersion {
+										let bin = min(((frequency - min_freq) / freq_diff * data.bins as f32).floor() as uint, data.bins-1);
+										weights[bin] += 1.0;
+									} else {
+										for bin in range(0, data.bins) {
+											weights[bin] += 1.0;
+										}
 									}
 								}
 						
@@ -272,11 +296,10 @@ impl Tracer {
 				None => {running = false;}
 			};
 
-			if data.command_port.peek() {
-				match data.command_port.recv() {
-					Stop => running = false
-				}
-			}
+			match data.command_port.try_recv() {
+				Some(Stop) => running = false,
+				_=>{}
+			};
 		}
 
 		data.task_counter.access(|&ref mut num| {
@@ -294,32 +317,18 @@ impl Tracer {
 	}
 
 	fn trace(ray: Ray, frequency: f32, scene: &Scene, rand_var: &mut RandomVariable) -> Option<Reflection> {
-		let mut hits = ~[];
-
-		//Find possible hits
-		for object in scene.objects.iter() {
-			match object.get_proximity(ray) {
-				Some(d) => hits.push((object, d)),
-				None => {}
-			};
-		}
-
-
 		let mut closest_dist = std::f32::INFINITY;
 		let mut closest_hit = None;
 
-		//Find closest hit
-		for &(ref object, d) in hits.iter() {
-			if d < closest_dist {
-				match object.intersect(ray) {
-					Some((hit, dist)) => {
-						if(dist < closest_dist && dist > 0.001) {
-							closest_dist = dist;
-							closest_hit = Some((object, Ray::new(hit.origin, hit.direction)));
-						}
-					},
-					None => {}
-				}
+		for object in scene.objects.iter() {
+			match object.intersect(ray) {
+				Some((hit, dist)) => {
+					if(dist < closest_dist && dist > 0.001) {
+						closest_dist = dist;
+						closest_hit = Some((object, Ray::new(hit.origin, hit.direction)));
+					}
+				},
+				None => {}
 			}
 		}
 
@@ -355,16 +364,16 @@ struct TracerData {
 	scene: ~Arc<Scene>,
 	bins: uint,
 	image_size: (u32, u32),
-	pixels: ~MutexArc<~[~[f32]]>
-	//sampler: S
+	pixels: ~MutexArc<~[~[f32]]>,
+	freq_span: (f32, f32)
 }
 
 
 //Reflection
 pub struct Reflection {
     out: Ray,
-    color: f32,
-    emission: f32,
+    color: ~ParametricValue,
+    emission: bool,
     dispersion: bool
 }
 
@@ -411,15 +420,20 @@ pub fn generate_tiles(image_size: (u32, u32), tile_size: (u32, u32)) -> ~[Tile] 
 		y+= tile_h;
 	}
 
-	merge_sort(tiles, |&a, &b| {
+	tiles.sort_by(|&a, &b| {
 		let (a_x, a_y, _) = a.world;
 		let (b_x, b_y, _) = b.world;
-		(a_x * a_x + a_y * a_y) <= (b_x * b_x + b_y * b_y)
-	})
+		let a_dist = a_x * a_x + a_y * a_y;
+		let b_dist = b_x * b_x + b_y * b_y;
+		if a_dist < b_dist { Less }
+		else if a_dist > b_dist { Greater }
+		else { Equal }
+	});
+	tiles
 }
 
 //Ray
-struct Ray {
+pub struct Ray {
     origin: Vec3<f32>,
     direction: Vec3<f32>
 }
@@ -504,4 +518,10 @@ pub struct Scene {
 pub trait Material {
 	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection;
 	fn to_owned_material(&self) -> ~Material: Send+Freeze;
+}
+
+//Parametric value
+pub trait ParametricValue {
+	fn get(&self, x: f32, y: f32, i: f32) -> f32;
+	fn clone_value(&self) -> ~ParametricValue: Send+Freeze;
 }
