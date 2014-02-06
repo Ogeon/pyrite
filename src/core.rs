@@ -308,7 +308,7 @@ impl Tracer {
 	}
 
 	fn get_tile(tiles: &mut ~[Tile]) -> Option<Tile> {
-		println!("{} tiles left", tiles.len()-1);
+		println!("{} tiles left", tiles.len());
 		tiles.shift()
 	}
 
