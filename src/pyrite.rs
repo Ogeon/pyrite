@@ -346,9 +346,11 @@ fn tracer_from_json(config: &~json::Object, tracer: &mut Tracer) {
 }
 
 fn scene_from_json(config: &json::Object) -> Scene {
+	let materials = materials_from_json(config);
 	Scene {
 		camera: camera_from_json(config),
-		objects: objects_from_json(config)
+		objects: objects_from_json(config, materials.len() - 1),
+		materials: materials
 	}
 }
 
@@ -448,12 +450,12 @@ fn camera_from_json(config: &json::Object) -> Camera {
 	camera
 }
 
-fn objects_from_json(config: &json::Object) -> ~[~SceneObject: Send+Freeze] {
+fn materials_from_json(config: &json::Object) -> ~[~Material: Send+Freeze] {
 	let default_material = ~materials::Diffuse{
 		color: ~values::Number{value: 0.0} as ~ParametricValue: Send+Freeze
 	} as ~Material: Send+Freeze;
 
-	let materials = match config.find(&~"materials") {
+	let mut materials = match config.find(&~"materials") {
 		Some(&json::List(ref materials)) => {
 			materials.iter().filter_map(|o| {
 				match o {
@@ -463,16 +465,22 @@ fn objects_from_json(config: &json::Object) -> ~[~SceneObject: Send+Freeze] {
 					_ => None
 				}
 			}).collect()
+			
 		},
 		_ => ~[]
 	};
 
+	materials.push(default_material);
+	return materials;
+}
+
+fn objects_from_json(config: &json::Object, material_count: uint) -> ~[~SceneObject: Send+Freeze] {
 	match config.find(&~"objects") {
 		Some(&json::List(ref objects)) => {
 			objects.iter().filter_map(|o| {
 				match o {
 					&json::Object(ref object) => {
-						shapes::from_json(object, materials, default_material)
+						shapes::from_json(object, material_count)
 					},
 					_ => None
 				}

@@ -1,13 +1,13 @@
 use extra::json;
 use nalgebra::na;
 use nalgebra::na::Vec3;
-use core::{SceneObject, Ray, Material, RandomVariable, Reflection};
+use core::{SceneObject, Ray};
 
-pub fn from_json(config: &~json::Object, materials: &[~Material: Send + Freeze], default_material: &Material: Send + Freeze) -> Option<~SceneObject: Send+Freeze> {
+pub fn from_json(config: &~json::Object, material_count: uint) -> Option<~SceneObject: Send+Freeze> {
 	match config.find(&~"type") {
 
 		Some(&json::String(~"Sphere")) => {
-			Some(Sphere::from_json(config, materials, default_material))
+			Some(Sphere::from_json(config, material_count))
 		},
 
 		Some(&json::String(ref something)) => {
@@ -118,11 +118,11 @@ struct Sphere {
 	position: Vec3<f32>,
 	radius: f32,
 	bounds: BoundingBox,
-	material: ~Material: Send + Freeze
+	material: uint
 }
 
 impl Sphere {
-	pub fn new(position: Vec3<f32>, radius: f32, material: ~Material: Send+Freeze) -> Sphere {
+	pub fn new(position: Vec3<f32>, radius: f32, material: uint) -> Sphere {
 		Sphere {
 			position: position,
 			radius: radius,
@@ -134,7 +134,7 @@ impl Sphere {
 		}
 	}
 
-	pub fn from_json(config: &~json::Object, materials: &[~Material: Send + Freeze], default_material: &Material: Send + Freeze) -> ~SceneObject: Send+Freeze {
+	pub fn from_json(config: &~json::Object, material_count: uint) -> ~SceneObject: Send+Freeze {
 		let label = match config.find(&~"label") {
 			Some(&json::String(ref label)) => label.to_owned(),
 			_ => ~"<Sphere>"
@@ -190,16 +190,16 @@ impl Sphere {
 		let material = match config.find(&~"material") {
 			Some(&json::Number(i)) => {
 				let index = i as uint;
-				if index < materials.len() {
-					materials[index].to_owned_material()
+				if index < material_count {
+					index
 				} else {
 					println!("Warning: Unknown material for object \"{}\". Default will be used.", label);
-					default_material.to_owned_material()
+					material_count
 				}
 			},
 			_ => {
 				println!("Warning: \"material\" for object \"{}\" is not set. Default will be used.", label);
-				default_material.to_owned_material()
+				material_count
 			}
 		};
 
@@ -208,8 +208,8 @@ impl Sphere {
 }
 
 impl SceneObject for Sphere {
-	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection {
-		self.material.get_reflection(normal, ray_in, frequency, rand_var)
+	fn get_material_index(&self, normal: Ray, ray_in: Ray) -> uint {
+		self.material
 	}
 
 	fn get_proximity(&self, ray: Ray) -> Option<f32> {

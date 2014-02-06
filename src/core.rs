@@ -117,7 +117,8 @@ impl Tracer {
 			active_tasks: ~MutexArc::new(~0),
 			scene: ~Arc::new(Scene{
 				camera: Camera::new(na::zero(), na::zero()),
-				objects: ~[]
+				objects: ~[],
+				materials: ~[]
 			}),
 			image_size: (512, 512),
 			tile_size: (64, 64),
@@ -330,7 +331,8 @@ impl Tracer {
 		match closest_hit {
 			Some((object, hit)) => {
 				//Use object material to get emission, color and reflected ray
-				Some(object.get_reflection(hit, ray, frequency, rand_var))
+				let material = &scene.materials[object.get_material_index(hit, ray)];
+				Some(material.get_reflection(hit, ray, frequency, rand_var))
 			},
 			None => None
 		}
@@ -446,7 +448,7 @@ impl Ray {
 
 //Scene Object
 pub trait SceneObject: Send+Freeze {
-	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection;
+	fn get_material_index(&self, normal: Ray, ray_in: Ray) -> uint;
 	fn get_proximity(&self, ray: Ray) -> Option<f32>;
 	fn intersect(&self, ray: Ray) -> Option<(Ray, f32)>;
 }
@@ -506,7 +508,8 @@ impl Camera {
 //Scene
 pub struct Scene {
 	camera: Camera,
-	objects: ~[~SceneObject: Send + Freeze]
+	objects: ~[~SceneObject: Send + Freeze],
+	materials: ~[~Material: Send + Freeze]
 }
 
 //Material
