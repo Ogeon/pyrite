@@ -81,7 +81,7 @@ impl BoundingBox {
 
 		unsafe {
 			for i in range(0 as uint, 3) {
-				if(witch_plane != i) {
+				if witch_plane != i {
 					coord.set_fast(i, origin.at_fast(i) + max_t[witch_plane] * dir.at_fast(i));
 					if coord.at_fast(i) < self.from.at_fast(i) || coord.at_fast(i) > self.to.at_fast(i) {
 						return None;
@@ -142,7 +142,7 @@ impl Sphere {
 
 		let position = match config.find(&~"position") {
 			Some(&json::List(ref position)) => {
-				if(position.len() == 3) {
+				if position.len() == 3 {
 					let mut new_position: Vec3<f32> = na::zero();
 					match position[0] {
 						json::Number(x) => {

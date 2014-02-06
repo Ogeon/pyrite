@@ -3,7 +3,7 @@ extern mod extra;
 extern mod nalgebra;
 use std::num::{min, max};
 use std::io::{File, io_error, stdio, Reader};
-use std::io::buffered::BufferedReader;
+use std::io::BufferedReader;
 use std::str::StrSlice;
 use extra::time::precise_time_s;
 use extra::json;
@@ -112,7 +112,7 @@ fn render(project: &json::Object, path: &Path) -> ~Tracer {
 	let mut last_image_update = precise_time_s();
 	while !tracer.done() {
 		//Don't be too eager!
-		if(!tracer.done()) {
+		if !tracer.done() {
 			std::io::timer::sleep(500);
 		}
 
@@ -359,7 +359,7 @@ fn camera_from_json(config: &json::Object) -> Camera {
 		Some(&json::Object(ref camera_cfg)) => {
 			match camera_cfg.find(&~"position") {
 				Some(&json::List(ref position)) => {
-					if(position.len() == 3) {
+					if position.len() == 3 {
 						match position[0] {
 							json::Number(x) => {
 								camera.position.x = x as f32;
@@ -391,7 +391,7 @@ fn camera_from_json(config: &json::Object) -> Camera {
 				Some(&json::List(ref rotation)) => {
 					let mut new_rotation: Vec3<f32> = na::zero();
 
-					if(rotation.len() == 3) {
+					if rotation.len() == 3 {
 						match rotation[0] {
 							json::Number(x) => {
 								new_rotation.x = x as f32;

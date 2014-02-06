@@ -187,7 +187,7 @@ impl ParametricValue for Curve {
 			y
 		} else {
 			let (min_x, min_y) = self.points[0];
-			let &(max_x, max_y) = self.points.last();
+			let &(max_x, max_y) = self.points.last().unwrap();
 
 			if i < min_x {
 				min_y
@@ -244,7 +244,7 @@ impl Curve {
 			u[i] = (6.0 * q / (x_next - x_prev) - sig * u[i-1]) / p;
 		}
 
-		for i in range(0, points.len() - 1).invert() {
+		for i in range(0, points.len() - 1).rev() {
 			y2[i] = y2[i] * y2[i+1] + u[i];
 		}
 

@@ -2,9 +2,8 @@ extern mod std;
 use std::rand::{XorShiftRng, Rng};
 use std::num::{exp, ln, min, max, sqrt};
 use std::{task, fmt, vec};
-use std::comm::Chan;
+use std::comm::{Chan, Data};
 use std::iter::range;
-use std::cmp::Ordering;
 use extra::arc::{MutexArc, Arc};
 use nalgebra::na::{Vec3, Rot3, Rotate};
 use nalgebra::na;
@@ -214,7 +213,7 @@ impl Tracer {
 											dispersion = dispersion || reflection.dispersion;
 											bounces.push(reflection);
 
-											if(emission) {
+											if emission {
 												break;
 											}
 										},
@@ -231,9 +230,9 @@ impl Tracer {
 									};
 								}
 
-								if bounces.len() > 0 && bounces.last().emission {
+								if bounces.len() > 0 && bounces.last().unwrap().emission {
 									if dispersion {
-										let value = bounces.iter().invert().fold(0.0, |incoming, ref reflection| {
+										let value = bounces.iter().rev().fold(0.0, |incoming, ref reflection| {
 											if reflection.emission {
 												max(0.0, reflection.color.get(0.0, 0.0, frequency))
 											} else {
@@ -249,7 +248,7 @@ impl Tracer {
 											//TODO: Only change first value in rand_var
 											let frequency = min_freq + freq_diff * (bin as f32 + rand_var.next()) / data.bins as f32;
 
-											let value = bounces.iter().invert().fold(0.0, |incoming, ref reflection| {
+											let value = bounces.iter().rev().fold(0.0, |incoming, ref reflection| {
 												if reflection.emission {
 													max(0.0, reflection.color.get(0.0, 0.0, frequency))
 												} else {
@@ -276,7 +275,7 @@ impl Tracer {
 							}
 
 							values.iter().zip(weights.iter()).map(|(&v, &w)| {
-								if(w == 0.0) {
+								if w == 0.0 {
 									0.0
 								} else {
 									v/w
@@ -297,7 +296,7 @@ impl Tracer {
 			};
 
 			match data.command_port.try_recv() {
-				Some(Stop) => running = false,
+				Data(Stop) => running = false,
 				_=>{}
 			};
 		}
@@ -308,12 +307,8 @@ impl Tracer {
 	}
 
 	fn get_tile(tiles: &mut ~[Tile]) -> Option<Tile> {
-		if(tiles.len() > 0) {
-			println!("{} tiles left", tiles.len()-1);
-			Some(tiles.shift())
-		} else {
-			None
-		}
+		println!("{} tiles left", tiles.len()-1);
+		tiles.shift()
 	}
 
 	fn trace(ray: Ray, frequency: f32, scene: &Scene, rand_var: &mut RandomVariable) -> Option<Reflection> {
@@ -323,7 +318,7 @@ impl Tracer {
 		for object in scene.objects.iter() {
 			match object.intersect(ray) {
 				Some((hit, dist)) => {
-					if(dist < closest_dist && dist > 0.001) {
+					if dist < closest_dist && dist > 0.001 {
 						closest_dist = dist;
 						closest_hit = Some((object, Ray::new(hit.origin, hit.direction)));
 					}
