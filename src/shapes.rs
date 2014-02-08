@@ -11,6 +11,10 @@ pub fn from_json(config: &~json::Object, material_count: uint) -> Option<~SceneO
 			Some(Sphere::from_json(config, material_count))
 		},
 
+		Some(&json::String(~"Triangle")) => {
+			Some(Triangle::from_json(config, material_count))
+		},
+
 		Some(&json::String(ref something)) => {
 			println!("Error: Unknown object type \"{}\".", something.to_owned());
 			None
@@ -247,6 +251,77 @@ impl SceneObject for Sphere {
 			let dist = -a1;
 			let hit_position = ray.origin + (ray.direction * dist);
 			return Some((Ray::new(hit_position, hit_position - self.position), dist));
+		}
+	}
+}
+
+
+//Triangle
+struct Triangle {
+	v1: Vec3<f32>,
+	v2: Vec3<f32>,
+	v3: Vec3<f32>,
+	material: uint
+}
+
+impl Triangle {
+	fn from_json(config: &~json::Object, material_count: uint) -> ~SceneObject: Send+Freeze {
+		let label = match config.find(&~"label") {
+			Some(&json::String(ref label)) => label.to_owned(),
+			_ => ~"<Triangle>"
+		};
+
+		let v1 = parse_vector(config, ~"v1", label);
+		let v2 = parse_vector(config, ~"v2", label);
+		let v3 = parse_vector(config, ~"v3", label);
+
+		let material = parse_material_inidex(config, material_count, label);
+
+		~Triangle{v1: v1, v2: v2, v3: v3, material: material} as ~SceneObject: Send+Freeze
+	}
+}
+
+impl SceneObject for Triangle {
+	fn get_material_index(&self, _: Ray, _: Ray) -> uint {
+		self.material
+	}
+
+	//Möller–Trumbore intersection algorithm
+	fn intersect(&self, ray: Ray) -> Option<(Ray, f32)> {
+		let epsilon = 0.000001f32;
+		let e1 = self.v2 - self.v1;
+		let e2 = self.v3 - self.v1;
+
+		let p = na::cross(&ray.direction, &e2);
+		let det = na::dot(&e1, &p);
+
+		if det > -epsilon && det < epsilon {
+			return None;
+		}
+
+		let inv_det = 1.0 / det;
+		let t = ray.origin - self.v1;
+		let u = na::dot(&t, &p) * inv_det;
+
+		//Outside triangle
+		if u < 0.0 || u > 1.0 {
+			return None;
+		}
+
+		let q = na::cross(&t, &e1);
+		let v = na::dot(&ray.direction, &q) * inv_det;
+
+		//Outside triangle
+		if(v < 0.0 || u + v > 1.0) {
+			return None;
+		}
+
+		let dist = na::dot(&e2, &q) * inv_det;
+		if dist > epsilon {
+			let hit_position = ray.origin + (ray.direction * dist);
+			Some((Ray::new(hit_position, na::cross(&e1, &e2)), dist))
+		} else {
+			None
 		}
 	}
 }
