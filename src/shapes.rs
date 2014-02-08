@@ -117,7 +117,6 @@ impl Eq for Quadrant {
 struct Sphere {
 	position: Vec3<f32>,
 	radius: f32,
-	bounds: BoundingBox,
 	material: uint
 }
 
@@ -126,10 +125,6 @@ impl Sphere {
 		Sphere {
 			position: position,
 			radius: radius,
-			bounds: BoundingBox {
-				from: Vec3::new(-radius, -radius, -radius) + position,
-				to: Vec3::new(radius, radius, radius) + position
-			},
 			material: material
 		}
 	}
@@ -210,10 +205,6 @@ impl Sphere {
 impl SceneObject for Sphere {
 	fn get_material_index(&self, normal: Ray, ray_in: Ray) -> uint {
 		self.material
-	}
-
-	fn get_proximity(&self, ray: Ray) -> Option<f32> {
-		self.bounds.intersect(ray)
 	}
 
 	fn intersect(&self, ray: Ray) -> Option<(Ray, f32)> {

@@ -449,7 +449,6 @@ impl Ray {
 //Scene Object
 pub trait SceneObject: Send+Freeze {
 	fn get_material_index(&self, normal: Ray, ray_in: Ray) -> uint;
-	fn get_proximity(&self, ray: Ray) -> Option<f32>;
 	fn intersect(&self, ray: Ray) -> Option<(Ray, f32)>;
 }
 
