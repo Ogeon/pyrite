@@ -488,9 +488,9 @@ impl Camera {
 
 	fn ray_to(&self, x: f32, y: f32, rand_var: &mut RandomVariable) -> Ray {
 		if self.aperture == 0.0 {
-			Ray::new(self.position, self.rotation.rotate(&Vec3::new(x, y, self.lens)))
+			Ray::new(self.position, self.rotation.rotate(&Vec3::new(x, -y, -self.lens)))
 		} else {
-			let base_dir = Vec3::new(x / self.lens, y / self.lens, 1.0);
+			let base_dir = Vec3::new(x / self.lens, -y / self.lens, -1.0);
 			let focal_point = base_dir * self.focal_distance;
 
 			let sqrt_r = sqrt(rand_var.next() * self.aperture);

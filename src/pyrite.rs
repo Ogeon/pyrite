@@ -5,6 +5,7 @@ use std::num::{min, max};
 use std::io::{File, io_error, stdio, Reader};
 use std::io::BufferedReader;
 use std::str::StrSlice;
+use std::f64::consts::PI;
 use extra::time::precise_time_s;
 use extra::json;
 use nalgebra::na;
@@ -396,21 +397,21 @@ fn camera_from_json(config: &json::Object) -> Camera {
 					if rotation.len() == 3 {
 						match rotation[0] {
 							json::Number(x) => {
-								new_rotation.x = x as f32;
+								new_rotation.x = (x * PI / 180.0) as f32;
 							},
 							_ => println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.")
 						}
 
 						match rotation[1] {
 							json::Number(y) => {
-								new_rotation.y = y as f32;
+								new_rotation.y = (y * PI / 180.0) as f32;
 							},
 							_ => println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.")
 						}
 
 						match rotation[2] {
 							json::Number(z) => {
-								new_rotation.z = z as f32;
+								new_rotation.z = (z * PI / 180.0) as f32;
 							},
 							_ => println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.")
 						}

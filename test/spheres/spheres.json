@@ -2,7 +2,7 @@
 	"camera": {
 		"label": "main",
 		"position": [0, -1, 0],
-		"rotation": [0, 0, 0]
+		"rotation": [180, 0, 0]
 	},
 
 	"materials": [
@@ -90,7 +90,7 @@
 		"camera": 0,
 		"width": 512,
 		"height": 256,
-		"samples": 8000,
+		"samples": 500,
 		"tile_width": 32,
 		"tile_height": 32
 	},

@@ -187,104 +187,104 @@
 			"label": "lamp",
 			"type": "Sphere",
 			"radius": 4,
-			"position": [0, 0, -8],
+			"position": [0, 0, 8],
 			"material": 0
 		},
 		{
 			"label": "floor",
 			"type": "Sphere",
 			"radius": 200,
-			"position": [0, 0, 200],
+			"position": [0, 0, -200],
 			"material": 1
 		},
 		{
 			"label": "400nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [10, 0, -1],
+			"position": [10, 0, 1],
 			"material": 2
 		},
 		{
 			"label": "430nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [8.66, 5, -1],
+			"position": [8.66, 5, 1],
 			"material": 3
 		},
 		{
 			"label": "461nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [5, 8.66, -1],
+			"position": [5, 8.66, 1],
 			"material": 4
 		},
 		{
 			"label": "492nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [0, 10, -1],
+			"position": [0, 10, 1],
 			"material": 5
 		},
 		{
 			"label": "623nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-5, 8.66, -1],
+			"position": [-5, 8.66, 1],
 			"material": 6
 		},
 		{
 			"label": "654nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-8.66, 5, -1],
+			"position": [-8.66, 5, 1],
 			"material": 7
 		},
 		{
 			"label": "585nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-10, 0, -1],
+			"position": [-10, 0, 1],
 			"material": 8
 		},
 		{
 			"label": "616nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-8.66, -5, -1],
+			"position": [-8.66, -5, 1],
 			"material": 9
 		},
 		{
 			"label": "647nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [-5, -8.66, -1],
+			"position": [-5, -8.66, 1],
 			"material": 10
 		},
 		{
 			"label": "678nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [0, -10, -1],
+			"position": [0, -10, 1],
 			"material": 11
 		},
 		{
 			"label": "709nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [5, -8.66, -1],
+			"position": [5, -8.66, 1],
 			"material": 11
 		},
 		{
 			"label": "740nm",
 			"type": "Sphere",
 			"radius": 1,
-			"position": [8.66, -5, -1],
+			"position": [8.66, -5, 1],
 			"material": 11
 		}
 	],
 
 	"camera": {
-		"position": [0, 0, -30]
+		"position": [0, 0, 30]
 	},
 
 	"render": {
