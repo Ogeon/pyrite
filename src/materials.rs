@@ -66,7 +66,7 @@ pub struct Diffuse {
 }
 
 impl Material for Diffuse {
-	fn get_reflection(&self, normal: Ray, _: Ray, _: f32, rand_var: &mut RandomVariable) -> Reflection {
+	fn get_reflection(&self, normal: Ray, ray_in: Ray, _: f32, rand_var: &mut RandomVariable) -> Reflection {
 		let u = rand_var.next();
 		let v = rand_var.next();
 		let theta = 2.0 * std::f32::consts::PI * u;
@@ -77,13 +77,19 @@ impl Material for Diffuse {
 			phi.cos().abs()
 			);
 
+		let n = if na::dot(&ray_in.direction, &normal.direction) < 0.0 {
+			normal.direction
+		} else {
+			-normal.direction
+		};
+
 		let mut bases = vec::with_capacity(3);
 
-		na::orthonormal_subspace_basis(&normal.direction, |base| {
+		na::orthonormal_subspace_basis(&n, |base| {
 			bases.push(base);
 			true
 		});
-		bases.push(normal.direction);
+		bases.push(n);
 
 		let mut reflection: Vec3<f32> = na::zero();
 
