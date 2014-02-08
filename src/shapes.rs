@@ -2,6 +2,7 @@ use extra::json;
 use nalgebra::na;
 use nalgebra::na::Vec3;
 use core::{SceneObject, Ray};
+use std::num::{FromPrimitive, Zero, from_f64};
 
 pub fn from_json(config: &~json::Object, material_count: uint) -> Option<~SceneObject: Send+Freeze> {
 	match config.find(&~"type") {
@@ -19,6 +20,63 @@ pub fn from_json(config: &~json::Object, material_count: uint) -> Option<~SceneO
 	}
 }
 
+
+fn parse_vector<T: FromPrimitive+Zero>(config:&~json::Object, key: ~str, label: &str) -> Vec3<T> {
+	match config.find(&key) {
+		Some(&json::List(ref values)) => {
+			if values.len() == 3 {
+				let mut vector: Vec3<T> = na::zero();
+
+				match values[0] {
+					json::Number(x) => {
+						vector.x = from_f64(x).unwrap();
+					},
+					_ => println!("Warning: \"{}\" for object \"{}\" must be a list of 3 numbers. Default will be used.", key, label)
+				}
+
+				match values[1] {
+					json::Number(y) => {
+						vector.y = from_f64(y).unwrap();
+					},
+					_ => println!("Warning: \"{}\" for object \"{}\" must be a list of 3 numbers. Default will be used.", key, label)
+				}
+
+				match values[2] {
+					json::Number(z) => {
+						vector.z = from_f64(z).unwrap();
+					},
+					_ => println!("Warning: \"{}\" for object \"{}\" must be a list of 3 numbers. Default will be used.", key, label)
+				}
+
+				vector
+			} else {
+				println!("Warning: \"{}\" for object \"{}\" must be a list of 3 numbers. Default will be used.", key, label);
+				na::zero()
+			}
+		},
+		_ => {
+			na::zero()
+		}
+	}
+}
+
+fn parse_material_inidex(config:&~json::Object, max_index: uint, label: &str) -> uint {
+	match config.find(&~"material") {
+		Some(&json::Number(i)) => {
+			let index = i as uint;
+			if index < max_index {
+				index
+			} else {
+				println!("Warning: Unknown material for object \"{}\". Default will be used.", label);
+				max_index
+			}
+		},
+		_ => {
+			println!("Warning: \"material\" for object \"{}\" is not set. Default will be used.", label);
+			max_index
+		}
+	}
+}
 
 
 //Bounding Box
@@ -135,41 +193,7 @@ impl Sphere {
 			_ => ~"<Sphere>"
 		};
 
-		let position = match config.find(&~"position") {
-			Some(&json::List(ref position)) => {
-				if position.len() == 3 {
-					let mut new_position: Vec3<f32> = na::zero();
-					match position[0] {
-						json::Number(x) => {
-							new_position.x = x as f32;
-						},
-						_ => println!("Warning: \"position\" for object \"{}\" must be a list of 3 numbers. Default will be used.", label)
-					}
-
-					match position[1] {
-						json::Number(y) => {
-							new_position.y = y as f32;
-						},
-						_ => println!("Warning: \"position\" for object \"{}\" must be a list of 3 numbers. Default will be used.", label)
-					}
-
-					match position[2] {
-						json::Number(z) => {
-							new_position.z = z as f32;
-						},
-						_ => println!("Warning: \"position\" for object \"{}\" must be a list of 3 numbers. Default will be used.", label)
-					}
-
-					new_position
-				} else {
-					println!("Warning: \"position\" for object \"{}\" must be a list of 3 numbers. Default will be used.", label);
-					na::zero()
-				}
-			},
-			_ => {
-				na::zero()
-			}
-		};
+		let position = parse_vector(config, ~"position", label);
 
 		let radius = match config.find(&~"radius") {
 			Some(&json::Number(radius)) => radius as f32,
@@ -182,21 +206,7 @@ impl Sphere {
 			}
 		};
 
-		let material = match config.find(&~"material") {
-			Some(&json::Number(i)) => {
-				let index = i as uint;
-				if index < material_count {
-					index
-				} else {
-					println!("Warning: Unknown material for object \"{}\". Default will be used.", label);
-					material_count
-				}
-			},
-			_ => {
-				println!("Warning: \"material\" for object \"{}\" is not set. Default will be used.", label);
-				material_count
-			}
-		};
+		let material = parse_material_inidex(config, material_count, label);
 
 		~Sphere::new(position, radius, material) as ~SceneObject: Send+Freeze
 	}
