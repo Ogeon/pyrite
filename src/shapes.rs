@@ -213,7 +213,7 @@ impl Sphere {
 }
 
 impl SceneObject for Sphere {
-	fn get_material_index(&self, normal: Ray, ray_in: Ray) -> uint {
+	fn get_material_index(&self, _: Ray, _: Ray) -> uint {
 		self.material
 	}
 
