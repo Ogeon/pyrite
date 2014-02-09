@@ -13,6 +13,7 @@ use nalgebra::na;
 pub struct RandomVariable {
 	values: ~[f32],
 	pos: uint,
+	end: uint,
 	random: XorShiftRng
 }
 
@@ -21,6 +22,7 @@ impl RandomVariable {
 		RandomVariable{
 			values: ~[],
 			pos: 0,
+			end: 0,
 			random: random
 		}
 	}
@@ -29,8 +31,14 @@ impl RandomVariable {
 		let pos = self.pos;
 		self.pos += 1;
 
+		while pos >= self.end && self.end < self.values.len() {
+			self.values[self.end] = self.random.gen();
+			self.end += 1;
+		}
+
 		while pos >= self.values.len() {
 			self.values.push(self.random.gen());
+			self.end += 1;
 		}
 
 		self.values[pos]
@@ -65,7 +73,7 @@ impl RandomVariable {
 	}
 
 	pub fn clear(&mut self) {
-		self.values = ~[];
+		self.end = 0;
 		self.pos = 0;
 	}
 
@@ -207,33 +215,30 @@ impl Tracer {
 								let sample_y = cam_y + (y as f32 - 0.5 + rand_var.next()) * pixel_size;
 								let mut ray = data.scene.get().camera.ray_to(sample_x, sample_y, &mut rand_var);
 
-								let mut bounces = vec::with_capacity(10);
 								let mut dispersion = false;
+								let mut emission = false;
 
-								for _ in range(0, 10) {
+								let bounces: ~[Reflection] = range(0, 10).take_while(|_| {!emission}).filter_map(|_| {
 									match Tracer::trace(ray, frequency, data.scene.get(), &mut rand_var) {
 										Some(reflection) => {
-											let emission = reflection.emission;
+											emission = reflection.emission;
 											ray = reflection.out;
 											dispersion = dispersion || reflection.dispersion;
-											bounces.push(reflection);
-
-											if emission {
-												break;
-											}
+											Some(reflection)
 										},
 										None => {
 											//TODO: Background color
-											/*bounces.push(Reflection {
+											emission = true;
+											/*Reflection {
 												out: ray,
 												color: 0.0,
 												emission: true, 
 												dispersion: false
-											});*/
-											break;
+											}*/
+											None
 										}
-									};
-								}
+									}
+								}).collect();
 
 								if bounces.len() > 0 && bounces.last().unwrap().emission {
 									if dispersion {
@@ -371,9 +376,9 @@ struct TracerData {
 
 
 //Reflection
-pub struct Reflection {
+pub struct Reflection<'a> {
     out: Ray,
-    color: ~ParametricValue,
+    color: &'a ParametricValue,
     emission: bool,
     dispersion: bool
 }
@@ -472,7 +477,6 @@ pub struct Scene {
 //Material
 pub trait Material {
 	fn get_reflection(&self, normal: Ray, ray_in: Ray, frequency: f32, rand_var: &mut RandomVariable) -> Reflection;
-	fn to_owned_material(&self) -> ~Material: Send+Freeze;
 }
 
 //Parametric value

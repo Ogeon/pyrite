@@ -101,16 +101,10 @@ impl Material for Diffuse {
 
 		Reflection {
 			out: Ray::new(normal.origin, reflection),
-			color: self.color.clone_value(),
+			color: self.color,
 			emission: false,
 			dispersion: false
 		}
-	}
-
-	fn to_owned_material(&self) -> ~Material: Send+Freeze {
-		~Diffuse {
-			color: self.color.clone_value()
-		} as ~Material: Send+Freeze
 	}
 }
 
@@ -140,16 +134,10 @@ impl Material for Mirror {
 		let perp = na::dot(&ray_in.direction, &normal.direction) * 2.0;
 		Reflection {
 			out: Ray::new(normal.origin, ray_in.direction - (normal.direction * perp)),
-			color: self.color.clone_value(),
+			color: self.color,
 			emission: false,
 			dispersion: false
 		}
-	}
-
-	fn to_owned_material(&self) -> ~Material: Send+Freeze {
-		~Mirror {
-			color: self.color.clone_value()
-		} as ~Material: Send+Freeze
 	}
 }
 
@@ -179,17 +167,10 @@ impl Material for Emission {
 	fn get_reflection(&self, _: Ray, _: Ray, _: f32, _: &mut RandomVariable) -> Reflection {
 		Reflection {
 			out: Ray::new(na::zero(), na::zero()),
-			color: self.color.clone_value(),
+			color: self.color,
 			emission: true,
 			dispersion: false
 		}
-	}
-
-	fn to_owned_material(&self) -> ~Material: Send+Freeze {
-		~Emission {
-			color: self.color.clone_value(),
-			luminance: self.luminance
-		} as ~Material: Send+Freeze
 	}
 }
 
@@ -239,14 +220,6 @@ impl Material for Mix {
 		} else {
 			self.material_b.get_reflection(normal, ray_in, frequency, rand_var)
 		}
-	}
-
-	fn to_owned_material(&self) -> ~Material: Send+Freeze {
-		~Mix {
-			material_a: self.material_a.to_owned_material(),
-			material_b: self.material_b.to_owned_material(),
-			factor: self.factor
-		} as ~Material: Send+Freeze
 	}
 }
 
@@ -335,15 +308,6 @@ impl Material for FresnelMix {
 
 		reflection.dispersion = reflection.dispersion || self.dispersion != 0.0;
 		return reflection;
-	}
-
-	fn to_owned_material(&self) -> ~Material: Send+Freeze {
-		~FresnelMix {
-			reflection: self.reflection.to_owned_material(),
-			refraction: self.refraction.to_owned_material(),
-			refractive_index: self.refractive_index,
-			dispersion: self.dispersion
-		} as ~Material: Send+Freeze
 	}
 }
 
@@ -496,14 +460,6 @@ impl Material for Refractive {
 				dispersion: self.dispersion != 0.0
 			}
 		}
-	}
-
-	fn to_owned_material(&self) -> ~Material: Send+Freeze {
-		~Refractive {
-			color: self.color.clone_value(),
-			refractive_index: self.refractive_index,
-			dispersion: self.dispersion
-		} as ~Material: Send+Freeze
 	}
 }
 
