@@ -79,7 +79,7 @@ pub fn parse(filename: &Path) -> ~Mesh {
 	//Read file
 	loop {
 		match reader.read_line() {
-			Some(line) => {
+			Ok(line) => {
 				let parts: ~[~str] = line.replace("  ", " ").split(' ').map(|part| {
 					part.to_owned()
 				}).collect();

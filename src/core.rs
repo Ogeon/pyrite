@@ -4,7 +4,7 @@ use std::num::{exp, ln, min, max, sqrt};
 use std::{task, fmt, vec};
 use std::comm::{Chan, Data};
 use std::iter::range;
-use extra::arc::{MutexArc, Arc};
+use sync::{MutexArc, Arc};
 use nalgebra::na::{Vec3, Rot3, Rotate};
 use nalgebra::na;
 
@@ -83,11 +83,11 @@ struct Sample {
 	pixel: (u32, u32)
 }
 
-impl fmt::Default for Sample {
-	fn fmt(s: &Sample, f: &mut fmt::Formatter) {
-		let (x, y) = s.pixel;
+impl fmt::Show for Sample {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let (x, y) = self.pixel;
 		write!(f.buf, "pixel: [{}, {}], freq: {} nm, value: {}, weight: {}",
-					  x, y, s.frequency, s.value, s.weight)
+					  x, y, self.frequency, self.value, self.weight)
 	}
 }
 

@@ -1,9 +1,10 @@
 # Pyrite (super pre alpha)
-Pyrite is an experimental render engine, written in Rust. It will use path
+Pyrite is an experimental render engine, written in Rust. It uses path
 tracing and colors based on wavelengths.
 
 ## Getting started
 Pyrite is currently only tested on Linux, but it may work on other systems too.
+It will ususaly be buildable using the [rust-nightly](http://www.rust-ci.org/) Ubuntu package.
 
 To download and build Pyrite to the `bin/` folder:
 

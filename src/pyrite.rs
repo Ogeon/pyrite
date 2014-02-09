@@ -1,8 +1,9 @@
 extern mod png;
 extern mod extra;
+extern mod sync;
 extern mod nalgebra;
 use std::num::{min, max};
-use std::io::{File, io_error, stdio, Reader};
+use std::io::{File, stdio, Reader};
 use std::io::BufferedReader;
 use std::hashmap::HashMap;
 use std::str::StrSlice;
@@ -56,7 +57,7 @@ fn main() {
 			print!("> ");
 			stdio::flush();
 			match stdin.read_line() {
-				Some(line) => {
+				Ok(line) => {
 					let args: ~[&str] = line.trim().splitn(' ', 1).collect();
 					match args {
 						[&"render"] => {
@@ -91,7 +92,7 @@ fn main() {
 						_ => println!("Unknown command \"{}\"", line.trim())
 					}
 				},
-				None => break
+				_ => break
 			}
 		}
 	}
@@ -212,22 +213,17 @@ fn load_project(path: &str) -> ~json::Object {
 		println!("New project created");
 		json::from_str(default)
 	} else {
-		io_error::cond.trap(|error| {
-			//Catching io_error
-			println!("Unable to open {}: {}", path, error.desc);
-		}).inside(proc() {
-			//Open provided file
-			match File::open(&Path::new(path)) {
-				//A valid path was provided
-				Some(mut file) => json::from_reader(&mut file as &mut Reader),
+		match File::open(&Path::new(path)) {
+			//A valid path was provided
+			Ok(mut file) => json::from_reader(&mut file as &mut Reader),
 
-				//An invalid path was provided
-				None => {
-					println!("New project created");
-					json::from_str(default)
-				}
+			//An invalid path was provided
+			Err(e) => {
+				println!("Unable to open {}: {}", path, e.desc);
+				println!("New project created");
+				json::from_str(default)
 			}
-		})
+		}
 	};
 
 	if project.is_err() {
