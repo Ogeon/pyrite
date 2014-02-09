@@ -83,98 +83,6 @@ fn parse_material_inidex(config:&~json::Object, max_index: uint, label: &str) ->
 }
 
 
-//Bounding Box
-priv struct BoundingBox {
-	from: Vec3<f32>,
-	to: Vec3<f32>
-}
-
-impl BoundingBox {
-	fn intersect(&self, ray: Ray) -> Option<f32> {
-		let origin = ray.origin;
-		let dir = ray.direction;
-
-		let mut quadrant = [Left, Left, Left];
-		let mut candidate_plane = [0f32, ..3];
-		let mut inside = true;
-
-		let mut coord: Vec3<f32> = na::zero();
-		let mut max_t = [0f32, ..3];
-		let mut witch_plane = 0;
-
-		unsafe {
-			for i in range(0 as uint, 3) {
-				if origin.at_fast(i) < self.from.at_fast(i) {
-					candidate_plane[i] = self.from.at_fast(i);
-					inside = false;
-				} else if origin.at_fast(i) > self.to.at_fast(i) {
-					quadrant[i] = Right;
-					candidate_plane[i] = self.to.at_fast(i);
-					inside = false;
-				} else {
-					quadrant[i] = Middle;
-				}
-			}
-		}
-
-		if inside {
-			return Some(0.0);
-		}
-
-		unsafe {
-			for i in range(0 as uint, 3) {
-				if quadrant[i] != Middle && dir.at_fast(i) != 0.0 {
-					max_t[i] = (candidate_plane[i] - origin.at_fast(i)) / dir.at_fast(i);
-				} else {
-					max_t[i] = -1.0;
-				}
-			}
-		}
-
-		for (i, &v) in max_t.iter().enumerate() {
-			if v > max_t[witch_plane] {
-				witch_plane = i;
-			}
-		}
-
-		if max_t[witch_plane] < 0.0 {
-			return None;
-		}
-
-		unsafe {
-			for i in range(0 as uint, 3) {
-				if witch_plane != i {
-					coord.set_fast(i, origin.at_fast(i) + max_t[witch_plane] * dir.at_fast(i));
-					if coord.at_fast(i) < self.from.at_fast(i) || coord.at_fast(i) > self.to.at_fast(i) {
-						return None;
-					}
-				} else {
-					coord.set_fast(i, candidate_plane[i]);
-				}
-			}
-		}
-
-		return Some(na::norm(&(coord - origin)));
-	}
-}
-
-enum Quadrant {
-	Left = 0,
-	Middle = 1,
-	Right = 2
-}
-
-impl Eq for Quadrant {
-	fn eq(&self, other: &Quadrant) -> bool {
-		*self as int == *other as int
-	}
-
-	fn ne(&self, other: &Quadrant) -> bool {
-		*self as int != *other as int
-	}
-}
-
-
 //Sphere
 pub struct Sphere {
 	position: Vec3<f32>,
@@ -316,7 +224,7 @@ impl SceneObject for Triangle {
 		let v = na::dot(&ray.direction, &q) * inv_det;
 
 		//Outside triangle
-		if(v < 0.0 || u + v > 1.0) {
+		if v < 0.0 || u + v > 1.0 {
 			return None;
 		}
 
