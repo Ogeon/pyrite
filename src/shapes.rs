@@ -176,7 +176,7 @@ impl Eq for Quadrant {
 
 
 //Sphere
-struct Sphere {
+pub struct Sphere {
 	position: Vec3<f32>,
 	radius: f32,
 	material: uint
@@ -257,7 +257,7 @@ impl SceneObject for Sphere {
 
 
 //Triangle
-struct Triangle {
+pub struct Triangle {
 	v1: Vec3<f32>,
 	v2: Vec3<f32>,
 	v3: Vec3<f32>,
@@ -265,7 +265,11 @@ struct Triangle {
 }
 
 impl Triangle {
-	fn from_json(config: &~json::Object, material_count: uint) -> ~SceneObject: Send+Freeze {
+	pub fn new(v1: Vec3<f32>, v2: Vec3<f32>, v3: Vec3<f32>, material: uint) -> Triangle {
+		Triangle{v1: v1, v2: v2, v3: v3, material: material}
+	}
+
+	pub fn from_json(config: &~json::Object, material_count: uint) -> ~SceneObject: Send+Freeze {
 		let label = match config.find(&~"label") {
 			Some(&json::String(ref label)) => label.to_owned(),
 			_ => ~"<Triangle>"

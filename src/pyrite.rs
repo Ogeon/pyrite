@@ -4,6 +4,7 @@ extern mod nalgebra;
 use std::num::{min, max};
 use std::io::{File, io_error, stdio, Reader};
 use std::io::BufferedReader;
+use std::hashmap::HashMap;
 use std::str::StrSlice;
 use std::f64::consts::PI;
 use extra::time::precise_time_s;
@@ -11,10 +12,12 @@ use extra::json;
 use nalgebra::na;
 use nalgebra::na::{Vec3, Rot3};
 use core::{Tracer, Camera, Scene, SceneObject, Material, ParametricValue};
+use wavefront::Mesh;
 mod core;
 mod shapes;
 mod materials;
 mod values;
+mod wavefront;
 
 fn main() {
 	let mut render_only = false;
@@ -95,7 +98,7 @@ fn main() {
 }
 
 fn render(project: &json::Object, path: &Path) -> ~Tracer {
-	let mut tracer = ~build_project(project);
+	let mut tracer = ~build_project(project, path);
 	tracer.bins = 40;
 
 	let mut tracers = ~[];
@@ -250,7 +253,7 @@ fn load_project(path: &str) -> ~json::Object {
 	}
 }
 
-fn build_project(project: &json::Object) -> Tracer {
+fn build_project(project: &json::Object, project_path: &Path) -> Tracer {
 	let mut tracer = Tracer::new();
 
 	match project.find(&~"render") {
@@ -260,7 +263,7 @@ fn build_project(project: &json::Object) -> Tracer {
 		_ => println!("Warning: No valid render configurations provided")
 	}
 
-	tracer.set_scene(scene_from_json(project));
+	tracer.set_scene(scene_from_json(project, project_path));
 
 	tracer
 }
@@ -346,11 +349,11 @@ fn tracer_from_json(config: &~json::Object, tracer: &mut Tracer) {
 	}
 }
 
-fn scene_from_json(config: &json::Object) -> Scene {
+fn scene_from_json(config: &json::Object, project_path: &Path) -> Scene {
 	let materials = materials_from_json(config);
 	Scene {
 		camera: camera_from_json(config),
-		objects: objects_from_json(config, materials.len() - 1),
+		objects: objects_from_json(config, materials.len() - 1, project_path),
 		materials: materials
 	}
 }
@@ -453,7 +456,7 @@ fn camera_from_json(config: &json::Object) -> Camera {
 
 fn materials_from_json(config: &json::Object) -> ~[~Material: Send+Freeze] {
 	let default_material = ~materials::Diffuse{
-		color: ~values::Number{value: 0.0} as ~ParametricValue: Send+Freeze
+		color: ~values::Number{value: 1.0} as ~ParametricValue: Send+Freeze
 	} as ~Material: Send+Freeze;
 
 	let mut materials = match config.find(&~"materials") {
@@ -475,18 +478,103 @@ fn materials_from_json(config: &json::Object) -> ~[~Material: Send+Freeze] {
 	return materials;
 }
 
-fn objects_from_json(config: &json::Object, material_count: uint) -> ~[~SceneObject: Send+Freeze] {
-	match config.find(&~"objects") {
+fn objects_from_json(config: &json::Object, material_count: uint, project_path: &Path) -> ~[~SceneObject: Send+Freeze] {
+	let mut models = HashMap::<~str, ~Mesh>::new();
+	let mut meshes = ~[];
+
+	let mut objects = match config.find(&~"objects") {
 		Some(&json::List(ref objects)) => {
 			objects.iter().filter_map(|o| {
 				match o {
 					&json::Object(ref object) => {
-						shapes::from_json(object, material_count)
+						match object.find(&~"type") {
+							Some(&json::String(~"Mesh")) => {
+								meshes.push(object);
+								None
+							},
+							_ => shapes::from_json(object, material_count)
+						}
+						
 					},
 					_ => None
 				}
 			}).collect()
 		},
 		_ => ~[]
+	};
+
+	for ref config in meshes.iter() {
+		let label = match config.find(&~"label") {
+			Some(&json::String(ref label)) => label.to_owned(),
+			_ => ~"<Mesh>"
+		};
+
+
+		match config.find(&~"file") {
+			Some(&json::String(ref file_name)) => {
+				let model = models.find_or_insert_with(file_name.to_owned(), |file| {
+						wavefront::parse(&project_path.with_filename(file_name.to_owned()))
+					}
+				);
+
+				let mut face_materials = HashMap::<u16, uint>::new();
+
+				match config.find(&~"materials") {
+					Some(&json::Object(ref material_config)) => {
+						for (key, value) in material_config.iter() {
+							match value {
+								&json::Number(index) => {
+									if (index as uint) < material_count {
+										match model.get_group_index(key) {
+											Some(group) => {
+												face_materials.insert(group, index as uint);
+											},
+											_ => {}
+										}
+									} else {
+										println!("Warning: Unknown material indiex {} for group {} in mesh \"{}\". Default will be used.", index as uint, key.to_str(), label);
+									}
+								},
+								_ => println!("Warning: material indices for mesh \"{}\" must be numbers.", label)
+							}
+						}
+					},
+					None => println!("Warning: \"materials\" for mesh \"{}\" must be an object with material indices. Default will be used.", label),
+					_ => println!("Warning: \"materials\" for mesh \"{}\" is not set. Default will be used.", label)
+				}
+
+				for indices in model.indices.chunks(3) {
+					let v1 = model.vertices[indices[0]];
+					let v2 = model.vertices[indices[1]];
+					let v3 = model.vertices[indices[2]];
+
+					let material = match face_materials.find_copy(&v1.group) {
+						Some(index) => {
+							index
+						},
+						None => material_count
+					};
+
+					objects.push(
+						~shapes::Triangle::new(
+							Vec3::new(v1.position[0], v1.position[1], v1.position[2]),
+							Vec3::new(v2.position[0], v2.position[1], v2.position[2]),
+							Vec3::new(v3.position[0], v3.position[1], v3.position[2]),
+							material
+						) as ~SceneObject: Send+Freeze
+					);
+				}
+			},
+			None => {
+				println!("Warning: missing \"file\" for the mesh \"{}\". The mesh will not be used.", label);
+				continue;
+			},
+			_ => {
+				println!("Warning: \"file\" for the mesh \"{}\" must be a string. The mesh will not be used.", label);
+				continue;
+			}
+		}
 	}
+
+	objects
 }

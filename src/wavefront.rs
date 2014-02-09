@@ -18,7 +18,7 @@ pub struct Mesh {
 
 
 impl Mesh {
-	fn get_vertex_buffer(&self) -> ~[f32] {
+	pub fn get_vertex_buffer(&self) -> ~[f32] {
 		let mut buffer : ~[f32] = ~[];
 		for &vertex in self.vertices.iter() {
 			for &value in vertex.position.iter() {
@@ -35,7 +35,7 @@ impl Mesh {
 		buffer
 	}
 
-	fn get_triangle_buffer(&self) -> ~[f32] {
+	pub fn get_triangle_buffer(&self) -> ~[f32] {
 		let mut buffer : ~[f32] = ~[];
 		for &index in self.indices.iter() {
 			let vertex = &self.vertices[index];
@@ -54,17 +54,13 @@ impl Mesh {
 		buffer
 	}
 
-	fn get_group_index(&self, name : &~str) -> Option<u16> {
-		if self.groups.contains_key(name) {
-			Some(self.groups.get_copy(name))
-		} else {
-			None
-		}
+	pub fn get_group_index(&self, name : &~str) -> Option<u16> {
+		self.groups.find_copy(name)
 	}
 }
 
 
-pub fn parse(filename: ~str) -> ~Mesh {
+pub fn parse(filename: &Path) -> ~Mesh {
 	let mut vertices: ~[Vertex] = ~[];
 	let mut faces: ~[~[~[uint, ..4]]] = ~[];
 	let mut indices: ~[u16] = ~[];
@@ -74,7 +70,7 @@ pub fn parse(filename: ~str) -> ~Mesh {
 	let mut groups = ~HashMap::<~str, u16>::new();
 	let mut vertex_map = ~HashMap::<~str, uint>::new();
 
-	let file = File::open(&Path::new(filename));
+	let file = File::open(filename);
 	let mut reader = BufferedReader::new(file);
 
 	let mut current_group = 0u16;
@@ -84,19 +80,22 @@ pub fn parse(filename: ~str) -> ~Mesh {
 	loop {
 		match reader.read_line() {
 			Some(line) => {
-				let parts: ~[&str] = line.replace(~"  ", ~" ").split(' ').collect();
-				match parts[0] {
-					&"f" => faces.push(parse_face(parts, current_group as uint)),
-					&"v" => points.push(parse_3f(parts)),
-					&"vn" => normals.push(parse_3f(parts)),
-					&"vt" => tex_coords.push(parse_2f(parts)),
-					&"g" => {
-							let name = parts[1];
+				let parts: ~[~str] = line.replace("  ", " ").split(' ').map(|part| {
+					part.to_owned()
+				}).collect();
+
+				match &parts[0] {
+					&~"f" => faces.push(parse_face(parts, current_group as uint)),
+					&~"v" => points.push(parse_3f(parts)),
+					&~"vn" => normals.push(parse_3f(parts)),
+					&~"vt" => tex_coords.push(parse_2f(parts)),
+					&~"g" => {
+							let name = parts[1].trim();
 							if groups.contains_key(&name.to_owned()) {
-								println!("Found old group {}", name);
+								//println!("Found old group {}", name);
 								current_group = groups.get(&name.to_owned())+1;
 							} else {
-								println!("Found new group {}", name);
+								//println!("Found new group {}", name);
 								last_group += 1;
 								current_group = last_group;
 								groups.insert(name.to_owned(), current_group-1);
@@ -177,27 +176,20 @@ pub fn parse(filename: ~str) -> ~Mesh {
 	~Mesh {indices: indices, vertices: vertices, groups: groups}
 }
 
-fn parse_face(line: &[&str], group: uint) -> ~[~[uint, ..4]] {
-	if line.len() < 4 {
-		~[
-			~parse_face_point(line[1].split('/').collect(), group),
-			~parse_face_point(line[2].split('/').collect(), group)
-		]
-	} else {
-		~[
-			~parse_face_point(line[1].split('/').collect(), group),
-			~parse_face_point(line[2].split('/').collect(), group),
-			~parse_face_point(line[3].split('/').collect(), group)
-		]
-	}
+fn parse_face(line: &[~str], group: uint) -> ~[~[uint, ..4]] {
+	//println!("Parsing line {}", line.to_str());
+
+	line.iter().skip(1).map(|point| {
+		~parse_face_point(point.to_owned().trim().split('/').collect(), group)
+	}).collect()
 }
 
 fn parse_face_point(point: ~[&str], group: uint) ->  [uint, ..4] {
 	if point.len() > 1 {
 		[
-			from_str(point[0]).unwrap_or(0),
-			from_str(point[1]).unwrap_or(0),
-			from_str(point[2]).unwrap_or(0),
+			from_str(point[0].to_owned()).unwrap_or(0),
+			from_str(point[1].to_owned()).unwrap_or(0),
+			from_str(point[2].to_owned()).unwrap_or(0),
 			group
 		]
 	} else {
@@ -206,7 +198,7 @@ fn parse_face_point(point: ~[&str], group: uint) ->  [uint, ..4] {
 	}
 }
 
-fn parse_3f(line: &[&str]) -> ~[f32] {
+fn parse_3f(line: &[~str]) -> ~[f32] {
 	if line.len() < 4 {
 		~[
 			from_str(line[1]).unwrap_or(0f32),
@@ -217,12 +209,12 @@ fn parse_3f(line: &[&str]) -> ~[f32] {
 		~[
 			from_str(line[1]).unwrap_or(0f32),
 			from_str(line[2]).unwrap_or(0f32),
-			from_str(line[3]).unwrap_or(0f32)
+			from_str(line[3].trim()).unwrap_or(0f32)
 		]
 	}
 }
 
-fn parse_2f(line: &[&str]) -> ~[f32] {
+fn parse_2f(line: &[~str]) -> ~[f32] {
 	~[
 		from_str(line[1]).unwrap_or(0.0),
 		from_str(line[2]).unwrap_or(0.0)
