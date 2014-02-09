@@ -27,36 +27,6 @@ pub fn from_json(config: &json::Json) -> Option<~ParametricValue: Send+Freeze> {
 }
 
 
-pub fn make_image(value: &ParametricValue, from: f32, to: f32, width: uint, height: uint) -> ~[u8] {
-	let diff = to - from;
-
-	let values: ~[f32] = range(0, width).map(|i| {
-		value.get(0.0, 0.0, from + diff * (i as f32 / width as f32))
-	}).collect();
-
-
-	vec::from_fn(height, |y| {
-		let lim = 1.0 - (y as f32 / height as f32);
-		vec::from_fn(width, |x| {
-			let pos = from + (x as f32 / width as f32) * diff;
-			if values[x] >= lim {
-				if (pos / 10.0).floor() % 2.0 == 0.0 {
-					~[128u8, 128u8, 128u8]
-				} else {
-					~[100u8, 100u8, 100u8]
-				}
-			} else {
-				if (pos / 10.0).floor() % 2.0 == 0.0 {
-					~[16u8, 16u8, 16u8]
-				} else {
-					~[64u8, 64u8, 64u8]
-				}
-			}
-		}).concat_vec()
-	}).concat_vec()
-}
-
-
 //A plain number
 pub struct Number {
 	value: f32
