@@ -7,16 +7,15 @@ use std::io::{File, stdio, Reader};
 use std::io::BufferedReader;
 use std::hashmap::HashMap;
 use std::str::StrSlice;
-use std::f64::consts::PI;
 use extra::time::precise_time_s;
 use extra::json;
-use nalgebra::na;
-use nalgebra::na::{Vec3, Rot3};
+use nalgebra::na::Vec3;
 use core::{Tracer, Camera, Scene, SceneObject, Material, ParametricValue};
 use wavefront::Mesh;
 mod core;
 mod shapes;
 mod materials;
+mod cameras;
 mod values;
 mod wavefront;
 
@@ -43,13 +42,17 @@ fn main() {
 	let project = load_project(project_file);
 
 	if render_only {
-		let tracer = render(project, &project_dir);
-		let response_curves = get_response_curves(project);
+		match render(project, &project_dir) {
+			Some(tracer) => {
+				let response_curves = get_response_curves(project);
 
-		tracer.pixels.access(|&ref mut values| {
-			let (width, height) = tracer.image_size;
-			save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
-		});
+				tracer.pixels.access(|&ref mut values| {
+					let (width, height) = tracer.image_size;
+					save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
+				});
+			},
+			None => {}
+		}
 	} else {
 		let mut stdin = BufferedReader::new(stdio::stdin());
 
@@ -61,13 +64,17 @@ fn main() {
 					let args: ~[&str] = line.trim().splitn(' ', 1).collect();
 					match args {
 						[&"render"] => {
-							let tracer = render(project, &project_dir);
-							let response_curves = get_response_curves(project);
+							match render(project, &project_dir) {
+								Some(tracer) => {
+									let response_curves = get_response_curves(project);
 
-							tracer.pixels.access(|&ref mut values| {
-								let (width, height) = tracer.image_size;
-								save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
-							});
+									tracer.pixels.access(|&ref mut values| {
+										let (width, height) = tracer.image_size;
+										save_png(project_dir.with_filename("render.png"), values, width, height, &response_curves);
+									});
+								},
+								None => {}
+							}
 						},
 						[&"get"] => {
 							println!("Type \"get path.to.something\" to get the value of \"something\"")
@@ -98,42 +105,52 @@ fn main() {
 	}
 }
 
-fn render(project: &json::Object, path: &Path) -> ~Tracer {
-	let mut tracer = ~build_project(project, path);
-	tracer.bins = 40;
+fn render(project: &json::Object, path: &Path) -> Option<~Tracer> {
+	match build_project(project, path) {
+		Some(t) => {
+			let mut tracer = ~t;
+			tracer.bins = 40;
 
-	let mut tracers = ~[];
-	std::task::deschedule();
-	for n in std::iter::range(0, 4) {
-		println!("Starting render task {}", n);
-		tracers.push(tracer.spawn());
-		std::task::deschedule();
+			let mut tracers = ~[];
+			std::task::deschedule();
+			for n in std::iter::range(0, 4) {
+				println!("Starting render task {}", n);
+				match tracer.spawn() {
+					Some(task) => {
+						tracers.push(task);
+						std::task::deschedule();
+					},
+					None => break
+				}
+			}
+
+			let response_curves = get_response_curves(project);
+
+			let render_started = precise_time_s();
+
+			let mut last_image_update = precise_time_s();
+			while !tracer.done() {
+				//Don't be too eager!
+				if !tracer.done() {
+					std::io::timer::sleep(500);
+				}
+
+				if last_image_update < precise_time_s() - 60.0 {
+					tracer.pixels.access(|&ref mut values| {
+						let (width, height) = tracer.image_size;
+						save_png(path.with_filename("render.png"), values, width, height, &response_curves);
+					});
+					last_image_update = precise_time_s();
+				}
+				std::task::deschedule();
+			}
+
+			println!("Render time: {}s", precise_time_s() - render_started);
+
+			Some(tracer)
+		},
+		None => None
 	}
-
-	let response_curves = get_response_curves(project);
-
-	let render_started = precise_time_s();
-
-	let mut last_image_update = precise_time_s();
-	while !tracer.done() {
-		//Don't be too eager!
-		if !tracer.done() {
-			std::io::timer::sleep(500);
-		}
-
-		if last_image_update < precise_time_s() - 60.0 {
-			tracer.pixels.access(|&ref mut values| {
-				let (width, height) = tracer.image_size;
-				save_png(path.with_filename("render.png"), values, width, height, &response_curves);
-			});
-			last_image_update = precise_time_s();
-		}
-		std::task::deschedule();
-	}
-
-	println!("Render time: {}s", precise_time_s() - render_started);
-
-	tracer
 }
 	
 
@@ -249,7 +266,7 @@ fn load_project(path: &str) -> ~json::Object {
 	}
 }
 
-fn build_project(project: &json::Object, project_path: &Path) -> Tracer {
+fn build_project(project: &json::Object, project_path: &Path) -> Option<Tracer> {
 	let mut tracer = Tracer::new();
 
 	match project.find(&~"render") {
@@ -259,9 +276,13 @@ fn build_project(project: &json::Object, project_path: &Path) -> Tracer {
 		_ => println!("Warning: No valid render configurations provided")
 	}
 
-	tracer.set_scene(scene_from_json(project, project_path));
-
-	tracer
+	match scene_from_json(project, project_path) {
+		Some(scene) => {
+			tracer.set_scene(scene);
+			Some(tracer)
+		},
+		None => None
+	}
 }
 
 fn get_response_curves(project: &json::Object) -> [~ParametricValue, ..3] {
@@ -345,109 +366,30 @@ fn tracer_from_json(config: &~json::Object, tracer: &mut Tracer) {
 	}
 }
 
-fn scene_from_json(config: &json::Object, project_path: &Path) -> Scene {
-	let materials = materials_from_json(config);
-	Scene {
-		camera: camera_from_json(config),
-		objects: objects_from_json(config, materials.len() - 1, project_path),
-		materials: materials
+fn scene_from_json(config: &json::Object, project_path: &Path) -> Option<Scene> {
+	match camera_from_json(config) {
+		Some(camera) => {
+			let materials = materials_from_json(config);
+			Some(Scene {
+				camera: camera,
+				objects: objects_from_json(config, materials.len() - 1, project_path),
+				materials: materials
+			})
+		},
+		None => None
 	}
 }
 
-fn camera_from_json(config: &json::Object) -> Camera {
-	let mut camera = Camera::new(na::zero(), na::zero());
-
+fn camera_from_json(config: &json::Object) -> Option<~Camera: Send+Freeze> {
 	match config.find(&~"camera") {
 		Some(&json::Object(ref camera_cfg)) => {
-			match camera_cfg.find(&~"position") {
-				Some(&json::List(ref position)) => {
-					if position.len() == 3 {
-						match position[0] {
-							json::Number(x) => {
-								camera.position.x = x as f32;
-							},
-							_ => println!("Warning: Camera position must be a list of 3 numbers. Default will be used.")
-						}
-
-						match position[1] {
-							json::Number(y) => {
-								camera.position.y = y as f32;
-							},
-							_ => println!("Warning: Camera position must be a list of 3 numbers. Default will be used.")
-						}
-
-						match position[2] {
-							json::Number(z) => {
-								camera.position.z = z as f32;
-							},
-							_ => println!("Warning: Camera position must be a list of 3 numbers. Default will be used.")
-						}
-					} else {
-						println!("Warning: Camera position must be a list of 3 numbers. Default will be used.");
-					}
-				},
-				_ => {}
-			}
-
-			match camera_cfg.find(&~"rotation") {
-				Some(&json::List(ref rotation)) => {
-					let mut new_rotation: Vec3<f32> = na::zero();
-
-					if rotation.len() == 3 {
-						match rotation[0] {
-							json::Number(x) => {
-								new_rotation.x = (x * PI / 180.0) as f32;
-							},
-							_ => println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.")
-						}
-
-						match rotation[1] {
-							json::Number(y) => {
-								new_rotation.y = (y * PI / 180.0) as f32;
-							},
-							_ => println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.")
-						}
-
-						match rotation[2] {
-							json::Number(z) => {
-								new_rotation.z = (z * PI / 180.0) as f32;
-							},
-							_ => println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.")
-						}
-					} else {
-						println!("Warning: Camera rotation must be a list of 3 numbers. Default will be used.");
-					}
-
-					camera.rotation = Rot3::new(new_rotation);
-				},
-				_ => {}
-			}
-
-			match camera_cfg.find(&~"lens") {
-				Some(&json::Number(lens)) => {
-					camera.lens = lens as f32;
-				},
-				_ => {}
-			}
-
-			match camera_cfg.find(&~"aperture") {
-				Some(&json::Number(aperture)) => {
-					camera.aperture = aperture as f32;
-				},
-				_ => {}
-			}
-
-			match camera_cfg.find(&~"focal_distance") {
-				Some(&json::Number(focal_distance)) => {
-					camera.focal_distance = focal_distance as f32;
-				},
-				_ => {}
-			}
+			cameras::from_json(camera_cfg)
 		},
-		_ => {}
+		_ => {
+			println!("Error: No valid camera configuration provided");
+			None
+		}
 	}
-
-	camera
 }
 
 fn materials_from_json(config: &json::Object) -> ~[~Material: Send+Freeze] {

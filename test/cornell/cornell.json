@@ -1,5 +1,6 @@
 {
 	"camera": {
+		"type": "Perspective",
 		"position": [-2.78, -5.4, 2.73],
 		"rotation": [90, 0, 0]
 	},

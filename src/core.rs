@@ -1,11 +1,11 @@
 extern mod std;
 use std::rand::{XorShiftRng, Rng};
-use std::num::{exp, ln, min, max, sqrt};
+use std::num::{exp, ln, min, max};
 use std::{task, fmt, vec};
 use std::comm::{Chan, Data};
 use std::iter::range;
 use sync::{MutexArc, Arc};
-use nalgebra::na::{Vec3, Rot3, Rotate};
+use nalgebra::na::Vec3;
 use nalgebra::na;
 
 //Random variable
@@ -101,7 +101,7 @@ pub trait Sampler {
 pub struct Tracer {
 	samples: u32,
 	active_tasks: ~MutexArc<~u16>,
-	scene: ~Arc<Scene>,
+	scene: Option<~Arc<Scene>>,
 	image_size: (u32, u32),
 	tile_size: (u32, u32),
 	tiles: ~MutexArc<~[Tile]>,
@@ -115,11 +115,7 @@ impl Tracer {
 		Tracer {
 			samples: 10,
 			active_tasks: ~MutexArc::new(~0),
-			scene: ~Arc::new(Scene{
-				camera: Camera::new(na::zero(), na::zero()),
-				objects: ~[],
-				materials: ~[]
-			}),
+			scene: None,
 			image_size: (512, 512),
 			tile_size: (64, 64),
 			tiles: ~MutexArc::new(~[]),
@@ -129,38 +125,46 @@ impl Tracer {
 		}
 	}
 
-	pub fn spawn(&mut self/*, sampler: S*/) -> TracerTask {
-		if self.done() {
-			let (image_w, image_h) = self.image_size;
-			self.tiles = ~MutexArc::new(generate_tiles(self.image_size, self.tile_size));
-			self.pixels = ~MutexArc::new(vec::from_elem((image_w * image_h) as uint, vec::from_elem(self.bins, 0.0f32)));
-		}
+	pub fn spawn(&mut self/*, sampler: S*/) -> Option<TracerTask> {
+		match self.scene {
+			Some(ref scene) => {
+				if self.done() {
+					let (image_w, image_h) = self.image_size;
+					self.tiles = ~MutexArc::new(generate_tiles(self.image_size, self.tile_size));
+					self.pixels = ~MutexArc::new(vec::from_elem((image_w * image_h) as uint, vec::from_elem(self.bins, 0.0f32)));
+				}
 
-		let (command_port, command_chan) = Chan::<TracerCommands>::new();
-		let data = TracerData{
-			command_port: command_port,
-			tiles: self.tiles.clone(),//generate_tiles(self.image_size, self.tile_size),
-			samples: self.samples,
-			task_counter: self.active_tasks.clone(),
-			scene: self.scene.clone(),
-			bins: self.bins,
-			image_size: self.image_size,
-			pixels: self.pixels.clone(),
-			freq_span: self.freq_span
-		};
+				let (command_port, command_chan) = Chan::<TracerCommands>::new();
+				let data = TracerData{
+					command_port: command_port,
+					tiles: self.tiles.clone(),//generate_tiles(self.image_size, self.tile_size),
+					samples: self.samples,
+					task_counter: self.active_tasks.clone(),
+					scene: scene.clone(),
+					bins: self.bins,
+					image_size: self.image_size,
+					pixels: self.pixels.clone(),
+					freq_span: self.freq_span
+				};
 
-		let task_number = self.active_tasks.access(|&ref mut num| {
-			**num += 1;
-			**num-1
-		});
-		let mut new_task = task::task();
-		new_task.name(format!("Task {}", task_number));
-		new_task.spawn(proc(){
-			Tracer::run(data);
-		});
+				let task_number = self.active_tasks.access(|&ref mut num| {
+					**num += 1;
+					**num-1
+				});
+				let mut new_task = task::task();
+				new_task.name(format!("Task {}", task_number));
+				new_task.spawn(proc(){
+					Tracer::run(data);
+				});
 
-		TracerTask {
-			command_chan: command_chan
+				Some(TracerTask {
+					command_chan: command_chan
+				})
+			},
+			None => {
+				println!("Error: No scene in task");
+				None
+			}
 		}
 	}
 
@@ -169,7 +173,7 @@ impl Tracer {
 	}
 
 	pub fn set_scene(&mut self, scene: Scene) {
-		self.scene = ~Arc::new(scene);
+		self.scene = Some(~Arc::new(scene));
 	}
 
 	fn run(data: TracerData) {
@@ -454,59 +458,13 @@ pub trait SceneObject: Send+Freeze {
 
 
 //Camera
-pub struct Camera {
-	position: Vec3<f32>,
-	rotation: Rot3<f32>,
-	lens: f32,
-	aperture: f32,
-	focal_distance: f32
-}
-
-impl Camera {
-	pub fn new(position: Vec3<f32>, rotation: Vec3<f32>) -> Camera {
-		Camera{
-			position: position,
-			rotation: Rot3::new(rotation),
-			lens: 2.0,
-			aperture: 0.0,
-			focal_distance: 0.0
-		}
-	}
-
-	pub fn look_at(from: Vec3<f32>, to: Vec3<f32>, up: Vec3<f32>) -> Camera {
-		let mut rot = Rot3::new(na::zero());
-		rot.look_at_z(&(to - from), &up);
-		Camera{
-			position: from,
-			rotation: rot,
-			lens: 2.0,
-			aperture: 0.0,
-			focal_distance: 0.0
-		}
-	}
-
-	fn ray_to(&self, x: f32, y: f32, rand_var: &mut RandomVariable) -> Ray {
-		if self.aperture == 0.0 {
-			Ray::new(self.position, self.rotation.rotate(&Vec3::new(x, -y, -self.lens)))
-		} else {
-			let base_dir = Vec3::new(x / self.lens, -y / self.lens, -1.0);
-			let focal_point = base_dir * self.focal_distance;
-
-			let sqrt_r = sqrt(rand_var.next() * self.aperture);
-			let psi = rand_var.next() * 2.0 * std::f32::consts::PI;
-			let lens_x = sqrt_r * psi.cos();
-			let lens_y = sqrt_r * psi.sin();
-
-			let lens_point = Vec3::new(lens_x, lens_y, 0.0);
-			
-			Ray::new(self.rotation.rotate(&lens_point) + self.position, self.rotation.rotate(&(focal_point - lens_point)))
-		}
-	}
+pub trait Camera {
+	fn ray_to(&self, x: f32, y: f32, rand_var: &mut RandomVariable) -> Ray;
 }
 
 //Scene
 pub struct Scene {
-	camera: Camera,
+	camera: ~Camera: Send + Freeze,
 	objects: ~[~SceneObject: Send + Freeze],
 	materials: ~[~Material: Send + Freeze]
 }

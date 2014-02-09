@@ -1,6 +1,6 @@
 {
 	"camera": {
-		"label": "main",
+		"type": "Perspective",
 		"position": [0, -1, 0],
 		"rotation": [180, 0, 0]
 	},

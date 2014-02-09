@@ -284,6 +284,7 @@
 	],
 
 	"camera": {
+		"type": "Perspective",
 		"position": [0, 0, 30]
 	},
 
