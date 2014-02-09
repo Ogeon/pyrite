@@ -14,6 +14,9 @@ To download and build Pyrite to the `bin/` folder:
     make deps
     make
 
+
+Run `make update` before `make deps` to trigger a dependency update.
+
 To run Pyrite:
 
 

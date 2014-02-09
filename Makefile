@@ -11,6 +11,10 @@ bin:
 lint:
 	rustc -O --no-trans src/pyrite.rs
 
+update:
+	git submodule init
+	git submodule update
+
 deps:
 	make -C lib/nalgebra
 	make -C lib/rust-png -f Makefile.in
