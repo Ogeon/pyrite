@@ -1,0 +1,6 @@
+[submodule "lib/nalgebra"]
+	path = lib/nalgebra
+	url = git://github.com/sebcrozet/nalgebra.git
+[submodule "lib/rust-png"]
+	path = lib/rust-png
+	url = git://github.com/Ogeon/rust-png.git
