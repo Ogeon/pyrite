@@ -170,7 +170,10 @@ fn save_png(path: Path, values: &~[~[f32]], width: u32, height: u32, response: &
 		pixels: pixels.concat_vec()
 	};
 
-	png::store_png(&image, &path);
+	match png::store_png(&image, &path) {
+		Err(e) => println!("Error while saving image: {}", e),
+		_ => {}
+	}
 }
 
 fn freq_to_rgb(freq_span: (f32, f32), color: &~[f32], response: &[~ParametricValue, ..3]) -> ~[u8] {
@@ -206,20 +209,6 @@ fn freq_to_rgb(freq_span: (f32, f32), color: &~[f32], response: &[~ParametricVal
 	let b = min( 1.0, (if bw > 0.0 {bv / bw} else {0.0})) * 255.0;
 
 	~[r as u8, g as u8, b as u8]
-}
-	
-
-fn save_png_u8(path: Path, pixels: ~[u8], width: u32, height: u32) {
-	println!("Saving PNG...");
-
-	let image = png::Image{
-		width: width,
-		height: height,
-		color_type: png::RGB8,
-		pixels: pixels
-	};
-
-	png::store_png(&image, &path);
 }
 
 fn load_project(path: &str) -> ~json::Object {
@@ -451,7 +440,7 @@ fn objects_from_json(config: &json::Object, material_count: uint, project_path: 
 		match config.find(&~"file") {
 			Some(&json::String(ref file_name)) => {
 				let model = models.find_or_insert_with(file_name.to_owned(), |file| {
-						wavefront::parse(&project_path.with_filename(file_name.to_owned()))
+						wavefront::parse(&project_path.with_filename(file.to_owned()))
 					}
 				);
 
