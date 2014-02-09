@@ -1,7 +1,6 @@
 use std::io::{BufferedReader, File};
 use std::hashmap::HashMap;
 use std::num;
-use std::from_str;
 
 pub struct Vertex {
 	position: [f32, ..3],
@@ -18,42 +17,6 @@ pub struct Mesh {
 
 
 impl Mesh {
-	pub fn get_vertex_buffer(&self) -> ~[f32] {
-		let mut buffer : ~[f32] = ~[];
-		for &vertex in self.vertices.iter() {
-			for &value in vertex.position.iter() {
-				buffer.push(value);
-			}
-			for &value in vertex.normal.iter() {
-				buffer.push(value);
-			}
-			for &value in vertex.texture.iter() {
-				buffer.push(value);
-			}
-		}
-
-		buffer
-	}
-
-	pub fn get_triangle_buffer(&self) -> ~[f32] {
-		let mut buffer : ~[f32] = ~[];
-		for &index in self.indices.iter() {
-			let vertex = &self.vertices[index];
-
-			for &value in vertex.position.iter() {
-				buffer.push(value);
-			}
-			for &value in vertex.normal.iter() {
-				buffer.push(value);
-			}
-			for &value in vertex.texture.iter() {
-				buffer.push(value);
-			}
-		}
-
-		buffer
-	}
-
 	pub fn get_group_index(&self, name : &~str) -> Option<u16> {
 		self.groups.find_copy(name)
 	}
