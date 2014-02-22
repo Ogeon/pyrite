@@ -1,8 +1,8 @@
-extern mod png;
-extern mod extra;
-extern mod sync;
-extern mod nalgebra;
-use std::num::{min, max};
+extern crate png;
+extern crate extra;
+extern crate sync;
+extern crate nalgebra;
+use std::cmp::{min, max};
 use std::io::{File, stdio, Reader};
 use std::io::BufferedReader;
 use std::hashmap::HashMap;
@@ -62,7 +62,7 @@ fn main() {
 			match stdin.read_line() {
 				Ok(line) => {
 					let args: ~[&str] = line.trim().splitn(' ', 1).collect();
-					match args {
+					match args.as_slice() {
 						[&"render"] => {
 							match render(project, &project_dir) {
 								Some(tracer) => {

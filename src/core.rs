@@ -1,6 +1,7 @@
-extern mod std;
+use std;
 use std::rand::{XorShiftRng, Rng};
-use std::num::{exp, ln, min, max};
+use std::num::{exp, ln};
+use std::cmp::{min, max};
 use std::{task, fmt, vec};
 use std::comm::{Chan, Data};
 use std::iter::range;
@@ -160,7 +161,7 @@ impl Tracer {
 					**num-1
 				});
 				let mut new_task = task::task();
-				new_task.name(format!("Task {}", task_number));
+				new_task = new_task.named(format!("Task {}", task_number));
 				new_task.spawn(proc(){
 					Tracer::run(data);
 				});
@@ -216,19 +217,17 @@ impl Tracer {
 								let mut ray = data.scene.get().camera.ray_to(sample_x, sample_y, &mut rand_var);
 
 								let mut dispersion = false;
-								let mut emission = false;
+								let mut last_emission = false;
 
-								let bounces: ~[Reflection] = range(0, 10).take_while(|_| {!emission}).filter_map(|_| {
+								let bounces = range(0, 10).filter_map(|_| {
 									match Tracer::trace(ray, frequency, data.scene.get(), &mut rand_var) {
 										Some(reflection) => {
-											emission = reflection.emission;
 											ray = reflection.out;
 											dispersion = dispersion || reflection.dispersion;
 											Some(reflection)
 										},
 										None => {
 											//TODO: Background color
-											emission = true;
 											/*Reflection {
 												out: ray,
 												color: 0.0,
@@ -238,7 +237,11 @@ impl Tracer {
 											None
 										}
 									}
-								}).collect();
+								}).take_while(|reflection| {
+									let result = last_emission;
+									last_emission = reflection.emission;
+									!result
+								}).to_owned_vec();
 
 								if bounces.len() > 0 && bounces.last().unwrap().emission {
 									if dispersion {

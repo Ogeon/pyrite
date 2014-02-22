@@ -229,8 +229,11 @@ impl Curve {
 			Some(&json::List(ref list)) => {
 				list.iter().filter_map(|v| {
 					match v {
-						&json::List([json::Number(x), json::Number(y)]) => {
-							Some((x as f32, y as f32))
+						&json::List(ref list) => {
+							match list.as_slice() {
+								[json::Number(x), json::Number(y)] => Some((x as f32, y as f32)),
+								_ => None
+							}
 						},
 						_ => None
 					}

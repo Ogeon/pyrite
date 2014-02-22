@@ -1,4 +1,4 @@
-extern mod std;
+use std;
 use std::vec;
 use extra::json;
 use nalgebra::na;
