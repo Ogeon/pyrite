@@ -303,7 +303,7 @@
 	"render": {
 		"width": 512,
 		"height": 512,
-		"samples": 500,
+		"samples": 8000,
 		"tile_width": 32,
 		"tile_height": 32
 	},

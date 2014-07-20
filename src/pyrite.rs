@@ -10,7 +10,7 @@ use std::str::StrSlice;
 use extra::time::precise_time_s;
 use extra::json;
 use nalgebra::na::Vec3;
-use core::{Tracer, Camera, Scene, SceneObject, Material, ParametricValue};
+use core::{Tracer, Camera, Scene, SceneObject, Material, ParametricValue, KdTree};
 use wavefront::Mesh;
 mod core;
 mod shapes;
@@ -359,9 +359,10 @@ fn scene_from_json(config: &json::Object, project_path: &Path) -> Option<Scene> 
 	match camera_from_json(config) {
 		Some(camera) => {
 			let materials = materials_from_json(config);
+			let objects = objects_from_json(config, materials.len() - 1, project_path);
 			Some(Scene {
 				camera: camera,
-				objects: objects_from_json(config, materials.len() - 1, project_path),
+				objects: KdTree::build(objects),
 				materials: materials
 			})
 		},

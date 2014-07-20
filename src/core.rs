@@ -1,6 +1,6 @@
 use std;
 use std::rand::{XorShiftRng, Rng};
-use std::num::{exp, ln};
+use std::num::{exp, ln, abs};
 use std::cmp::{min, max};
 use std::{task, fmt, vec};
 use std::comm::{Chan, Data};
@@ -186,7 +186,7 @@ impl Tracer {
 	}
 
 	fn run(data: TracerData) {
-		task::deschedule();
+		std::task::deschedule();
 
 		let mut running = true;
 		let mut rand_var = RandomVariable::new(XorShiftRng::new());
@@ -286,6 +286,7 @@ impl Tracer {
 						
 								samples -= 1;
 							}
+							std::task::deschedule();
 
 							values.iter().zip(weights.iter()).map(|(&v, &w)| {
 								if w == 0.0 {
@@ -302,7 +303,6 @@ impl Tracer {
 								pixels[index] = p.to_owned();
 							}
 						});
-						task::deschedule();
 					}
 				},
 				None => {running = false;}
@@ -325,23 +325,8 @@ impl Tracer {
 	}
 
 	fn trace(ray: Ray, frequency: f32, scene: &Scene, rand_var: &mut RandomVariable) -> Option<Reflection> {
-		let mut closest_dist = std::f32::INFINITY;
-		let mut closest_hit = None;
-
-		for object in scene.objects.iter() {
-			match object.intersect(ray) {
-				Some((hit, dist)) => {
-					if dist < closest_dist && dist > 0.001 {
-						closest_dist = dist;
-						closest_hit = Some((object, Ray::new(hit.origin, hit.direction)));
-					}
-				},
-				None => {}
-			}
-		}
-
-		match closest_hit {
-			Some((object, hit)) => {
+		match scene.objects.search(&ray) {
+			Some((object, hit, _)) => {
 				//Use object material to get emission, color and reflected ray
 				let material = &scene.materials[object.get_material_index(hit, ray)];
 				Some(material.get_reflection(hit, ray, frequency, rand_var))
@@ -441,6 +426,8 @@ pub fn generate_tiles(image_size: (u32, u32), tile_size: (u32, u32)) -> ~[Tile] 
 	tiles
 }
 
+
+
 //Ray
 pub struct Ray {
     origin: Vec3<f32>,
@@ -461,7 +448,8 @@ impl Ray {
 //Scene Object
 pub trait SceneObject: Send+Freeze {
 	fn get_material_index(&self, normal: Ray, ray_in: Ray) -> uint;
-	fn intersect(&self, ray: Ray) -> Option<(Ray, f32)>;
+	fn intersect(&self, ray: &Ray) -> Option<(Ray, f32)>;
+	fn get_bounds(&self) -> (Vec3<f32>, Vec3<f32>);
 }
 
 
@@ -470,10 +458,276 @@ pub trait Camera {
 	fn ray_to(&self, x: f32, y: f32, rand_var: &mut RandomVariable) -> Ray;
 }
 
+
+
+//Kd-tree
+pub struct KdTree {
+	left: Option<~KdTree>,
+	right: Option<~KdTree>,
+	center: Option<~KdTree>,
+	here: ~[~SceneObject: Send + Freeze],
+	priv axis: u8,
+	priv min: f32,
+	priv max: f32,
+	priv limit: f32
+}
+
+impl KdTree {
+	pub fn build(objects: ~[~SceneObject: Send + Freeze]) -> ~KdTree {
+		let (axis, limit) = KdTree::get_axis(objects);
+
+		let (_, _, min, max) = objects.iter().fold((0.0, 0.0, std::f32::INFINITY, std::f32::NEG_INFINITY),
+			|(sum, weight, total_min, total_max), object| {
+			let (min, max) = unsafe {
+				let (min, max) = object.get_bounds();
+				(min.at_fast(axis as uint), max.at_fast(axis as uint))
+			};
+			let w = 1.0 + max - min;
+			let v = (min + max / 2.0) * w;
+			(sum + v, weight + w, std::cmp::min(total_min, min), std::cmp::max(total_max, max))
+		});
+
+		if axis < 3 {
+			let mut objects = objects;
+
+			let mut left_list = ~[];
+			let mut right_list = ~[];
+			let mut center_list = ~[];
+
+			//let limit = if weight == 0.0 { 0.0 } else { sum / weight };
+
+			for object in objects.move_iter() {
+				let (min, max) = unsafe {
+					let (min, max) = object.get_bounds();
+					(min.at_fast(axis as uint), max.at_fast(axis as uint))
+				};
+
+				if min < limit && max < limit {
+					left_list.push(object);
+				} else if min >= limit && max >= limit {
+					right_list.push(object);
+				} else {
+					center_list.push(object);
+				}
+			}
+
+			/*if left_list.len() == 0 && center_list.len() == 0 {
+				center_list = right_list;
+				right_list = ~[];
+			}
+
+			if right_list.len() == 0 && center_list.len() == 0 {
+				center_list = left_list;
+				left_list = ~[];
+			}*/
+
+
+			//println!("left: {}, right: {}, center: {}", left_list.len(), right_list.len(), center_list.len());
+
+			~KdTree {
+				left: if left_list.len() > 0 {
+					Some(KdTree::build(left_list))
+				} else {
+					None
+				},
+				right: if right_list.len() > 0 {
+					Some(KdTree::build(right_list))
+				} else {
+					None
+				},
+				center: if center_list.len() > 0 {
+					Some(KdTree::build(center_list))
+				} else {
+					None
+				},
+				here: ~[],
+				axis: axis,
+				min: min,
+				max: max,
+				limit: limit
+			}
+		} else {
+			~KdTree {
+				left: None,
+				right: None,
+				center: None,
+				here: objects,
+				axis: 0,
+				min: std::f32::NEG_INFINITY,
+				max: std::f32::INFINITY,
+				limit: 0.0
+			}
+		}
+	}
+
+	fn get_axis(objects: &[~SceneObject: Send + Freeze]) -> (u8, f32) {
+		let mut min_max = ~[std::f32::INFINITY, std::f32::INFINITY, std::f32::INFINITY];
+		let mut max_min = ~[std::f32::NEG_INFINITY, std::f32::NEG_INFINITY, std::f32::NEG_INFINITY];
+
+		for object in objects.iter() {
+			let (min_bounds, max_bounds) = object.get_bounds();
+
+			for (index, value) in min_max.mut_iter().enumerate() {
+				*value = min(value.clone(), unsafe {max_bounds.at_fast(index as uint)});
+			}
+
+			for (index, value) in max_min.mut_iter().enumerate() {
+				*value = max(value.clone(), unsafe {min_bounds.at_fast(index as uint)});
+			}
+		}
+
+		let (index, _) = min_max.iter().zip(max_min.iter()).enumerate().fold((3, 0.0), |(best_index, best_diff), (index, (&min, &max))| {
+			if max - min > best_diff {
+				(index as u8, max - min)
+			} else {
+				(best_index, best_diff)
+			}
+		});
+
+		//println!("Differences: {}, {}, {}, best: {}", max_min[0] - min_max[0], max_min[1] - min_max[1], max_min[2] - min_max[2], index);
+
+		let limit = if index < 3 {
+			(max_min[index] + min_max[index]) / 2.0
+		} else {
+			0.0
+		};
+
+		(index, limit)
+	}
+
+	fn trace<'a>(&'a self, ray: &Ray) -> Option<(&'a ~SceneObject: Send + Freeze, Ray, f32)> {
+		let mut closest_dist = std::f32::INFINITY;
+
+		self.here.iter().fold(None, |closest, object| {
+			match object.intersect(ray) {
+				Some((hit, dist)) => {
+					if dist < closest_dist && dist > 0.001 {
+						closest_dist = dist;
+						Some((object, Ray::new(hit.origin, hit.direction), dist))
+					} else {
+						closest
+					}
+				},
+				None => closest
+			}
+		})
+	}
+
+	fn search<'a>(&'a self, ray: &Ray) -> Option<(&'a ~SceneObject: Send + Freeze, Ray, f32)> {
+		let mut stack = ~[];
+		let mut best_intersection = self.trace(ray);
+		let mut max_dist = std::f32::INFINITY;
+
+		let origin = unsafe{ ray.origin.at_fast(self.axis as uint) };
+		let direction = unsafe{ ray.direction.at_fast(self.axis as uint) };
+
+		if origin >= self.limit || (origin < self.limit && direction > 0.0) {
+			match self.right {
+				Some(ref child) => {
+					if !(origin < self.limit && direction > 0.0 && abs((origin-self.limit)/direction) > max_dist) {
+						stack.push(child);
+					}
+				},
+				None => {}
+			}
+		}
+
+		if origin < self.limit || (origin >= self.limit && direction < 0.0) {
+			match self.left {
+				Some(ref child) => {
+					if !(origin >= self.limit && direction < 0.0 && abs((origin-self.limit)/direction) > max_dist) {
+						stack.push(child);
+					}
+				},
+				None => {}
+			}
+		}
+
+		
+		match self.center {
+			Some(ref child) => {
+				stack.push(child);
+			},
+			None => {}
+		}
+
+		while stack.len() > 0 {
+			let current_node = stack.pop().unwrap();
+
+			let origin = unsafe{ ray.origin.at_fast(current_node.axis as uint) };
+			let direction = unsafe{ ray.direction.at_fast(current_node.axis as uint) };
+
+			if (origin < current_node.min && direction <= 0.0) || (origin > current_node.max && direction >= 0.0) {
+				continue;
+			}
+
+			if origin < current_node.min && direction > 0.0 && abs((origin-current_node.min)/direction) > max_dist {
+				continue;
+			}
+
+			if origin > current_node.max && direction < 0.0 && abs((origin-current_node.max)/direction) > max_dist {
+				continue;
+			}
+
+			match current_node.trace(ray) {
+				Some((object, hit, dist)) => {
+					match best_intersection {
+						Some((_, _, best_dist)) => {
+							if dist < best_dist {
+								max_dist = dist;
+								best_intersection = Some((object, hit, dist));
+							}
+						},
+						None => {
+							max_dist = dist;
+							best_intersection = Some((object, hit, dist));
+						}
+					}
+				},
+				None => {}
+			}
+
+			if origin >= current_node.limit || (origin < current_node.limit && direction > 0.0) {
+				match current_node.right {
+					Some(ref child) => {
+						if !(origin < current_node.limit && direction > 0.0 && abs((origin-current_node.limit)/direction) > max_dist) {
+							stack.push(child);
+						}
+					},
+					None => {}
+				}
+			}
+
+			if origin < current_node.limit || (origin >= current_node.limit && direction < 0.0) {
+				match current_node.left {
+					Some(ref child) => {
+						if !(origin >= current_node.limit && direction < 0.0 && abs((origin-current_node.limit)/direction) > max_dist) {
+							stack.push(child);
+						}
+					},
+					None => {}
+				}
+			}
+
+			
+			match current_node.center {
+				Some(ref child) => {
+					stack.push(child);
+				},
+				None => {}
+			}
+		}
+
+		best_intersection
+	}
+}
+
+
+
 //Scene
 pub struct Scene {
 	camera: ~Camera: Send + Freeze,
-	objects: ~[~SceneObject: Send + Freeze],
+	objects: ~KdTree,
 	materials: ~[~Material: Send + Freeze]
 }
 

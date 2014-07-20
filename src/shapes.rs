@@ -1,8 +1,9 @@
 use extra::json;
 use nalgebra::na;
-use nalgebra::na::Vec3;
+use nalgebra::na::{Vec3, Iterable};
 use core::{SceneObject, Ray};
 use std::num::{FromPrimitive, Zero, from_f64};
+use std::cmp::{min, max};
 
 pub fn from_json(config: &~json::Object, material_count: uint) -> Option<~SceneObject: Send+Freeze> {
 	match config.find(&~"type") {
@@ -129,7 +130,7 @@ impl SceneObject for Sphere {
 		self.material
 	}
 
-	fn intersect(&self, ray: Ray) -> Option<(Ray, f32)> {
+	fn intersect(&self, ray: &Ray) -> Option<(Ray, f32)> {
 		let diff = ray.origin - self.position;
 		let a0 = na::dot(&diff, &diff) - self.radius*self.radius;
 
@@ -160,6 +161,11 @@ impl SceneObject for Sphere {
 			let hit_position = ray.origin + (ray.direction * dist);
 			return Some((Ray::new(hit_position, hit_position - self.position), dist));
 		}
+	}
+
+	fn get_bounds(&self) -> (Vec3<f32>, Vec3<f32>) {
+		let rad_vec = Vec3::new(self.radius, self.radius, self.radius);
+		(self.position - rad_vec, self.position + rad_vec)
 	}
 }
 
@@ -199,7 +205,7 @@ impl SceneObject for Triangle {
 	}
 
 	//Möller–Trumbore intersection algorithm
-	fn intersect(&self, ray: Ray) -> Option<(Ray, f32)> {
+	fn intersect(&self, ray: &Ray) -> Option<(Ray, f32)> {
 		let epsilon = 0.000001f32;
 		let e1 = self.v2 - self.v1;
 		let e2 = self.v3 - self.v1;
@@ -235,5 +241,15 @@ impl SceneObject for Triangle {
 		} else {
 			None
 		}
+	}
+
+	fn get_bounds(&self) -> (Vec3<f32>, Vec3<f32>) {
+		(self.v1.iter().zip(self.v2.iter().zip(self.v3.iter())).map(|(p1, (p2, p3))| {
+			min(min(p1, p2), p3).clone()
+		}).collect(),
+
+		self.v1.iter().zip(self.v2.iter().zip(self.v3.iter())).map(|(p1, (p2, p3))| {
+			max(max(p1, p2), p3).clone()
+		}).collect())
 	}
 }
