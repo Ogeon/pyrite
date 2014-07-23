@@ -1,0 +1,18 @@
+[package]
+
+name = "pyrite"
+version = "0.0.0"
+authors = []
+
+[[bin]]
+
+name = "pyrite"
+path = "src/main.rs"
+
+[dependencies.cgmath]
+
+git = "https://github.com/bjz/cgmath-rs"
+
+[dependencies.image]
+
+git = "https://github.com/PistonDevelopers/rust-image"
