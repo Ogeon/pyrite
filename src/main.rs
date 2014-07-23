@@ -5,19 +5,23 @@ use std::cmp::min;
 use std::sync::{TaskPool, Arc, RWLock};
 use std::io::File;
 
-use cgmath::vector::Vector2;
-use cgmath::transform::Transform;
+use cgmath::vector::{Vector2, Vector3};
+use cgmath::rotation::Rotation;
+use cgmath::transform::{Transform, Decomposed};
 use cgmath::angle::deg;
+use cgmath::ray::Ray3;
 
 use tracer::{Camera, Area, Tile};
 
 mod tracer;
 mod cameras;
+mod worlds;
+mod shapes;
 
 fn main() {
     let tile_size = 64;
     let image_size = Vector2::new(640, 480);
-    let samples = 100;
+    let samples = 10;
 
     let camera = cameras::Perspective::new(Transform::identity(), image_size.clone(), deg(45.0f64));
 
@@ -33,13 +37,23 @@ fn main() {
             let size = Vector2::new(min(image_size.x - from.x, tile_size), min(image_size.y - from.y, tile_size));
 
             let image_area = Area::new(from, size);
-            let camera_area = camera.to_view_area(image_area);
+            let camera_area = camera.to_view_area(&image_area);
 
             tiles.push(Tile::new(image_area, camera_area, 0.0, 1.0, 1));
         }
     }
 
-    let config = Arc::new(Tiles {
+    let sphere = shapes::Sphere(
+        Decomposed {
+            scale: 1.0,
+            rot: Rotation::identity(),
+            disp: Vector3::new(0.0, 0.0, 2.0)
+        }
+    );
+
+    let config = Arc::new(RenderContext {
+        camera: camera,
+        world: worlds::SimpleWorld::new(vec!(Geometric(sphere))),
         pending: RWLock::new(tiles),
         completed: RWLock::new(Vec::new())
     });
@@ -52,15 +66,15 @@ fn main() {
     });
 
     for _ in range(0, tile_count) {
-        pool.execute(proc(&(task_id, ref tiles): &(uint, Arc<Tiles>)) {
+        pool.execute(proc(&(task_id, ref context): &(uint, Arc<RenderContext<cameras::Perspective, worlds::SimpleWorld<Vec<Object>>>>)) {
             let mut tile = {
-                tiles.pending.write().pop().unwrap()
+                context.pending.write().pop().unwrap()
             };
             println!("Task {} got tile {}", task_id, tile.screen_area().from);
 
-            tracer::trace(&mut tile, samples);
+            tracer::render(&mut tile, samples, &context.camera, &context.world);
 
-            tiles.completed.write().push(tile);
+            context.completed.write().push(tile);
         })
     }
 
@@ -69,19 +83,17 @@ fn main() {
     let mut pixels = Vec::from_elem(image_size.x * image_size.y * 3, 0);
     
     while tile_counter < tile_count {
-        std::io::timer::sleep(1000);
+        std::io::timer::sleep(4000);
 
 
         loop {
             match config.completed.write().pop() {
                 Some(tile) => {
                     for (spectrum, position) in tile.pixels() {
-                        spectrum.map(|spectrum| {
-                            let value = clamp_channel(spectrum.value_at(0.0));
-                            *pixels.get_mut(position.x * 3 + position.y * image_size.x * 3)     = value;
-                            *pixels.get_mut(position.x * 3 + position.y * image_size.x * 3 + 1) = value;
-                            *pixels.get_mut(position.x * 3 + position.y * image_size.x * 3 + 2) = value;
-                        });
+                        let value = clamp_channel(spectrum.value_at(0.0));
+                        *pixels.get_mut(position.x * 3 + position.y * image_size.x * 3)     = value;
+                        *pixels.get_mut(position.x * 3 + position.y * image_size.x * 3 + 1) = value;
+                        *pixels.get_mut(position.x * 3 + position.y * image_size.x * 3 + 2) = value;
                     }
 
                     tile_counter += 1;
@@ -100,9 +112,23 @@ fn main() {
     println!("Done!")
 }
 
-struct Tiles {
+struct RenderContext<C, W> {
+    camera: C,
+    world: W,
     pending: RWLock<Vec<Tile>>,
     completed: RWLock<Vec<Tile>>
+}
+
+enum Object {
+    Geometric(shapes::Shape)
+}
+
+impl worlds::WorldObject for Object {
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<Ray3<f64>> {
+        match *self {
+            Geometric(shape) => shape.intersect(ray)
+        }
+    }
 }
 
 fn clamp_channel(value: f64) -> u8 {

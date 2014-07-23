@@ -5,9 +5,15 @@ use std::cmp::min;
 use std::iter::Iterator;
 
 use cgmath::vector::{Vector, Vector2};
+use cgmath::ray::Ray3;
 
 pub trait Camera {
-    fn to_view_area(&self, area: Area<uint>) -> Area<f64>;
+    fn to_view_area(&self, area: &Area<uint>) -> Area<f64>;
+    fn ray_towards(&self, target: &Vector2<f64>) -> Ray3<f64>;
+}
+
+pub trait World {
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, f64)>;
 }
 
 pub struct Spectrum {
@@ -50,17 +56,12 @@ impl<S: Mul<S, S>> Area<S> {
 }
 
 struct Pixel {
-    pub spectrum: Vec<f64>,
-    pub weight: f64
+    pub spectrum: Vec<(f64, f64)>
 }
 
 impl Pixel {
-    fn final_values(&self) -> Option<Vec<f64>> {
-        if self.weight > 0.0 {
-            Some(self.spectrum.iter().map(|&v| v / self.weight).collect())
-        } else {
-            None
-        }
+    fn final_values(&self) -> Vec<f64> {
+        self.spectrum.iter().map(|&(b, w)| if w > 0.0 { b / w } else { 0.0 }).collect()
     }
 }
 
@@ -70,8 +71,8 @@ pub struct Pixels<'a> {
     y_counter: uint
 }
 
-impl<'a> Iterator<(Option<Spectrum>, Vector2<uint>)> for Pixels<'a> {
-    fn next(&mut self) -> Option<(Option<Spectrum>, Vector2<uint>)> {
+impl<'a> Iterator<(Spectrum, Vector2<uint>)> for Pixels<'a> {
+    fn next(&mut self) -> Option<(Spectrum, Vector2<uint>)> {
         if self.y_counter >= self.tile.screen_area().size.y {
             None
         } else {
@@ -116,8 +117,7 @@ impl Tile {
             frequency_width: frequency_to - frequency_from,
             screen_camera_ratio: Vector2::new(screen_area.size.x as f64 / camera_area.size.x, screen_area.size.y as f64 / camera_area.size.y),
             pixels: Vec::from_fn(screen_area.area(), |_| Pixel {
-                spectrum: Vec::from_elem(spectrum_steps, 0.0),
-                weight: 0.0
+                spectrum: Vec::from_elem(spectrum_steps, (0.0, 0.0))
             })
         }
     }
@@ -138,10 +138,9 @@ impl Tile {
         }
     }
 
-    pub fn pixel(&self, x: uint, y: uint) -> Option<Spectrum> {
-        self.pixels[x + y * self.screen_area.size.x].final_values().map(|values| {
-            Spectrum::new(self.frequency_from, self.frequency_to, values)
-        })
+    pub fn pixel(&self, x: uint, y: uint) -> Spectrum {
+        let values = self.pixels[x + y * self.screen_area.size.x].final_values();
+        Spectrum::new(self.frequency_from, self.frequency_to, values)
     }
 
     pub fn sample_position<R: Rng>(&self, rng: &mut R) -> Vector2<f64> {
@@ -158,12 +157,13 @@ impl Tile {
         let offset = sample.position.sub_v(&self.camera_area.from);
         let x = (offset.x * self.screen_camera_ratio.x) as uint;
         let y = (offset.y * self.screen_camera_ratio.y) as uint;
-        let &Pixel{spectrum: ref mut spectrum, weight: ref mut weight} = self.pixels.get_mut(x + y * self.screen_area.size.x);
+        let &Pixel{spectrum: ref mut spectrum} = self.pixels.get_mut(x + y * self.screen_area.size.x);
 
         let index = ((sample.frequency - self.frequency_from) / self.frequency_width * spectrum.len() as f64) as uint;
 
         if index <= spectrum.len() {
-            *spectrum.get_mut(min(index, index - 1)) += sample.brightness * sample.weight;
+            let (ref mut brightness, ref mut weight) = *spectrum.get_mut(min(index, index - 1));
+            *brightness += sample.brightness * sample.weight;
             *weight += sample.weight;
         }
     }
@@ -189,7 +189,7 @@ impl<R: Rng + Rand> RandomSequence<R> {
         RandomSequence {
             pos: 0,
             numbers: self.numbers.iter().map(|&n| {
-                if 0.2f32 < rng.gen() {
+                if 0.5f32 < rng.gen() {
                     if rng.gen() {
                         n + rng.gen_range(0, 100_000_000)
                     } else {
@@ -220,18 +220,19 @@ impl<R: Rng> Rng for RandomSequence<R> {
     }
 }
 
-pub fn trace(tile: &mut Tile, samples: uint) {
+pub fn render<C: Camera, W: World>(tile: &mut Tile, samples: uint, camera: &C, world: &W) {
     let mut rng: RandomSequence<XorShiftRng> = RandomSequence::new(rand::task_rng().gen());
-    let mut old_sample = sample(tile, &mut rng);
+    let mut old_sample = sample(tile, &mut rng, camera, world);
+    old_sample.weight = 1.0;
 
     for _ in range(0, tile.pixel_count() * samples - 1) {
         let mut new_rng = rng.mutate();
-        let mut new_sample = sample(tile, &mut new_rng);
+        let mut new_sample = sample(tile, &mut new_rng, camera, world);
 
-        let a = (new_sample.brightness / old_sample.brightness).min(1.0);
+        let a = ((new_sample.brightness + 1.0) / (old_sample.brightness + 1.0)).min(1.0);
 
-        new_sample.weight = a / (new_sample.brightness);
-        old_sample.weight += (1.0 - a) / (old_sample.brightness);
+        new_sample.weight = a;
+        old_sample.weight += (1.0 - a);
 
         if a >= new_rng.generator().gen() {
             rng = new_rng;
@@ -244,13 +245,15 @@ pub fn trace(tile: &mut Tile, samples: uint) {
     }
 }
 
-fn sample<R: Rng>(tile: &Tile, rng: &mut R) -> Sample {
+fn sample<R: Rng, C: Camera, W: World>(tile: &Tile, rng: &mut R, camera: &C, world: &W) -> Sample {
     let position = tile.sample_position(rng);
     let frequency = tile.sample_frequency(rng);
 
-    //Sample world
-    let b = (position.x * position.y).abs();
-    let brightness = rng.gen_range(b * 0.5, b * 1.5);
+    let ray = camera.ray_towards(&position);
+    let brightness = match world.intersect(&ray) {
+        Some((normal, distance)) => 1.0 / distance,
+        None => 0.0
+    };
 
     Sample {
         brightness: brightness,
