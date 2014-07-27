@@ -1,3 +1,5 @@
+#![feature(macro_rules)]
+
 extern crate cgmath;
 extern crate image;
 
@@ -17,6 +19,7 @@ mod tracer;
 mod cameras;
 mod worlds;
 mod shapes;
+mod config;
 
 fn main() {
     let tile_size = 64;
