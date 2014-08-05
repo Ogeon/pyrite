@@ -6,7 +6,6 @@ pub use self::parser::String;
 pub use self::parser::Number;
 
 mod parser;
-mod interpreter;
 
 pub type PrimitiveType = parser::Value;
 
