@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::any::{Any, AnyRefExt};
+use std::str::StrAllocating;
 
 pub use self::parser::String;
 pub use self::parser::Number;
@@ -76,7 +77,7 @@ fn deep_insert(items: &mut HashMap<String, ConfigItem>, path: &[String], item: C
             Structure(None, HashMap::new())
         ) {
             &Structure(_, ref mut fields) => deep_insert(fields, rest, item).map(|e| format!("{}.{}", segment, e)),
-            &Primitive(ref v) => Some(format!("{}: expected a structure, but found primitive value {}", segment, v))
+            &Primitive(ref v) => Some(format!("{}: expected a structure, but found primitive value '{}'", segment, v))
         },
         [] => unreachable!()
     }
@@ -88,12 +89,12 @@ fn deep_find<'a>(items: &'a HashMap<String, ConfigItem>, path: &Vec<String>) -> 
     let end = path.len() - 1;
 
     for (i, segment) in path.iter().enumerate() {
-        let result = items.find(&segment.clone());
+        result = items.find(&segment.clone());
         if i < end {
             items = match result {
                 Some(&Structure(_, ref fields)) => fields,
-                Some(&Primitive(ref v)) => return Err(format!("{}: expected a structure, but found primitive value {}", path.slice(0, i + 1).connect("."), v)),
-                None => return Err(format!("{} was not found", path.slice(0, i + 1).connect(".")))
+                Some(&Primitive(ref v)) => return Err(format!("{}: expected a structure, but found primitive value '{}'", path.slice(0, i + 1).connect("."), v)),
+                None => return Ok(None)
             };
         }
     }
@@ -114,11 +115,14 @@ impl ConfigContext {
         }
     }
 
-    pub fn insert_type<T, D: 'static + Decoder<T>>(&mut self, group_name: String, type_name: String, decoder: D) -> bool {
-        self.groups.find_or_insert_with(group_name, |_| HashMap::new()).insert(type_name, box decoder as Box<Any>)
+    pub fn insert_type<T: 'static, Gr: StrAllocating, Ty: StrAllocating>(&mut self, group_name: Gr, type_name: Ty, decoder: DecoderFn<T>) -> bool {
+        let group_name = group_name.into_string();
+        let type_name = type_name.into_string();
+
+        self.groups.find_or_insert_with(group_name, |_| HashMap::new()).insert(type_name, box Decoder(decoder) as Box<Any>)
     }
 
-    pub fn decode<T: FromConfig>(&self, item: ConfigItem) -> Result<T, String> {
+    pub fn decode<T: 'static + FromConfig>(&self, item: ConfigItem) -> Result<T, String> {
         match item {
             Structure(Some((group_name, type_name)), fields) => self.decode_structure(group_name, type_name, fields),
             Structure(None, fields) => FromConfig::from_structure(None, fields),
@@ -126,38 +130,59 @@ impl ConfigContext {
         }
     }
 
-    pub fn decode_structure_from_group<T>(&self, group_name: String, item: ConfigItem) -> Result<T, String> {
+    pub fn decode_structure_from_group<T: 'static, Gr: StrAllocating>(&self, group_name: Gr, item: ConfigItem) -> Result<T, String> {
+        let group_name = group_name.into_string();
+
         match item {
             Structure(Some((item_group_name, type_name)), fields) => if group_name == item_group_name {
                 self.decode_structure(group_name, type_name, fields)
             } else {
-                Err(format!("expected a structure from group {}.*, but found {}.{}", group_name, item_group_name, type_name))
+                Err(format!("expected a structure from group '{}', but found '{}.{}'", group_name, item_group_name, type_name))
             },
-            Structure(None, _) => Err(format!("expected a structure from group {}.*, but found an untyped structure", group_name)),
-            Primitive(value) => Err(format!("expected a structure from group {}.*, but found {}", group_name, value))
+            Structure(None, _) => Err(format!("expected a structure from group '{}', but found an untyped structure", group_name)),
+            Primitive(value) => Err(format!("expected a structure from group '{}', but found '{}'", group_name, value))
         }
     }
 
-    pub fn decode_structure<T>(&self, group_name: String, type_name: String, fields: HashMap<String, ConfigItem>) -> Result<T, String> {
-        match self.groups.find(&group_name).and_then(|group| group.find(&type_name)) {
-            Some(decoder) => match decoder.downcast_ref::<Box<Decoder<T> + 'static>>() {
+    pub fn decode_structure_of_type<T: 'static, Gr: StrAllocating, Ty: StrAllocating>(&self, group_name: Gr, type_name: Ty, item: ConfigItem) -> Result<T, String> {
+        let group_name = group_name.into_string();
+        let type_name = type_name.into_string();
+
+        match item {
+            Structure(Some((item_group_name, item_type_name)), fields) =>{
+                if group_name == item_group_name && type_name == item_type_name {
+                    self.decode_structure(group_name, type_name, fields)
+                } else {
+                    Err(format!("expected a structure of type '{}.{}', but found '{}.{}'", group_name, type_name, item_group_name, item_type_name))
+                }
+            },
+            Structure(None, _) => Err(format!("expected a structure of type '{}.{}', but found an untyped structure", group_name, type_name)),
+            Primitive(value) => Err(format!("expected a structure of type '{}.{}', but found '{}'", group_name, type_name, value))
+        }
+    }
+
+    pub fn decode_structure<T: 'static, Gr: StrAllocating, Ty: StrAllocating>(&self, group_name: Gr, type_name: Ty, fields: HashMap<String, ConfigItem>) -> Result<T, String> {
+        let group_name = group_name.into_string();
+        let type_name = type_name.into_string();
+
+        match self.groups.find_equiv(&group_name).and_then(|group| group.find_equiv(&type_name)) {
+            Some(decoder) => match decoder.downcast_ref::<Decoder<T>>() {
                 Some(decoder) => decoder.decode(self, fields),
-                None => Err(format!("type cannot be decoded from {}.{}", group_name, type_name))
+                None => Err(format!("type cannot be decoded from '{}.{}'", group_name, type_name))
             },
-            None => Err(format!("unknown type {}.{}", group_name, type_name))
+            None => Err(format!("unknown type '{}.{}'", group_name, type_name))
         }
     }
 }
 
+pub type DecoderFn<T> = fn(&ConfigContext, HashMap<String, ConfigItem>) -> Result<T, String>;
 
+struct Decoder<T>(DecoderFn<T>);
 
-trait Decoder<T> {
-    fn decode(&self, context: &ConfigContext, fields: HashMap<String, ConfigItem>) -> Result<T, String>;
-}
-
-impl<T> Decoder<T> for fn(&ConfigContext, HashMap<String, ConfigItem>) -> Result<T, String> {
+impl<T> Decoder<T>  {
     fn decode(&self, context: &ConfigContext, fields: HashMap<String, ConfigItem>) -> Result<T, String> {
-        (*self)(context, fields)
+        let &Decoder(decoder) = self;
+        decoder(context, fields)
     }
 }
 
@@ -218,7 +243,7 @@ pub trait FromConfig {
         Err(format!("unexpected {}", item))
     }
 
-    fn from_structure(structure_type: Option<(String, String)>, fields: HashMap<String, ConfigItem>) -> Result<Self, String> {
+    fn from_structure(structure_type: Option<(String, String)>, _fields: HashMap<String, ConfigItem>) -> Result<Self, String> {
         match structure_type {
             Some((group_name, type_name)) => Err(format!("unexpected structure of type {}.{}", group_name, type_name)),
             None => Err(String::from_str("unexpected untyped structure"))

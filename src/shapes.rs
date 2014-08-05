@@ -1,6 +1,6 @@
 use cgmath::sphere::Sphere;
 use cgmath::transform::{Transform, Decomposed};
-use cgmath::vector::Vector3;
+use cgmath::vector::{EuclideanVector, Vector3};
 use cgmath::point::Point;
 use cgmath::intersect::Intersect;
 use cgmath::ray::{Ray, Ray3};
@@ -25,7 +25,7 @@ impl Shape {
 					//println!("{} -> {} to {} -> {}", ray.origin, ray.direction, new_ray.origin, new_ray.direction);
 					(sphere, new_ray).intersection()
 				})
-				.map( |intersection| Ray::new(transform.transform_point(&intersection), intersection.to_vec()) )
+				.map( |intersection| Ray::new(transform.transform_point(&intersection), transform.transform_vector(&intersection.to_vec()).normalize()) )
 			}
 		}
 	}

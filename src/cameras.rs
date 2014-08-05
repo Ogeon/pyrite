@@ -1,31 +1,30 @@
+use std::collections::HashMap;
+
 use cgmath::vector::{Vector, EuclideanVector, Vector2, Vector3};
 use cgmath::point::Point;
-use cgmath::transform::AffineMatrix3;
-use cgmath::angle::{Angle, cos};
+use cgmath::transform::{AffineMatrix3, Transform};
+use cgmath::angle::{Angle, ToRad, cos, sin, deg};
 use cgmath::ray::{Ray, Ray3};
 
-use tracer::{Camera, Area};
+use renderer::Area;
 
-pub struct Perspective {
-    transform: AffineMatrix3<f64>,
-    image_size: Vector2<uint>,
-    view_plane: f64
+use config;
+use config::FromConfig;
+
+pub fn register_types(context: &mut config::ConfigContext) {
+    context.insert_type("Camera", "Perspective", decode_perspective);
 }
 
-impl Perspective {
-    pub fn new<A: Angle<f64>>(transform: AffineMatrix3<f64>, image_size: Vector2<uint>, fov: A) -> Perspective {
-        let dist = cos(fov.div_s(2.0).to_rad());
-        Perspective {
-            transform: transform,
-            image_size: image_size,
-            view_plane: dist
-        }
+pub enum Camera {
+    Perspective {
+        transform: AffineMatrix3<f64>,
+        view_plane: f64
     }
 }
 
-impl Camera for Perspective {
-    fn to_view_area(&self, area: &Area<uint>) -> Area<f64> {
-        let float_image_size = Vector2::new(self.image_size.x as f64, self.image_size.y as f64);
+impl Camera {
+    pub fn to_view_area(&self, area: &Area<uint>, image_size: &Vector2<uint>) -> Area<f64> {
+        let float_image_size = Vector2::new(image_size.x as f64, image_size.y as f64);
         let float_coord = Vector2::new(area.from.x as f64, area.from.y as f64);
         let float_size = Vector2::new(area.size.x as f64, area.size.y as f64);
 
@@ -35,9 +34,38 @@ impl Camera for Perspective {
         Area::new(from, size)
     }
 
-    fn ray_towards(&self, target: &Vector2<f64>) -> Ray3<f64> {
-        let mut direction = Vector3::new(target.x, target.y, self.view_plane);
-        direction.normalize_self();
-        Ray::new(Point::origin(), direction)
+    pub fn ray_towards(&self, target: &Vector2<f64>) -> Ray3<f64> {
+        match *self {
+            Perspective { transform: ref transform, view_plane: view_plane} => {
+                let mut direction = Vector3::new(-target.x, -target.y, view_plane);
+                direction.normalize_self();
+                //transform.transform_ray(&Ray::new(Point::origin(), direction))
+                Ray::new(Point::origin(), direction)
+            }
+        }
     }
+}
+
+fn decode_perspective(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Camera, String> {
+    let mut items = items;
+
+    let transform = match items.pop_equiv(&"transform") {
+        Some(v) => AffineMatrix3 {
+            mat: try!(context.decode_structure_from_group("Transform", v), "transform")
+        },
+        None => Transform::identity()
+    };
+
+    let fov: f64 = match items.pop_equiv(&"fov") {
+        Some(v) => try!(FromConfig::from_config(v), "fov"),
+        None => return Err(String::from_str("missing field of view ('fov')"))
+    };
+
+    let a = deg(fov / 2.0).to_rad();
+    let dist = -cos(a) / sin(a);
+
+    Ok(Perspective {
+        transform: transform,
+        view_plane: dist
+    })
 }

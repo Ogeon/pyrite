@@ -186,6 +186,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
         loop {
             match self.take_if(|t| match t {
                 &Alpha(_) => true,
+                &Num(_) => true,
                 &Underscore => true,
                 _ => false
             }) {
@@ -326,8 +327,6 @@ fn parse_assign<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Acti
 }
 
 fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String> {
-    let pos = parser.position();
-
     match try!(parser.parse_string()) {
         Some(s) => return Ok(String(s)),
         None => {}
@@ -347,11 +346,12 @@ fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, Strin
             Some(assignments) => return Ok(Struct(path, assignments)),
             None => return Err(format_error(pos, "unmatched '{'"))
         },
-        Some(Whitespace(_)) | None => return Ok(Struct(path, Vec::new())),
-        Some(t) => return Err(format_error(pos, format!("unexpected '{}'", t.to_char())))
+        Some(t) => {
+            parser.buffer(t);
+            return Ok(Struct(path, Vec::new()))
+        },
+        None => return Ok(Struct(path, Vec::new())),
     }
-
-    Err(format_error(pos, "expected a value"))
 }
 
 #[cfg(test)]

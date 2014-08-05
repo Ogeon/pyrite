@@ -1,0 +1,14 @@
+image = {
+	width = 800
+	height = 600
+	format = Image.Png
+}
+
+renderer = Renderer.Simple
+renderer.samples = 8000
+
+camera = Camera.Perspective {
+	fov = 40
+	transform = Transform.LookAt
+	transform.from = Vector.3D { z = -5 }
+}

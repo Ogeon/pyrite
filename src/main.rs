@@ -1,67 +1,91 @@
-#![feature(macro_rules)]
+#![feature(macro_rules, struct_variant)]
 
 extern crate cgmath;
 extern crate image;
 
-use std::cmp::min;
 use std::sync::{TaskPool, Arc, RWLock};
 use std::io::File;
 
 use cgmath::vector::{Vector2, Vector3};
 use cgmath::rotation::Rotation;
-use cgmath::transform::{Transform, Decomposed};
-use cgmath::angle::deg;
+use cgmath::transform::Decomposed;
 use cgmath::ray::Ray3;
 
-use tracer::{Camera, Area, Tile};
+use tracer::Material;
+
+use renderer::Tile;
+
+macro_rules! try(
+    ($e:expr) => (
+        match $e {
+            Ok(v) => v,
+            Err(e) => return Err(e)
+        }
+    );
+
+    ($e:expr, $under:expr) => (
+        match $e {
+            Ok(v) => v,
+            Err(e) => return Err(format!("{}: {}", $under, e))
+        }
+    )
+)
 
 mod tracer;
 mod cameras;
 mod worlds;
 mod shapes;
+mod materials;
 mod config;
+mod project;
+mod renderer;
+mod types3d;
 
 fn main() {
-    let tile_size = 64;
-    let image_size = Vector2::new(640, 480);
-    let samples = 10;
+    let args = std::os::args();
 
-    let camera = cameras::Perspective::new(Transform::identity(), image_size.clone(), deg(45.0f64));
-
-    let tiles_x = (image_size.x as f32 / tile_size as f32).ceil() as uint;
-    let tiles_y = (image_size.y as f32 / tile_size as f32).ceil() as uint;
-    let tile_count = tiles_x * tiles_y;
-
-    let mut tiles = Vec::new();
-
-    for y in range(0, tiles_y) {
-        for x in range(0, tiles_x) {
-            let from = Vector2::new(x * tile_size, y * tile_size);
-            let size = Vector2::new(min(image_size.x - from.x, tile_size), min(image_size.y - from.y, tile_size));
-
-            let image_area = Area::new(from, size);
-            let camera_area = camera.to_view_area(&image_area);
-
-            tiles.push(Tile::new(image_area, camera_area, 0.0, 1.0, 1));
+    if args.len() > 1 {
+        match project::from_file(Path::new(args[1].clone())) {
+            project::Success(p) => render(p),
+            project::IoError(e) => println!("error while reading project file: {}", e),
+            project::ParseError(e) => println!("error while parsing project file: {}", e)
         }
+    } else {
+        println!("usage: {} project_file", args[0]);
     }
+}
 
-    let sphere = shapes::Sphere(
+fn render(project: project::Project) {
+    let image_size = Vector2::new(project.image.width, project.image.height);
+
+    let tiles = project.renderer.make_tiles(&project.camera, &image_size);
+    let tile_count = tiles.len();
+
+    let sphere1 = shapes::Sphere(
         Decomposed {
             scale: 1.0,
             rot: Rotation::identity(),
-            disp: Vector3::new(0.0, 0.0, 2.0)
+            disp: Vector3::new(0.0, 0.0, -6.0)
+        }
+    );
+
+    let sphere2 = shapes::Sphere(
+        Decomposed {
+            scale: 1.0,
+            rot: Rotation::identity(),
+            disp: Vector3::new(2.0, 0.0, -6.0)
         }
     );
 
     let config = Arc::new(RenderContext {
-        camera: camera,
-        world: worlds::SimpleWorld::new(vec!(Geometric(sphere))),
+        camera: project.camera,
+        world: worlds::SimpleWorld::new(vec![Geometric(sphere1, box materials::Diffuse {reflection: 0.8f64}), Geometric(sphere2, box materials::Emission {spectrum: 1.0f64})], 0.0f64),
         pending: RWLock::new(tiles),
-        completed: RWLock::new(Vec::new())
+        completed: RWLock::new(Vec::new()),
+        renderer: project.renderer
     });
 
-    let mut pool = TaskPool::new(std::rt::default_sched_threads(), || {
+    let mut pool = TaskPool::new(project.renderer.threads(), || {
         let config = config.clone();
         proc(id: uint) {
             (id, config)
@@ -69,13 +93,14 @@ fn main() {
     });
 
     for _ in range(0, tile_count) {
-        pool.execute(proc(&(task_id, ref context): &(uint, Arc<RenderContext<cameras::Perspective, worlds::SimpleWorld<Vec<Object>>>>)) {
+        pool.execute(proc(&(task_id, ref context): &(uint, Arc<RenderContext<worlds::SimpleWorld<Vec<Object>, f64>>>)) {
             let mut tile = {
                 context.pending.write().pop().unwrap()
             };
             println!("Task {} got tile {}", task_id, tile.screen_area().from);
 
-            tracer::render(&mut tile, samples, &context.camera, &context.world);
+            //tracer::render(&mut tile, samples, &context.camera, &context.world, context.depth, &context.shared_stats);
+            context.renderer.render_tile(&mut tile, &context.camera, &context.world);
 
             context.completed.write().push(tile);
         })
@@ -115,21 +140,24 @@ fn main() {
     println!("Done!")
 }
 
-struct RenderContext<C, W> {
-    camera: C,
+struct RenderContext<W> {
+    camera: cameras::Camera,
     world: W,
     pending: RWLock<Vec<Tile>>,
-    completed: RWLock<Vec<Tile>>
+    completed: RWLock<Vec<Tile>>,
+    renderer: renderer::Renderer
 }
 
 enum Object {
-    Geometric(shapes::Shape)
+    Geometric(shapes::Shape, Box<Material + Send + Share>)
 }
 
 impl worlds::WorldObject for Object {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<Ray3<f64>> {
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
         match *self {
-            Geometric(shape) => shape.intersect(ray)
+            Geometric(shape, ref material) => {
+                shape.intersect(ray).map(|r| (r, material as &Material))
+            }
         }
     }
 }
