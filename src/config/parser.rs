@@ -61,6 +61,8 @@ make_tokens! {
     Equals => '=',
     LBrace => '{',
     RBrace => '}',
+    LBracket => '[',
+    RBracket => ']',
     Quote => '"',
     Underscore => '_',
     Minus => '-'
@@ -82,6 +84,7 @@ pub enum Action {
 #[deriving(Clone, PartialEq, Show)]
 pub enum Value {
     Struct(Vec<String>, Vec<Action>),
+    List(Vec<Value>),
     String(String),
     Number(f64)
 }
@@ -336,6 +339,32 @@ fn parse_assign<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Acti
     Ok(Some(Assign(path, value)))
 }
 
+fn parse_list<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String> {
+    let mut elements = Vec::new();
+
+    loop {
+        parser.skip_while(|t| match *t {
+            Comma => true,
+            Whitespace(_) => true,
+            _ => false
+        });
+
+        if parser.eat(RBracket) {
+            break;
+        }
+
+        elements.push(try!(parse_value(parser)));
+    }
+
+    parser.skip_while(|t| match *t {
+        Comma => true,
+        Whitespace(_) => true,
+        _ => false
+    });
+
+    Ok(List(elements))
+}
+
 fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String> {
     match try!(parser.parse_string()) {
         Some(s) => return Ok(String(s)),
@@ -345,6 +374,10 @@ fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, Strin
     match try!(parser.parse_number()) {
         Some(n) => return Ok(Number(n)),
         None => {}
+    }
+
+    if parser.eat(LBracket) {
+        return parse_list(parser);
     }
 
     let path = try!(parser.parse_path()).unwrap_or_else(|| Vec::new());
@@ -369,7 +402,8 @@ mod test {
     use super::{
         Assign,
         String,
-        Number
+        Number,
+        List
     };
 
     #[test]
@@ -397,5 +431,14 @@ mod test {
 
         let mut parser = super::Parser::new("path = -1_000.123".chars());
         assert_eq!(super::parse_assign(&mut parser), Ok(Some(Assign(vec![String::from_str("path")], Number(-1_000.123)))));
+    }
+
+    #[test]
+    fn parse_assign_list() {
+        let mut parser = super::Parser::new("path = [\"helo\" 42]".chars());
+        assert_eq!( super::parse_assign(&mut parser), Ok(Some(Assign( vec![String::from_str("path")], List(vec![String(String::from_str("helo")), Number(42.0)]) ))) );
+
+        let mut parser = super::Parser::new("path = [\"helo\", 42]".chars());
+        assert_eq!( super::parse_assign(&mut parser), Ok(Some(Assign( vec![String::from_str("path")], List(vec![String(String::from_str("helo")), Number(42.0)]) ))) );
     }
 }

@@ -108,7 +108,8 @@ fn decode_image_spec(context: &config::ConfigContext, item: config::ConfigItem) 
                 format: format
             })
         },
-        config::Primitive(v) => Err(format!("unexpected {}", v))
+        config::Primitive(v) => Err(format!("unexpected {}", v)),
+        config::List(_) => Err(format!("unexpected list"))
     }
 }
 

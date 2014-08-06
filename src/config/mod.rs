@@ -17,20 +17,17 @@ pub fn parse<C: Iterator<char>>(source: C) -> Result<HashMap<String, ConfigItem>
     for instruction in try!(instructions).move_iter() {
         match instruction {
             parser::Assign(path, parser::Struct(template, instructions)) => {
-                let (ty, mut fields) = match try!(deep_find(&items, &template)).map(|v| (*v).clone()) {
-                    Some(Structure(template_type, fields)) => (template_type, fields),
-                    None => match template.as_slice() {
-                        [ref group_name, ref type_name] => (Some((group_name.clone(), type_name.clone())), HashMap::new()),
-                        [] => (None, HashMap::new()),
-                        _ => return Err(format!("{}: {} is not a valid type name", path.as_slice().connect("."), template.as_slice().connect(".")))
-                    },
-                    Some(_) => return Err(format!("{}: only a structure or a type can be used as a template", path.as_slice().connect("."))),
-                };
+                let (ty, mut fields) = try!(get_template(&items, &template), path.as_slice().connect("."));
 
                 match evaluate(instructions, &mut fields, &items) {
-                    None => deep_insert(&mut items, path.as_slice(), Structure(ty, fields)),
-                    Some(e) => return Err(format!("{}: {}", path.as_slice().connect("."), e))
+                    Ok(()) => deep_insert(&mut items, path.as_slice(), Structure(ty, fields)),
+                    Err(e) => return Err(format!("{}: {}", path.as_slice().connect("."), e))
                 }
+            },
+            parser::Assign(path, parser::List(elements)) => {
+                let elements = try!(evaluate_list(elements, &items), path.as_slice().connect("."));
+
+                deep_insert(&mut items, path.as_slice(), List(elements))
             },
             parser::Assign(path, primitive) => deep_insert(&mut items, path.as_slice(), Primitive(primitive))
         };
@@ -39,44 +36,74 @@ pub fn parse<C: Iterator<char>>(source: C) -> Result<HashMap<String, ConfigItem>
     Ok(items)
 }
 
-fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, ConfigItem>, context: &HashMap<String, ConfigItem>) -> Option<String> {
+fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, ConfigItem>, context: &HashMap<String, ConfigItem>) -> Result<(), String> {
     for instruction in instructions.move_iter() {
         match instruction {
             parser::Assign(path, parser::Struct(template, instructions)) => {
-                let (ty, mut fields) = match deep_find(context, &template).map(|v| v.map(|v| (*v).clone())) {
-                    Ok(Some(Structure(template_type, fields))) => (template_type, fields),
-                    Ok(None) => match template.as_slice() {
-                        [ref group_name, ref type_name] => (Some((group_name.clone(), type_name.clone())), HashMap::new()),
-                        [] => (None, HashMap::new()),
-                        _ => return Some(format!("{}: {} is not a valid type name", path.as_slice().connect("."), template.as_slice().connect(".")))
-                    },
-                    Ok(Some(_)) => return Some(format!("{}: only a structure or a type can be used as a template", path.as_slice().connect("."))),
-                    Err(e) => return Some(format!("{}: {}", path.as_slice().connect("."), e))
-                };
+                let (ty, mut fields) = try!(get_template(context, &template), path.as_slice().connect("."));
 
                 match evaluate(instructions, &mut fields, context) {
-                    None => deep_insert(scope, path.as_slice(), Structure(ty, fields)),
-                    Some(e) => return Some(format!("{}: {}", path.as_slice().connect("."), e))
+                    Ok(()) => deep_insert(scope, path.as_slice(), Structure(ty, fields)),
+                    Err(e) => return Err(format!("{}: {}", path.as_slice().connect("."), e))
                 }
+            },
+            parser::Assign(path, parser::List(elements)) => {
+                let elements = try!(evaluate_list(elements, context), path.as_slice().connect("."));
+
+                deep_insert(scope, path.as_slice(), List(elements))
             },
             parser::Assign(path, primitive) => deep_insert(scope, path.as_slice(), Primitive(primitive))
         };
     }
 
-    None
+    Ok(())
 }
 
-fn deep_insert(items: &mut HashMap<String, ConfigItem>, path: &[String], item: ConfigItem) -> Option<String> {
+fn evaluate_list(elements: Vec<parser::Value>, context: &HashMap<String, ConfigItem>) -> Result<Vec<ConfigItem>, String> {
+    let mut result = Vec::new();
+    for (i, v) in elements.move_iter().enumerate() {
+        match v {
+            parser::Struct(template, instructions) => {
+                let (ty, mut fields) = try!(get_template(context, &template), format!("[{}]", i));
+
+                match evaluate(instructions, &mut fields, context) {
+                    Ok(()) => result.push(Structure(ty, fields)),
+                    Err(e) => return Err(format!("[{}]: {}", i, e))
+                }
+            },
+            parser::List(elements) => result.push(List(try!(evaluate_list(elements, context), format!("[{}]", i)))),
+            primitive => result.push(Primitive(primitive))
+        }
+    }
+
+    Ok(result)
+}
+
+fn get_template(context: &HashMap<String, ConfigItem>, template: &Vec<String>) -> Result<(Option<(String, String)>, HashMap<String, ConfigItem>), String> {
+    match deep_find(context, template).map(|v| v.map(|v| (*v).clone())) {
+        Ok(Some(Structure(template_type, fields))) => Ok((template_type, fields)),
+        Ok(None) => match template.as_slice() {
+            [ref group_name, ref type_name] => Ok((Some((group_name.clone(), type_name.clone())), HashMap::new())),
+            [] => Ok((None, HashMap::new())),
+            _ => Err(format!("'{}' is not a valid type name", template.as_slice().connect(".")))
+        },
+        Ok(Some(_)) => Err(String::from_str("only a structure or a type can be used as a template")),
+        Err(e) => Err(e)
+    }
+}
+
+fn deep_insert(items: &mut HashMap<String, ConfigItem>, path: &[String], item: ConfigItem) -> Result<(), String> {
     match path {
         [ref segment] => {
             items.insert(segment.clone(), item);
-            None
+            Ok(())
         },
-        [ref segment, ..rest] => match items.find_or_insert_with(segment.clone(), |_| 
-            Structure(None, HashMap::new())
-        ) {
-            &Structure(_, ref mut fields) => deep_insert(fields, rest, item).map(|e| format!("{}.{}", segment, e)),
-            &Primitive(ref v) => Some(format!("{}: expected a structure, but found primitive value '{}'", segment, v))
+        [ref segment, ..rest] => {
+            match items.find_or_insert_with(segment.clone(), |_| Structure(None, HashMap::new()) ) {
+                &Structure(_, ref mut fields) => deep_insert(fields, rest, item).map_err(|e| format!("{}.{}", segment, e)),
+                &Primitive(ref v) => Err(format!("{}: expected a structure, but found primitive value '{}'", segment, v)),
+                &List(_) => Err(format!("{}: expected a structure, but found a list", segment))
+            }
         },
         [] => unreachable!()
     }
@@ -93,6 +120,7 @@ fn deep_find<'a>(items: &'a HashMap<String, ConfigItem>, path: &Vec<String>) -> 
             items = match result {
                 Some(&Structure(_, ref fields)) => fields,
                 Some(&Primitive(ref v)) => return Err(format!("{}: expected a structure, but found primitive value '{}'", path.slice(0, i + 1).connect("."), v)),
+                Some(&List(_)) => return Err(format!("{}: expected a structure, but found list", path.slice(0, i + 1).connect("."))),
                 None => return Ok(None)
             };
         }
@@ -125,7 +153,8 @@ impl ConfigContext {
         match item {
             Structure(Some((group_name, type_name)), fields) => self.decode_structure(group_name, type_name, fields),
             Structure(None, fields) => FromConfig::from_structure(None, fields),
-            Primitive(value) => FromConfig::from_primitive(value)
+            Primitive(value) => FromConfig::from_primitive(value),
+            List(list) => FromConfig::from_list(list)
         }
     }
 
@@ -139,7 +168,8 @@ impl ConfigContext {
                 Err(format!("expected a structure from group '{}', but found '{}.{}'", group_name, item_group_name, type_name))
             },
             Structure(None, _) => Err(format!("expected a structure from group '{}', but found an untyped structure", group_name)),
-            Primitive(value) => Err(format!("expected a structure from group '{}', but found '{}'", group_name, value))
+            Primitive(value) => Err(format!("expected a structure from group '{}', but found '{}'", group_name, value)),
+            List(_) => Err(format!("expected a structure from group '{}', but found a list", group_name))
         }
     }
 
@@ -156,7 +186,8 @@ impl ConfigContext {
                 }
             },
             Structure(None, _) => Err(format!("expected a structure of type '{}.{}', but found an untyped structure", group_name, type_name)),
-            Primitive(value) => Err(format!("expected a structure of type '{}.{}', but found '{}'", group_name, type_name, value))
+            Primitive(value) => Err(format!("expected a structure of type '{}.{}', but found '{}'", group_name, type_name, value)),
+            List(_) => Err(format!("expected a structure of type '{}.{}', but found a list", group_name, type_name))
         }
     }
 
@@ -190,6 +221,7 @@ impl<T> Decoder<T>  {
 #[deriving(Clone)]
 pub enum ConfigItem {
     Structure(Option<(String, String)>, HashMap<String, ConfigItem>),
+    List(Vec<ConfigItem>),
     Primitive(parser::Value)
 }
 
@@ -249,10 +281,15 @@ pub trait FromConfig {
         }
     }
 
+    fn from_list(_elements: Vec<ConfigItem>) -> Result<Self, String> {
+        Err(format!("unexpected list"))
+    }
+
     fn from_config(item: ConfigItem) -> Result<Self, String> {
         match item {
             Structure(ty, fields) => FromConfig::from_structure(ty, fields),
-            Primitive(item) => FromConfig::from_primitive(item)
+            Primitive(item) => FromConfig::from_primitive(item),
+            List(elements) => FromConfig::from_list(elements)
         }
     }
 }
