@@ -11,7 +11,6 @@ renderer = Renderer.Simple {
 camera = Camera.Perspective {
 	fov = 40
 	transform = Transform.LookAt
-	transform.from = Vector.3D { z =  0  x =  3 }
-	transform.to = Vector.3D   { z =  -6  x =  0 }
-	transform.up = Vector.3D   { y = 1 }
+	transform.from = Vector.3D { z =  0, x =  3 }
+	transform.to = Vector.3D { z =  -6, x =  0 }
 }

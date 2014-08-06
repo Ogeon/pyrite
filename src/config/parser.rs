@@ -289,7 +289,11 @@ fn parse_assignments<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: b
     let mut assignments = Vec::new();
 
     loop {
-        parser.skip_whitespace();
+        parser.skip_while(|t| match *t {
+            Comma => true,
+            Whitespace(_) => true,
+            _ => false
+        });
 
         match try!(parse_assign(parser)) {
             Some(a) => assignments.push(a),
@@ -300,6 +304,12 @@ fn parse_assignments<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: b
             }
         }
     }
+
+    parser.skip_while(|t| match *t {
+        Comma => true,
+        Whitespace(_) => true,
+        _ => false
+    });
 
     Ok(Some(assignments))
 }
