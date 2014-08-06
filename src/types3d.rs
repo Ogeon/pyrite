@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use cgmath::matrix::Matrix4;
+use cgmath::matrix::{Matrix, Matrix4};
 use cgmath::vector::Vector3;
 use cgmath::point::Point;
 
@@ -52,5 +52,5 @@ fn decode_transform_look_at(context: &config::ConfigContext, items: HashMap<Stri
         None => Vector3::new(0.0, 1.0, 0.0)
     };
 
-    Ok(Matrix4::look_at(&Point::from_vec(&from), &Point::from_vec(&to), &up))
+    Matrix4::look_at(&Point::from_vec(&from), &Point::from_vec(&to), &up).invert().map(|m| Ok(m)).unwrap_or(Err(String::from_str("could not invert view matrix")))
 }

@@ -37,10 +37,9 @@ impl Camera {
     pub fn ray_towards(&self, target: &Vector2<f64>) -> Ray3<f64> {
         match *self {
             Perspective { transform: ref transform, view_plane: view_plane} => {
-                let mut direction = Vector3::new(-target.x, -target.y, view_plane);
+                let mut direction = Vector3::new(target.x, -target.y, -view_plane);
                 direction.normalize_self();
-                //transform.transform_ray(&Ray::new(Point::origin(), direction))
-                Ray::new(Point::origin(), direction)
+                transform.transform_ray(&Ray::new(Point::origin(), direction))
             }
         }
     }
@@ -62,7 +61,7 @@ fn decode_perspective(context: &config::ConfigContext, items: HashMap<String, co
     };
 
     let a = deg(fov / 2.0).to_rad();
-    let dist = -cos(a) / sin(a);
+    let dist = cos(a) / sin(a);
 
     Ok(Perspective {
         transform: transform,

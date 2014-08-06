@@ -56,12 +56,16 @@ pub fn trace<R: Rng + FloatRng, W: World>(rng: &mut R, ray: Ray3<f64>, frequency
 
     let mut ray = ray;
 
-    for _ in range(0, bounces) {
+    for i in range(0, bounces) {
         match world.intersect(&ray) {
             Some((normal, _distance, material)) => match material.reflect(&ray, &normal, &mut *rng as &mut FloatRng) {
                 Reflect(out_ray, brightness) => {
                     path.push(brightness);
                     ray = out_ray;
+
+                    if i == bounces - 1 {
+                        path.push(world.sky_color(&ray.direction));
+                    }
                 }
                 Emit(brightness) => {
                     path.push(brightness);

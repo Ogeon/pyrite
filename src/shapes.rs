@@ -1,31 +1,25 @@
-use cgmath::sphere::Sphere;
+use cgmath::sphere;
 use cgmath::transform::{Transform, Decomposed};
 use cgmath::vector::{EuclideanVector, Vector3};
-use cgmath::point::Point;
+use cgmath::point::{Point, Point3};
 use cgmath::intersect::Intersect;
 use cgmath::ray::{Ray, Ray3};
 use cgmath::quaternion::Quaternion;
 
 pub enum Shape {
-	Sphere(Decomposed<f64, Vector3<f64>, Quaternion<f64>>)
+	Sphere { pub position: Point3<f64>, pub radius: f64 }
 }
 
 impl Shape {
 	pub fn intersect(&self, ray: &Ray3<f64>) -> Option<Ray3<f64>> {
 		match *self {
-			Sphere(ref transform) => {
-				transform.invert()
-				.and_then(|t| {
-					let sphere = Sphere {
-						radius: 1.0,
-						center: Point::origin()
-					};
-
-					let new_ray = t.transform_ray(ray);
-					//println!("{} -> {} to {} -> {}", ray.origin, ray.direction, new_ray.origin, new_ray.direction);
-					(sphere, new_ray).intersection()
-				})
-				.map( |intersection| Ray::new(transform.transform_point(&intersection), transform.transform_vector(&intersection.to_vec()).normalize()) )
+			Sphere {ref position, radius} => {
+				let sphere = sphere::Sphere {
+					radius: radius,
+					center: position.clone()
+				};
+				(sphere, ray.clone()).intersection()
+					.map(|intersection| Ray::new(intersection, intersection.to_vec().normalize()))
 			}
 		}
 	}

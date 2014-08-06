@@ -10,6 +10,7 @@ use cgmath::vector::{Vector2, Vector3};
 use cgmath::rotation::Rotation;
 use cgmath::transform::Decomposed;
 use cgmath::ray::Ray3;
+use cgmath::point::Point3;
 
 use tracer::Material;
 
@@ -61,25 +62,31 @@ fn render(project: project::Project) {
     let tiles = project.renderer.make_tiles(&project.camera, &image_size);
     let tile_count = tiles.len();
 
-    let sphere1 = shapes::Sphere(
-        Decomposed {
-            scale: 1.0,
-            rot: Rotation::identity(),
-            disp: Vector3::new(0.0, 0.0, -6.0)
-        }
-    );
+    let sphere1 = shapes::Sphere{
+        radius: 1.0,
+        position: Point3::new(0.0, 0.0, -6.0)
+    };
 
-    let sphere2 = shapes::Sphere(
-        Decomposed {
-            scale: 1.0,
-            rot: Rotation::identity(),
-            disp: Vector3::new(2.0, 0.0, -6.0)
-        }
-    );
+    let sphere2 = shapes::Sphere{
+        radius: 1.0,
+        position: Point3::new(2.0, 1.0, -6.0)
+    };
+
+    let sphere3 = shapes::Sphere{
+        radius: 50.0,
+        position: Point3::new(0.0, -51.0, -6.0)
+    };
 
     let config = Arc::new(RenderContext {
         camera: project.camera,
-        world: worlds::SimpleWorld::new(vec![Geometric(sphere1, box materials::Diffuse {reflection: 0.8f64}), Geometric(sphere2, box materials::Emission {spectrum: 1.0f64})], 0.0f64),
+        world: worlds::SimpleWorld::new(
+            vec![
+                Geometric(sphere3, box materials::Diffuse {reflection: 1.0f64}),
+                Geometric(sphere1, box materials::Diffuse {reflection: 0.8f64}),
+                Geometric(sphere2, box materials::Emission {spectrum: 2.0f64}),
+            ],
+            0.0f64
+        ),
         pending: RWLock::new(tiles),
         completed: RWLock::new(Vec::new()),
         renderer: project.renderer
