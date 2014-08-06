@@ -12,6 +12,8 @@ use cgmath::transform::Decomposed;
 use cgmath::ray::Ray3;
 use cgmath::point::Point3;
 
+use image::GenericImage;
+
 use tracer::Material;
 
 use renderer::Tile;
@@ -115,7 +117,7 @@ fn render(project: project::Project) {
 
     let mut tile_counter = 0;
 
-    let mut pixels = Vec::from_elem(image_size.x * image_size.y * 3, 0);
+    let mut pixels = image::ImageBuf::new(image_size.x as u32, image_size.y as u32);
     
     while tile_counter < tile_count {
         std::io::timer::sleep(4000);
@@ -126,9 +128,7 @@ fn render(project: project::Project) {
                 Some(tile) => {
                     for (spectrum, position) in tile.pixels() {
                         let value = clamp_channel(spectrum.value_at(0.0));
-                        *pixels.get_mut(position.x * 3 + position.y * image_size.x * 3)     = value;
-                        *pixels.get_mut(position.x * 3 + position.y * image_size.x * 3 + 1) = value;
-                        *pixels.get_mut(position.x * 3 + position.y * image_size.x * 3 + 2) = value;
+                        pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb(value, value, value))
                     }
 
                     tile_counter += 1;
@@ -137,8 +137,7 @@ fn render(project: project::Project) {
             }
         }
 
-        let mut encoder = image::PNGEncoder::new(File::create(&Path::new("test.png")));
-        match encoder.encode(pixels.as_slice(), image_size.x as u32, image_size.y as u32, image::RGB(8)) {
+        match File::create(&Path::new("test.png")).and_then(|f| image::ImageRgb8(pixels.clone()).save(f, image::PNG)) {
             Err(e) => println!("error while writing image: {}", e),
             _ => {}
         }
