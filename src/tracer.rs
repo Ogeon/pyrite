@@ -7,7 +7,6 @@ use cgmath::ray::Ray3;
 use cgmath::point::Point;
 
 use config;
-use config::FromConfig;
 
 use shapes;
 

@@ -6,15 +6,9 @@ extern crate image;
 use std::sync::{TaskPool, Arc, RWLock};
 use std::io::File;
 
-use cgmath::vector::{Vector2, Vector3};
-use cgmath::rotation::Rotation;
-use cgmath::transform::Decomposed;
-use cgmath::ray::Ray3;
-use cgmath::point::Point3;
+use cgmath::vector::Vector2;
 
 use image::GenericImage;
-
-use tracer::Material;
 
 use renderer::Tile;
 

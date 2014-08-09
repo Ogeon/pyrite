@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
 use cgmath::sphere;
-use cgmath::transform::{Transform, Decomposed};
-use cgmath::vector::{EuclideanVector, Vector3};
+use cgmath::vector::EuclideanVector;
 use cgmath::point::{Point, Point3};
 use cgmath::intersect::Intersect;
 use cgmath::ray::{Ray, Ray3};
-use cgmath::quaternion::Quaternion;
 
 use tracer::Material;
 
