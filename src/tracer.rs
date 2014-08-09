@@ -13,7 +13,7 @@ pub trait Material {
     fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection;
 }
 
-impl Material for Box<Material + Send + Share> {
+impl Material for Box<Material + Send + Sync> {
     fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
         self.reflect(ray_in, normal, rng)
     }

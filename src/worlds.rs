@@ -44,7 +44,7 @@ pub struct SimpleWorld<S, C> {
     sky_color: C
 }
 
-impl<S: Scene, C: ParametricValue<f64, f64> + Send + Share> SimpleWorld<S, C> {
+impl<S: Scene, C: ParametricValue<f64, f64> + Send + Sync> SimpleWorld<S, C> {
     pub fn new(scene: S, sky_color: C) -> SimpleWorld<S, C> {
         SimpleWorld {
             scene: scene,

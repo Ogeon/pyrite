@@ -155,7 +155,7 @@ struct RenderContext<W> {
 }
 
 enum Object {
-    Geometric(shapes::Shape, Box<Material + Send + Share>)
+    Geometric(shapes::Shape, Box<Material + Send + Sync>)
 }
 
 impl worlds::WorldObject for Object {
