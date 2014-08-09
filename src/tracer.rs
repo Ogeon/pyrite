@@ -61,7 +61,7 @@ impl ObjectContainer for Vec<shapes::Shape> {
 
                 match closest {
                     Some((closest_normal, closest_dist, closest_material)) => {
-                        if new_dist < closest_dist {
+                        if new_dist > 0.000001 && new_dist < closest_dist {
                             (normal, new_dist, material as &Material)
                         } else {
                             (closest_normal, closest_dist, closest_material)

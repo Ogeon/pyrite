@@ -30,13 +30,15 @@ impl Material for Diffuse {
             -normal.direction
         };
 
-        let mut reflected = n.cross(&if n.x > 0.3 {
-            Vector3::new(n.x, 0.0, 0.0)
-        } else if n.y > 0.3 {
-            Vector3::new(0.0, n.y, 0.0)
-        } else {
-            Vector3::new(0.0, 0.0, n.z)
-        });
+        let mut reflected = n.cross(
+            &if n.x >= n.y && n.x >= n.z {
+                Vector3::new(1.0, 0.0, 0.0)
+            } else if n.y >= n.z {
+                Vector3::new(0.0, 1.0, 0.0)
+            } else {
+                Vector3::new(0.0, 0.0, 1.0)
+            }
+        );
 
         reflected.normalize_self_to(sphere_point.x);
 

@@ -25,7 +25,7 @@ impl Shape {
 				};
 				(sphere, ray.clone())
 					.intersection()
-					.map(|intersection| Ray::new(intersection, intersection.to_vec().normalize()))
+					.map(|intersection| Ray::new(intersection, intersection.sub_p(position).normalize()))
 					.map(|normal| (normal, material))
 			}
 		}
