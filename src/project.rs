@@ -9,6 +9,7 @@ use renderer;
 use cameras;
 use types3d;
 use shapes;
+use materials;
 
 macro_rules! try_io(
     ($e:expr) => (
@@ -52,6 +53,7 @@ pub fn from_file(path: Path) -> ParseResult<Project> {
     renderer::register_types(&mut context);
     cameras::register_types(&mut context);
     shapes::register_types(&mut context);
+    materials::register_types(&mut context);
     register_types(&mut context);
 
     let image_spec = match config.pop_equiv(&"image") {

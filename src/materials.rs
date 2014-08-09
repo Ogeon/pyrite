@@ -1,15 +1,18 @@
 use std;
+use std::collections::HashMap;
 
 use cgmath::vector::{EuclideanVector, Vector, Vector3};
 use cgmath::ray::{Ray, Ray3};
 
 use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect};
 
-pub struct Diffuse<V> {
-    pub reflection: V
+use config;
+
+pub struct Diffuse {
+    pub color: Box<ParametricValue<f64, f64> + 'static + Send + Sync>
 }
 
-impl<V: ParametricValue<f64, f64> + 'static> Material for Diffuse<V> {
+impl Material for Diffuse {
     fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
         let u = rng.next_float();
         let v = rng.next_float();
@@ -45,16 +48,47 @@ impl<V: ParametricValue<f64, f64> + 'static> Material for Diffuse<V> {
         n.normalize_self_to(sphere_point.z);
         reflected.add_self_v(&n);
 
-        Reflect(Ray::new(normal.origin, reflected), &self.reflection as &ParametricValue<f64, f64>)
+        Reflect(Ray::new(normal.origin, reflected), &self.color as &ParametricValue<f64, f64>)
     }
 }
 
-pub struct Emission<V> {
-    pub spectrum: V
+pub struct Emission {
+    pub color: Box<ParametricValue<f64, f64> + 'static + Send + Sync>
 }
 
-impl<V: ParametricValue<f64, f64> + 'static> Material for Emission<V> {
+impl Material for Emission {
     fn reflect(&self, _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
-        Emit(&self.spectrum as &ParametricValue<f64, f64>)
+        Emit(&self.color as &ParametricValue<f64, f64>)
     }
+}
+
+
+
+pub fn register_types(context: &mut config::ConfigContext) {
+    context.insert_type("Material", "Diffuse", decode_diffuse);
+    context.insert_type("Material", "Emission", decode_emission);
+}
+
+pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+    let mut fields = fields;
+
+    let color = match fields.pop_equiv(&"color") {
+        Some(config::Primitive(config::Number(n))) => box n as Box<ParametricValue<f64, f64> + 'static + Send + Sync>,
+        Some(v) => return Err(String::from_str("only numbers are accepted for field 'color'")),//Todo: try!(FromConfig::from_config(v), "color"),
+        None => return Err(String::from_str("missing field 'color'"))
+    };
+
+    Ok(box Diffuse { color: color} as Box<Material + 'static + Send + Sync>)
+}
+
+pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+    let mut fields = fields;
+
+    let color = match fields.pop_equiv(&"color") {
+        Some(config::Primitive(config::Number(n))) => box n as Box<ParametricValue<f64, f64> + 'static + Send + Sync>,
+        Some(v) => return Err(String::from_str("only numbers are accepted for field 'color'")),//Todo: try!(FromConfig::from_config(v), "color"),
+        None => return Err(String::from_str("missing field 'color'"))
+    };
+
+    Ok(box Emission { color: color} as Box<Material + 'static + Send + Sync>)
 }

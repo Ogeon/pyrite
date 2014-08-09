@@ -21,7 +21,7 @@ ball = Shape.Sphere {
 }
 
 
-world.sky = Sky.Color { color = 2 }
+world.sky = Sky.Color { color = 0 }
 world.objects = [
 	Shape.Sphere {
 		radius = 50.0
@@ -36,7 +36,7 @@ world.objects = [
 
 	ball {
 		position.x = -3
-		material = Material.Diffuse { color = 8.0 }
+		material = Material.Diffuse { color = 0.8 }
 	},
 
 	ball {

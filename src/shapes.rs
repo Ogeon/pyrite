@@ -8,13 +8,11 @@ use cgmath::ray::{Ray, Ray3};
 
 use tracer::Material;
 
-use materials;
-
 use config;
 use config::FromConfig;
 
 pub enum Shape {
-	Sphere { pub position: Point3<f64>, pub radius: f64, pub material: Box<Material + Send + Sync> }
+	Sphere { pub position: Point3<f64>, pub radius: f64, pub material: Box<Material + 'static + Send + Sync> }
 }
 
 impl Shape {
@@ -53,9 +51,14 @@ fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config:
         None => return Err(String::from_str("missing field 'radius'"))
     };
 
+    let material = match items.pop_equiv(&"material") {
+        Some(v) => try!(context.decode_structure_from_group("Material", v), "material"),
+        None => return Err(String::from_str("missing field 'material'"))
+    };
+
     Ok(Sphere {
     	position: Point::from_vec(&position),
     	radius: radius,
-    	material: box materials::Diffuse {reflection: 0.5f64}
+    	material: material
     })
 }
