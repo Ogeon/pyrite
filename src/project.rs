@@ -4,9 +4,11 @@ use std::collections::HashMap;
 use config;
 use config::FromConfig;
 
+use tracer;
 use renderer;
 use cameras;
 use types3d;
+use shapes;
 
 macro_rules! try_io(
     ($e:expr) => (
@@ -46,8 +48,10 @@ pub fn from_file(path: Path) -> ParseResult<Project> {
     let mut context = config::ConfigContext::new();
 
     types3d::register_types(&mut context);
+    tracer::register_types(&mut context);
     renderer::register_types(&mut context);
     cameras::register_types(&mut context);
+    shapes::register_types(&mut context);
     register_types(&mut context);
 
     let image_spec = match config.pop_equiv(&"image") {
@@ -65,17 +69,24 @@ pub fn from_file(path: Path) -> ParseResult<Project> {
         None => return ParseError(String::from_str("missing camera specifications"))
     };
 
+    let world = match config.pop_equiv(&"world") {
+        Some(v) => try_parse!(tracer::decode_world(&context, v), "world"),
+        None => return ParseError(String::from_str("missing world specifications"))
+    };
+
     Success(Project {
         image: image_spec,
         renderer: renderer,
-        camera: camera
+        camera: camera,
+        world: world
     })
 }
 
 pub struct Project {
     pub image: ImageSpec,
     pub renderer: renderer::Renderer,
-    pub camera: cameras::Camera
+    pub camera: cameras::Camera,
+    pub world: tracer::World
 }
 
 pub struct ImageSpec {

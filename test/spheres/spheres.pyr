@@ -5,12 +5,42 @@ image = {
 }
 
 renderer = Renderer.Simple {
-	samples = 2000
+	samples = 200
 }
 
 camera = Camera.Perspective {
 	fov = 40
 	transform = Transform.LookAt
-	transform.from = Vector.3D { z =  0, x =  3 }
-	transform.to = Vector.3D { z =  -6, x =  0 }
+	transform.from = Vector.3D { y=1 }
+	transform.to = Vector.3D { y=1, z=1 }
 }
+
+ball = Shape.Sphere {
+	radius = 1.5
+	position = Vector.3D { y=1.4, z=10 }
+}
+
+
+world.sky = Sky.Color { color = 2 }
+world.objects = [
+	Shape.Sphere {
+		radius = 50.0
+		position = Vector.3D { x=0, y=-50, z=10 }
+		material = Material.Diffuse { color = 1.0 }
+	},
+
+	ball {
+		position.y = 1.5
+		material = Material.Emission { color = 3.0 }
+	},
+
+	ball {
+		position.x = -3
+		material = Material.Diffuse { color = 8.0 }
+	},
+
+	ball {
+		position.x = 3
+		material = Material.Diffuse { color = 0.5 }
+	}
+]

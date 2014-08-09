@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use cgmath::sphere;
 use cgmath::transform::{Transform, Decomposed};
 use cgmath::vector::{EuclideanVector, Vector3};
@@ -7,6 +9,11 @@ use cgmath::ray::{Ray, Ray3};
 use cgmath::quaternion::Quaternion;
 
 use tracer::Material;
+
+use materials;
+
+use config;
+use config::FromConfig;
 
 pub enum Shape {
 	Sphere { pub position: Point3<f64>, pub radius: f64, pub material: Box<Material + Send + Sync> }
@@ -27,4 +34,30 @@ impl Shape {
 			}
 		}
 	}
+}
+
+
+
+pub fn register_types(context: &mut config::ConfigContext) {
+	context.insert_type("Shape", "Sphere", decode_sphere);
+}
+
+fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Shape, String> {
+    let mut items = items;
+
+    let position = match items.pop_equiv(&"position") {
+        Some(v) => try!(context.decode_structure_of_type("Vector", "3D", v), "position"),
+        None => return Err(String::from_str("missing field 'position'"))
+    };
+
+    let radius = match items.pop_equiv(&"radius") {
+        Some(v) => try!(FromConfig::from_config(v), "radius"),
+        None => return Err(String::from_str("missing field 'radius'"))
+    };
+
+    Ok(Sphere {
+    	position: Point::from_vec(&position),
+    	radius: radius,
+    	material: box materials::Diffuse {reflection: 0.5f64}
+    })
 }

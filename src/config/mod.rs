@@ -15,7 +15,7 @@ pub fn parse<C: Iterator<char>>(source: C) -> Result<HashMap<String, ConfigItem>
     let instructions = parser::parse(source);
 
     for instruction in try!(instructions).move_iter() {
-        match instruction {
+        try!(match instruction {
             parser::Assign(path, parser::Struct(template, instructions)) => {
                 let (ty, mut fields) = try!(get_template(&items, &template), path.as_slice().connect("."));
 
@@ -30,7 +30,7 @@ pub fn parse<C: Iterator<char>>(source: C) -> Result<HashMap<String, ConfigItem>
                 deep_insert(&mut items, path.as_slice(), List(elements))
             },
             parser::Assign(path, primitive) => deep_insert(&mut items, path.as_slice(), Primitive(primitive))
-        };
+        })
     }
 
     Ok(items)
@@ -38,7 +38,7 @@ pub fn parse<C: Iterator<char>>(source: C) -> Result<HashMap<String, ConfigItem>
 
 fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, ConfigItem>, context: &HashMap<String, ConfigItem>) -> Result<(), String> {
     for instruction in instructions.move_iter() {
-        match instruction {
+        try!(match instruction {
             parser::Assign(path, parser::Struct(template, instructions)) => {
                 let (ty, mut fields) = try!(get_template(context, &template), path.as_slice().connect("."));
 
@@ -53,7 +53,7 @@ fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, Confi
                 deep_insert(scope, path.as_slice(), List(elements))
             },
             parser::Assign(path, primitive) => deep_insert(scope, path.as_slice(), Primitive(primitive))
-        };
+        })
     }
 
     Ok(())
@@ -265,6 +265,15 @@ impl ConfigItem {
         match self {
             &Structure(..) => true,
             _ => false
+        }
+    }
+
+    pub fn into_list(self) -> Result<Vec<ConfigItem>, String> {
+        match self {
+            List(v) => Ok(v),
+            Structure(Some((group_name, type_name)), _) => Err(format!("expected a list, but found a structure of type {}.{}", group_name, type_name)),
+            Structure(None, _) => Err(String::from_str("expected a list, but found an untyped structure")),
+            Primitive(v) => Err(format!("expected a list, but found {}", v))
         }
     }
 }

@@ -53,7 +53,7 @@ impl Renderer {
 		}
 	}
 
-	pub fn render_tile<W: tracer::World>(&self, tile: &mut Tile, camera: &cameras::Camera, world: &W) {
+	pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World) {
 		match *self {
 			Simple {bounces, samples, ..} => {
 				let mut rng: XorShiftRng = rand::task_rng().gen();

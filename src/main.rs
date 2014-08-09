@@ -36,7 +36,6 @@ macro_rules! try(
 
 mod tracer;
 mod cameras;
-mod worlds;
 mod shapes;
 mod materials;
 mod config;
@@ -64,34 +63,9 @@ fn render(project: project::Project) {
     let tiles = project.renderer.make_tiles(&project.camera, &image_size);
     let tile_count = tiles.len();
 
-    let sphere1 = shapes::Sphere{
-        radius: 1.0,
-        position: Point3::new(0.0, 0.0, -6.0)
-        material: box materials::Diffuse {reflection: 0.8f64}
-    };
-
-    let sphere2 = shapes::Sphere{
-        radius: 1.0,
-        position: Point3::new(2.0, 1.0, -6.0)
-        material: box materials::Emission {spectrum: 2.0f64}
-    };
-
-    let sphere3 = shapes::Sphere{
-        radius: 50.0,
-        position: Point3::new(0.0, -51.0, -6.0)
-        material: box materials::Diffuse {reflection: 1.0f64}
-    };
-
     let config = Arc::new(RenderContext {
         camera: project.camera,
-        world: worlds::SimpleWorld::new(
-            vec![
-                sphere1,
-                sphere2,
-                sphere3,
-            ],
-            0.0f64
-        ),
+        world: project.world,
         pending: RWLock::new(tiles),
         completed: RWLock::new(Vec::new()),
         renderer: project.renderer
@@ -105,7 +79,7 @@ fn render(project: project::Project) {
     });
 
     for _ in range(0, tile_count) {
-        pool.execute(proc(&(task_id, ref context): &(uint, Arc<RenderContext<worlds::SimpleWorld<Vec<shapes::Shape>, f64>>>)) {
+        pool.execute(proc(&(task_id, ref context): &(uint, Arc<RenderContext>)) {
             let mut tile = {
                 context.pending.write().pop().unwrap()
             };
@@ -148,9 +122,9 @@ fn render(project: project::Project) {
     println!("Done!")
 }
 
-struct RenderContext<W> {
+struct RenderContext {
     camera: cameras::Camera,
-    world: W,
+    world: tracer::World,
     pending: RWLock<Vec<Tile>>,
     completed: RWLock<Vec<Tile>>,
     renderer: renderer::Renderer
