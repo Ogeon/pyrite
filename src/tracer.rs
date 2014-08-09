@@ -45,13 +45,7 @@ pub enum Reflection<'a> {
 }
 
 
-pub struct Sample {
-    pub brightness: f64,
-    pub frequency: f64,
-    pub weight: f64
-}
-
-pub fn trace<R: Rng + FloatRng, W: World>(rng: &mut R, ray: Ray3<f64>, frequency: f64, world: &W, bounces: uint) -> Sample {
+pub fn trace<R: Rng + FloatRng, W: World>(rng: &mut R, ray: Ray3<f64>, frequency: f64, world: &W, bounces: uint) -> f64 {
     let mut path = Vec::new();
 
     let mut ray = ray;
@@ -62,26 +56,18 @@ pub fn trace<R: Rng + FloatRng, W: World>(rng: &mut R, ray: Ray3<f64>, frequency
                 Reflect(out_ray, brightness) => {
                     path.push(brightness);
                     ray = out_ray;
-
-                    if i == bounces - 1 {
-                        path.push(world.sky_color(&ray.direction));
-                    }
-                }
-                Emit(brightness) => {
-                    path.push(brightness);
-                    break;
                 },
+                Emit(brightness) => {
+                    return evaluate_contribution(frequency, brightness, path)
+                }
             },
-            None => {
-                path.push(world.sky_color(&ray.direction));
-                break;
-            }
+            None => break
         };
     }
 
-    Sample {
-        brightness: path.iter().rev().fold(1.0f64, |prod, v| prod * v.get(frequency)),
-        frequency: frequency,
-        weight: 0.0
-    }
+    evaluate_contribution(frequency, world.sky_color(&ray.direction), path)
+}
+
+pub fn evaluate_contribution(frequency: f64, sky_color: &ParametricValue<f64, f64>, path: Vec<&ParametricValue<f64, f64>>) -> f64 {
+    path.iter().rev().fold(sky_color.get(frequency), |prod, v| prod * v.get(frequency))
 }

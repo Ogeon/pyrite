@@ -63,8 +63,11 @@ impl Renderer {
 					let frequency = tile.sample_frequency(&mut rng);
 
 					let ray = camera.ray_towards(&position);
-					let mut sample = tracer::trace(&mut rng, ray, frequency, world, bounces);
-					sample.weight = 1.0;
+					let sample = Sample {
+						brightness: tracer::trace(&mut rng, ray, frequency, world, bounces),
+						frequency: frequency,
+						weight: 1.0
+					};
 
 					tile.expose(sample, position);
 				}
@@ -180,6 +183,12 @@ impl<'a> Iterator<(Spectrum, Vector2<uint>)> for Pixels<'a> {
     }
 }
 
+pub struct Sample {
+    pub brightness: f64,
+    pub frequency: f64,
+    pub weight: f64
+}
+
 pub struct Tile {
     screen_area: Area<uint>,
     camera_area: Area<f64>,
@@ -236,7 +245,7 @@ impl Tile {
         rng.gen_range(self.frequency_from, self.frequency_to)
     }
 
-    pub fn expose(&mut self, sample: tracer::Sample, position: Vector2<f64>) {
+    pub fn expose(&mut self, sample: Sample, position: Vector2<f64>) {
         let offset = position.sub_v(&self.camera_area.from);
         let x = (offset.x * self.screen_camera_ratio.x) as uint;
         let y = (offset.y * self.screen_camera_ratio.y) as uint;
