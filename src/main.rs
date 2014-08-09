@@ -67,25 +67,28 @@ fn render(project: project::Project) {
     let sphere1 = shapes::Sphere{
         radius: 1.0,
         position: Point3::new(0.0, 0.0, -6.0)
+        material: box materials::Diffuse {reflection: 0.8f64}
     };
 
     let sphere2 = shapes::Sphere{
         radius: 1.0,
         position: Point3::new(2.0, 1.0, -6.0)
+        material: box materials::Emission {spectrum: 2.0f64}
     };
 
     let sphere3 = shapes::Sphere{
         radius: 50.0,
         position: Point3::new(0.0, -51.0, -6.0)
+        material: box materials::Diffuse {reflection: 1.0f64}
     };
 
     let config = Arc::new(RenderContext {
         camera: project.camera,
         world: worlds::SimpleWorld::new(
             vec![
-                Geometric(sphere3, box materials::Diffuse {reflection: 1.0f64}),
-                Geometric(sphere1, box materials::Diffuse {reflection: 0.8f64}),
-                Geometric(sphere2, box materials::Emission {spectrum: 2.0f64}),
+                sphere1,
+                sphere2,
+                sphere3,
             ],
             0.0f64
         ),
@@ -102,13 +105,12 @@ fn render(project: project::Project) {
     });
 
     for _ in range(0, tile_count) {
-        pool.execute(proc(&(task_id, ref context): &(uint, Arc<RenderContext<worlds::SimpleWorld<Vec<Object>, f64>>>)) {
+        pool.execute(proc(&(task_id, ref context): &(uint, Arc<RenderContext<worlds::SimpleWorld<Vec<shapes::Shape>, f64>>>)) {
             let mut tile = {
                 context.pending.write().pop().unwrap()
             };
             println!("Task {} got tile {}", task_id, tile.screen_area().from);
 
-            //tracer::render(&mut tile, samples, &context.camera, &context.world, context.depth, &context.shared_stats);
             context.renderer.render_tile(&mut tile, &context.camera, &context.world);
 
             context.completed.write().push(tile);
@@ -152,20 +154,6 @@ struct RenderContext<W> {
     pending: RWLock<Vec<Tile>>,
     completed: RWLock<Vec<Tile>>,
     renderer: renderer::Renderer
-}
-
-enum Object {
-    Geometric(shapes::Shape, Box<Material + Send + Sync>)
-}
-
-impl worlds::WorldObject for Object {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
-        match *self {
-            Geometric(shape, ref material) => {
-                shape.intersect(ray).map(|r| (r, material as &Material))
-            }
-        }
-    }
 }
 
 fn clamp_channel(value: f64) -> u8 {

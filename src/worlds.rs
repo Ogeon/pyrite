@@ -3,16 +3,13 @@ use cgmath::point::Point;
 use cgmath::vector::{EuclideanVector, Vector3};
 
 use tracer::{World, Material, ParametricValue};
+use shapes::Shape;
 
 pub trait Scene {
     fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, f64, &Material)>;
 }
 
-pub trait WorldObject {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)>;
-}
-
-impl<S: WorldObject> Scene for Vec<S> {
+impl Scene for Vec<Shape> {
     fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, f64, &Material)> {
         let mut closest: Option<(Ray3<f64>, f64, &Material)> = None;
 
@@ -24,12 +21,12 @@ impl<S: WorldObject> Scene for Vec<S> {
                 match closest {
                     Some((closest_normal, closest_dist, closest_material)) => {
                         if new_dist < closest_dist {
-                            (normal, new_dist, material)
+                            (normal, new_dist, material as &Material)
                         } else {
                             (closest_normal, closest_dist, closest_material)
                         }
                     },
-                    None => (normal, new_dist, material)
+                    None => (normal, new_dist, material as &Material)
                 }
 
             }).or(closest);
