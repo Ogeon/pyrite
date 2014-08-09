@@ -7,6 +7,7 @@ use cgmath::ray::{Ray, Ray3};
 use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect};
 
 use config;
+use config::FromConfig;
 
 pub struct Diffuse {
     pub color: Box<ParametricValue<f64, f64> + 'static + Send + Sync>
@@ -64,11 +65,48 @@ impl Material for Emission {
     }
 }
 
+pub struct Mirror {
+    pub color: Box<ParametricValue<f64, f64> + 'static + Send + Sync>
+}
+
+impl Material for Mirror {
+    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
+
+        let mut n = if ray_in.direction.dot(&normal.direction) < 0.0 {
+            normal.direction
+        } else {
+            -normal.direction
+        };
+
+        let perp = ray_in.direction.dot(&n) * 2.0;
+        n.mul_self_s(perp);
+        Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), &self.color as &ParametricValue<f64, f64>)
+    }
+}
+
+pub struct Mix {
+    pub factor: f64,
+    pub a: Box<Material + 'static + Send + Sync>,
+    pub b: Box<Material + 'static + Send + Sync>
+}
+
+impl Material for Mix {
+    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+        if self.factor < rng.next_float() {
+            self.a.reflect(ray_in, normal, rng)
+        } else {
+            self.b.reflect(ray_in, normal, rng)
+        }
+    }
+}
+
 
 
 pub fn register_types(context: &mut config::ConfigContext) {
     context.insert_type("Material", "Diffuse", decode_diffuse);
     context.insert_type("Material", "Emission", decode_emission);
+    context.insert_type("Material", "Mirror", decode_mirror);
+    context.insert_type("Material", "Mix", decode_mix);
 }
 
 pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
@@ -80,7 +118,7 @@ pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, c
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(box Diffuse { color: color} as Box<Material + 'static + Send + Sync>)
+    Ok(box Diffuse { color: color } as Box<Material + 'static + Send + Sync>)
 }
 
 pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
@@ -92,5 +130,42 @@ pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, 
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(box Emission { color: color} as Box<Material + 'static + Send + Sync>)
+    Ok(box Emission { color: color } as Box<Material + 'static + Send + Sync>)
+}
+
+pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+    let mut fields = fields;
+
+    let color = match fields.pop_equiv(&"color") {
+        Some(config::Primitive(config::Number(n))) => box n as Box<ParametricValue<f64, f64> + 'static + Send + Sync>,
+        Some(v) => return Err(String::from_str("only numbers are accepted for field 'color'")),//Todo: try!(FromConfig::from_config(v), "color"),
+        None => return Err(String::from_str("missing field 'color'"))
+    };
+
+    Ok(box Mirror { color: color } as Box<Material + 'static + Send + Sync>)
+}
+
+pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+    let mut fields = fields;
+
+    let factor = match fields.pop_equiv(&"factor") {
+        Some(v) => try!(FromConfig::from_config(v), "factor"),
+        None => return Err(String::from_str("missing field 'factor'"))
+    };
+
+    let a = match fields.pop_equiv(&"a") {
+        Some(v) => try!(context.decode_structure_from_group("Material", v), "a"),
+        None => return Err(String::from_str("missing field 'a'"))
+    };
+
+    let b = match fields.pop_equiv(&"b") {
+        Some(v) => try!(context.decode_structure_from_group("Material", v), "b"),
+        None => return Err(String::from_str("missing field 'b'"))
+    };
+
+    Ok(box Mix {
+        factor: factor,
+        a: a,
+        b: b
+    } as Box<Material + 'static + Send + Sync>)
 }

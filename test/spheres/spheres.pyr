@@ -37,7 +37,11 @@ world.objects = [
 
 	ball {
 		position.x = -3
-		material = Material.Diffuse { color = 0.8 }
+		material = Material.Mix {
+			factor = 0.1
+			a = Material.Diffuse { color = 0.6 }
+			b = Material.Mirror { color = 1.0 }
+		}
 	},
 
 	ball {
