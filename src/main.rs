@@ -36,6 +36,7 @@ mod config;
 mod project;
 mod renderer;
 mod types3d;
+mod math;
 
 fn main() {
     let args = std::os::args();

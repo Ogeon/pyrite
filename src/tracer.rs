@@ -21,17 +21,17 @@ impl Material for Box<Material + Send + Sync> {
 }
 
 pub trait ParametricValue<From, To> {
-    fn get(&self, i: From) -> To; 
+    fn get(&self, i: &From) -> To; 
 }
 
 impl<From, To> ParametricValue<From, To> for Box<ParametricValue<From, To> + 'static + Send + Sync> {
-    fn get(&self, i: From) -> To {
+    fn get(&self, i: &From) -> To {
         self.get(i)
     }
 }
 
-impl ParametricValue<f64, f64> for f64 {
-    fn get(&self, _: f64) -> f64 {
+impl<From> ParametricValue<From, f64> for f64 {
+    fn get(&self, _: &From) -> f64 {
         *self
     }
 }
@@ -144,8 +144,7 @@ fn decode_sky_color(context: &config::ConfigContext, fields: HashMap<String, con
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
-        Some(config::Primitive(config::Number(n))) => box n as Box<ParametricValue<f64, f64> + 'static + Send + Sync>,
-        Some(v) => return Err(String::from_str("only numbers are accepted for field 'color'")),//Todo: try!(FromConfig::from_config(v), "color"),
+        Some(v) => try!(decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
     };
 
@@ -178,5 +177,13 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem) -
         },
         config::Primitive(v) => Err(format!("unexpected {}", v)),
         config::List(_) => Err(format!("unexpected list"))
+    }
+}
+
+pub fn decode_parametric_number<From>(context: &config::ConfigContext, item: config::ConfigItem) -> Result<Box<ParametricValue<From, f64> + 'static + Send + Sync>, String> {
+    match item {
+        config::Structure(..) => context.decode_structure_from_group("Math", item),
+        config::Primitive(config::Number(n)) => Ok(box n as Box<ParametricValue<From, f64> + 'static + Send + Sync>),
+        v => return Err(format!("expected a number or a structure from group 'Math', but found {}", v))
     }
 }
