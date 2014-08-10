@@ -103,10 +103,10 @@ impl Material for Mix {
 
 
 pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_type("Material", "Diffuse", decode_diffuse);
-    context.insert_type("Material", "Emission", decode_emission);
-    context.insert_type("Material", "Mirror", decode_mirror);
-    context.insert_type("Material", "Mix", decode_mix);
+    context.insert_grouped_type("Material", "Diffuse", decode_diffuse);
+    context.insert_grouped_type("Material", "Emission", decode_emission);
+    context.insert_grouped_type("Material", "Mirror", decode_mirror);
+    context.insert_grouped_type("Material", "Mix", decode_mix);
 }
 
 pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {

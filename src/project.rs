@@ -127,7 +127,7 @@ fn decode_image_spec(context: &config::ConfigContext, item: config::ConfigItem) 
 }
 
 fn register_types(context: &mut config::ConfigContext) {
-    context.insert_type("Image", "Png", decode_png);
+    context.insert_grouped_type("Image", "Png", decode_png);
 }
 
 pub enum ImageFormat {

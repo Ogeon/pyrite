@@ -12,7 +12,7 @@ use config;
 use config::FromConfig;
 
 pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_type("Camera", "Perspective", decode_perspective);
+    context.insert_grouped_type("Camera", "Perspective", decode_perspective);
 }
 
 pub enum Camera {

@@ -5,11 +5,11 @@ use cgmath::vector::Vector3;
 use cgmath::point::Point;
 
 use config;
-use config::FromConfig;
+use config::{FromConfig, Type};
 
 pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_type("Vector", "3D", decode_vector_3d);
-    context.insert_type("Transform", "LookAt", decode_transform_look_at);
+    context.insert_type("Vector", decode_vector_3d);
+    context.insert_grouped_type("Transform", "LookAt", decode_transform_look_at);
 }
 
 fn decode_vector_3d(_context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Vector3<f64>, String> {
@@ -38,17 +38,17 @@ fn decode_transform_look_at(context: &config::ConfigContext, items: HashMap<Stri
     let mut items = items;
 
     let from = match items.pop_equiv(&"from") {
-        Some(v) => try!(context.decode_structure_of_type("Vector", "3D", v), "from"),
+        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "from"),
         None => Vector3::new(0.0, 0.0, 0.0)
     };
 
     let to = match items.pop_equiv(&"to") {
-        Some(v) => try!(context.decode_structure_of_type("Vector", "3D", v), "to"),
+        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "to"),
         None => Vector3::new(0.0, 0.0, 0.0)
     };
 
     let up = match items.pop_equiv(&"up") {
-        Some(v) => try!(context.decode_structure_of_type("Vector", "3D", v), "up"),
+        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "up"),
         None => Vector3::new(0.0, 1.0, 0.0)
     };
 

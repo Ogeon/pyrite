@@ -137,7 +137,7 @@ pub fn evaluate_contribution(frequency: f64, sky_color: &ParametricValue<f64, f6
 
 
 pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_type("Sky", "Color", decode_sky_color);
+    context.insert_grouped_type("Sky", "Color", decode_sky_color);
 }
 
 fn decode_sky_color(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Sky, String> {

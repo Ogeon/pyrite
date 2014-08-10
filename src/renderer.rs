@@ -14,7 +14,7 @@ use cameras;
 use tracer;
 
 pub fn register_types(context: &mut config::ConfigContext) {
-	context.insert_type("Renderer", "Simple", decode_simple);
+	context.insert_grouped_type("Renderer", "Simple", decode_simple);
 }
 
 pub enum Renderer {

@@ -9,7 +9,7 @@ use cgmath::ray::{Ray, Ray3};
 use tracer::Material;
 
 use config;
-use config::FromConfig;
+use config::{FromConfig, Type};
 
 pub enum Shape {
 	Sphere { pub position: Point3<f64>, pub radius: f64, pub material: Box<Material + 'static + Send + Sync> }
@@ -35,14 +35,14 @@ impl Shape {
 
 
 pub fn register_types(context: &mut config::ConfigContext) {
-	context.insert_type("Shape", "Sphere", decode_sphere);
+	context.insert_grouped_type("Shape", "Sphere", decode_sphere);
 }
 
 fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Shape, String> {
     let mut items = items;
 
     let position = match items.pop_equiv(&"position") {
-        Some(v) => try!(context.decode_structure_of_type("Vector", "3D", v), "position"),
+        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "position"),
         None => return Err(String::from_str("missing field 'position'"))
     };
 
