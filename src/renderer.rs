@@ -44,7 +44,7 @@ impl Renderer {
 			            let image_area = Area::new(from, size);
 			            let camera_area = camera.to_view_area(&image_area, image_size);
 
-			            tiles.push(Tile::new(image_area, camera_area, 0.0, 1.0, 1));
+			            tiles.push(Tile::new(image_area, camera_area, 300.0, 900.0, 3));
 			        }
 			    }
 
@@ -125,8 +125,12 @@ impl Spectrum {
     }
 
     pub fn value_at(&self, frequency: f64) -> f64 {
-        let index = ((frequency - self.min) / self.width * self.values.len() as f64) as uint;
-        self.values[min(index, index - 1)]
+    	if frequency < self.min || frequency > self.min + self.width {
+    		0.0
+    	} else {
+    		let index = ((frequency - self.min) / self.width * self.values.len() as f64) as uint;
+    		self.values[min(index, index - 1)]
+    	}
     }
 }
 

@@ -4,13 +4,14 @@ use std::collections::HashMap;
 use cgmath::vector::{EuclideanVector, Vector, Vector3};
 use cgmath::ray::{Ray, Ray3};
 
+use tracer;
 use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect};
 
 use config;
 use config::FromConfig;
 
 pub struct Diffuse {
-    pub color: Box<ParametricValue<f64, f64> + 'static + Send + Sync>
+    pub color: Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
 }
 
 impl Material for Diffuse {
@@ -51,22 +52,22 @@ impl Material for Diffuse {
         n.normalize_self_to(sphere_point.z);
         reflected.add_self_v(&n);
 
-        Reflect(Ray::new(normal.origin, reflected), &self.color as &ParametricValue<f64, f64>)
+        Reflect(Ray::new(normal.origin, reflected), &self.color as &ParametricValue<tracer::RenderContext, f64>)
     }
 }
 
 pub struct Emission {
-    pub color: Box<ParametricValue<f64, f64> + 'static + Send + Sync>
+    pub color: Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
 }
 
 impl Material for Emission {
     fn reflect(&self, _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
-        Emit(&self.color as &ParametricValue<f64, f64>)
+        Emit(&self.color as &ParametricValue<tracer::RenderContext, f64>)
     }
 }
 
 pub struct Mirror {
-    pub color: Box<ParametricValue<f64, f64> + 'static + Send + Sync>
+    pub color: Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
 }
 
 impl Material for Mirror {
@@ -80,7 +81,7 @@ impl Material for Mirror {
 
         let perp = ray_in.direction.dot(&n) * 2.0;
         n.mul_self_s(perp);
-        Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), &self.color as &ParametricValue<f64, f64>)
+        Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), &self.color as &ParametricValue<tracer::RenderContext, f64>)
     }
 }
 
@@ -113,8 +114,7 @@ pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, c
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
-        Some(config::Primitive(config::Number(n))) => box n as Box<ParametricValue<f64, f64> + 'static + Send + Sync>,
-        Some(v) => return Err(String::from_str("only numbers are accepted for field 'color'")),//Todo: try!(FromConfig::from_config(v), "color"),
+        Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
     };
 
@@ -125,8 +125,7 @@ pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, 
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
-        Some(config::Primitive(config::Number(n))) => box n as Box<ParametricValue<f64, f64> + 'static + Send + Sync>,
-        Some(v) => return Err(String::from_str("only numbers are accepted for field 'color'")),//Todo: try!(FromConfig::from_config(v), "color"),
+        Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
     };
 
@@ -137,8 +136,7 @@ pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, co
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
-        Some(config::Primitive(config::Number(n))) => box n as Box<ParametricValue<f64, f64> + 'static + Send + Sync>,
-        Some(v) => return Err(String::from_str("only numbers are accepted for field 'color'")),//Todo: try!(FromConfig::from_config(v), "color"),
+        Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
     };
 

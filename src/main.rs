@@ -37,6 +37,7 @@ mod project;
 mod renderer;
 mod types3d;
 mod math;
+mod values;
 
 fn main() {
     let args = std::os::args();
@@ -98,8 +99,10 @@ fn render(project: project::Project) {
             match config.completed.write().pop() {
                 Some(tile) => {
                     for (spectrum, position) in tile.pixels() {
-                        let value = clamp_channel(spectrum.value_at(0.0));
-                        pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb(value, value, value))
+                        let r = clamp_channel(spectrum.value_at(400.0));
+                        let g = clamp_channel(spectrum.value_at(600.0));
+                        let b = clamp_channel(spectrum.value_at(800.0));
+                        pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb(r, g, b))
                     }
 
                     tile_counter += 1;

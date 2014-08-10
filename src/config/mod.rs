@@ -181,6 +181,25 @@ impl ConfigContext {
         }
     }
 
+    pub fn decode_structure_from_groups<T: 'static, Gr: StrAllocating>(&self, group_names: Vec<Gr>, item: ConfigItem) -> Result<T, String> {
+        let group_names = group_names.move_iter().map(|n| n.into_string()).collect::<Vec<String>>();
+
+        let name_collection = match group_names.as_slice() {
+            [ref name] => format!("'{}'", name),
+            [..names, ref last] => format!("'{}' or '{}'", names.connect("', '"), last),
+            [] => return Err(String::from_str("internal error: trying to decode structure from one of 0 groups"))
+        };
+
+        match item {
+            Structure(Grouped(group_name, type_name), fields) => if group_names.contains(&group_name) {
+                self.decode_structure(&Grouped(group_name, type_name), fields)
+            } else {
+                Err(format!("expected a structure from group {}, but found structure of type '{}.{}'", group_names, group_name, type_name))
+            },
+            value => Err(format!("expected a structure from group {}, but found {}", name_collection, value))
+        }
+    }
+
     pub fn decode_structure_of_type<T: 'static>(&self, structure_type: &Type, item: ConfigItem) -> Result<T, String> {
         match item {
             Structure(ty, fields) => if &ty == structure_type {
@@ -379,6 +398,31 @@ impl FromConfig for String {
         match item {
             parser::String(s) => Ok(s),
             _ => Err(String::from_str("expected a string"))
+        }
+    }
+}
+
+impl<T: FromConfig> FromConfig for Vec<T> {
+    fn from_list(items: Vec<ConfigItem>) -> Result<Vec<T>, String> {
+        let mut decoded = Vec::new();
+
+        for (i, item) in items.move_iter().enumerate() {
+            decoded.push(try!(FromConfig::from_config(item), format!("[{}]: ", i)))
+        }
+
+        Ok(decoded)
+    }
+}
+
+impl<A: FromConfig, B: FromConfig> FromConfig for (A, B) {
+    fn from_list(items: Vec<ConfigItem>) -> Result<(A, B), String> {
+        if items.len() != 2 {
+            Err(format!("expected a list of length 2, but found a list of length {}", items.len()))
+        } else {
+            let mut items = items.move_iter();
+            let a = try!(FromConfig::from_config(items.next().unwrap()), "[0]");
+            let b = try!(FromConfig::from_config(items.next().unwrap()), "[1]");
+            Ok((a, b))
         }
     }
 }

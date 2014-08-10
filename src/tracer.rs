@@ -78,13 +78,13 @@ impl ObjectContainer for Vec<shapes::Shape> {
 }
 
 pub enum Sky {
-    Color(Box<ParametricValue<f64, f64> + 'static + Send + Sync>)
+    Color(Box<ParametricValue<RenderContext, f64> + 'static + Send + Sync>)
 }
 
 impl Sky {
-    pub fn color(&self, _direction: &Vector3<f64>) -> &ParametricValue<f64, f64> {
+    pub fn color(&self, _direction: &Vector3<f64>) -> &ParametricValue<RenderContext, f64> {
         match *self {
-            Color(ref c) => c as &ParametricValue<f64, f64>,
+            Color(ref c) => c as &ParametricValue<RenderContext, f64>,
         }
     }
 }
@@ -101,8 +101,12 @@ impl World {
 }
 
 pub enum Reflection<'a> {
-    Emit(&'a ParametricValue<f64, f64>),
-    Reflect(Ray3<f64>, &'a ParametricValue<f64, f64>)
+    Emit(&'a ParametricValue<RenderContext, f64>),
+    Reflect(Ray3<f64>, &'a ParametricValue<RenderContext, f64>)
+}
+
+pub struct RenderContext {
+    pub frequency: f64
 }
 
 
@@ -119,18 +123,25 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, frequency: f64, wor
                     ray = out_ray;
                 },
                 Emit(brightness) => {
-                    return evaluate_contribution(frequency, brightness, path)
+                    let context = RenderContext {
+                        frequency: frequency
+                    };
+
+                    return evaluate_contribution(&context, brightness, path)
                 }
             },
             None => break
         };
     }
 
-    evaluate_contribution(frequency, world.sky.color(&ray.direction), path)
+    let context = RenderContext {
+        frequency: frequency
+    };
+    evaluate_contribution(&context, world.sky.color(&ray.direction), path)
 }
 
-pub fn evaluate_contribution(frequency: f64, sky_color: &ParametricValue<f64, f64>, path: Vec<&ParametricValue<f64, f64>>) -> f64 {
-    path.iter().rev().fold(sky_color.get(frequency), |prod, v| prod * v.get(frequency))
+pub fn evaluate_contribution(context: &RenderContext, sky_color: &ParametricValue<RenderContext, f64>, path: Vec<&ParametricValue<RenderContext, f64>>) -> f64 {
+    path.iter().rev().fold(sky_color.get(context), |prod, v| prod * v.get(context))
 }
 
 
@@ -181,9 +192,17 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem) -
 }
 
 pub fn decode_parametric_number<From>(context: &config::ConfigContext, item: config::ConfigItem) -> Result<Box<ParametricValue<From, f64> + 'static + Send + Sync>, String> {
+    let group_names = vec!["Math", "Value"];
+
+    let name_collection = match group_names.as_slice() {
+        [name] => format!("'{}'", name),
+        [..names, last] => format!("'{}' or '{}'", names.connect("', '"), last),
+        [] => return Err(String::from_str("internal error: trying to decode structure from one of 0 groups"))
+    };
+
     match item {
-        config::Structure(..) => context.decode_structure_from_group("Math", item),
+        config::Structure(..) => context.decode_structure_from_groups(group_names, item),
         config::Primitive(config::Number(n)) => Ok(box n as Box<ParametricValue<From, f64> + 'static + Send + Sync>),
-        v => return Err(format!("expected a number or a structure from group 'Math', but found {}", v))
+        v => return Err(format!("expected a number or a structure from group {}, but found {}", name_collection, v))
     }
 }
