@@ -93,15 +93,15 @@ fn render(project: project::Project) {
 
     let (red, green, blue) = project.image.rgb_curves;
 
-    let red = math::Interpolated {
+    let red = math::utils::Interpolated {
         points: red
     };
 
-    let green = math::Interpolated {
+    let green = math::utils::Interpolated {
         points: green
     };
 
-    let blue = math::Interpolated {
+    let blue = math::utils::Interpolated {
         points: blue
     };
     
@@ -135,7 +135,7 @@ fn render(project: project::Project) {
     println!("Done!")
 }
 
-fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::Interpolated) -> f64 {
+fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::utils::Interpolated) -> f64 {
     let mut sum = 0.0;
     let mut weight = 0.0;
 

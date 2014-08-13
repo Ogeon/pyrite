@@ -107,10 +107,14 @@ pub enum Reflection<'a> {
 
 pub struct RenderContext {
     pub wavelength: f64,
+    pub normal: Vector3<f64>,
+    pub incident: Vector3<f64>
 }
 
 struct Collision<'a> {
     color: &'a ParametricValue<RenderContext, f64>,
+    normal: Vector3<f64>,
+    incident: Vector3<f64>
 }
 
 pub struct WavelengthSample {
@@ -129,36 +133,54 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                 Reflect(out_ray, color) => {
                     let collision = Collision {
                         color: color,
+                        normal: normal.direction,
+                        incident: ray.direction
                     };
 
                     path.push(collision);
                     ray = out_ray;
                 },
                 Emit(color) => {
-                    return evaluate_contribution(wavelengths, color, path)
+                    let sky = Collision {
+                        color: color,
+                        normal: normal.direction,
+                        incident: ray.direction
+                    };
+
+                    return evaluate_contribution(wavelengths, sky, path)
                 }
             },
             None => break
         };
     }
 
-    evaluate_contribution(wavelengths, world.sky.color(&ray.direction), path)
+    let sky = Collision {
+        color: world.sky.color(&ray.direction),
+        normal: Vector3::new(0.0, 0.0, 0.0),
+        incident: ray.direction
+    };
+
+    evaluate_contribution(wavelengths, sky, path)
 }
 
-pub fn evaluate_contribution(wavelengths: Vec<f64>, sky_color: &ParametricValue<RenderContext, f64>, path: Vec<Collision>) -> Vec<WavelengthSample> {
+pub fn evaluate_contribution(wavelengths: Vec<f64>, sky: Collision, path: Vec<Collision>) -> Vec<WavelengthSample> {
     let mut context: Vec<RenderContext> = wavelengths.move_iter().map(|wl|
         RenderContext {
             wavelength: wl,
+            normal: sky.normal,
+            incident: sky.incident
         }
     ).collect();
 
     let initial: Vec<WavelengthSample> = context.iter().map(|context| WavelengthSample {
         wavelength: context.wavelength,
-        brightness: sky_color.get(context)
+        brightness: sky.color.get(context)
     }).collect();
 
     path.move_iter().fold(initial, |samples, v| {
         samples.move_iter().zip(context.mut_iter()).map(|(mut sample, context)| {
+            context.normal = v.normal;
+            context.incident = v.incident;
             sample.brightness *= v.color.get(context);
             sample
         }).collect()

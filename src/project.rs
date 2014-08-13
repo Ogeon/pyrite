@@ -77,6 +77,7 @@ pub fn from_file(path: Path) -> ParseResult<Project> {
     materials::register_types(&mut context);
     values::register_types(&mut context);
     math::register_types::<tracer::RenderContext>(&mut context);
+    math::register_specific_types(&mut context);
     register_types(&mut context);
 
     let image_spec = match config.pop_equiv(&"image") {

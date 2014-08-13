@@ -10,6 +10,8 @@ use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect};
 use config;
 use config::FromConfig;
 
+use math;
+
 pub struct Diffuse {
     pub color: Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
 }
@@ -86,7 +88,7 @@ impl Material for Mirror {
 }
 
 pub struct Mix {
-    pub factor: f64,
+    factor: f64,
     pub a: Box<Material + 'static + Send + Sync>,
     pub b: Box<Material + 'static + Send + Sync>
 }
@@ -101,6 +103,29 @@ impl Material for Mix {
     }
 }
 
+struct FresnelMix {
+    ior: f64,
+    env_ior: f64,
+    pub reflect: Box<Material + 'static + Send + Sync>,
+    pub refract: Box<Material + 'static + Send + Sync>
+}
+
+impl Material for FresnelMix {
+    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+        let factor = if ray_in.direction.dot(&normal.direction) < 0.0 {
+            math::utils::schlick(self.env_ior, self.ior, &normal.direction, &ray_in.direction)
+        } else {
+            math::utils::schlick(self.ior, self.env_ior, &-normal.direction, &ray_in.direction)
+        };
+
+        if factor > rng.next_float() {
+            self.reflect.reflect(ray_in, normal, rng)
+        } else {
+            self.refract.reflect(ray_in, normal, rng)
+        }
+    }
+}
+
 
 
 pub fn register_types(context: &mut config::ConfigContext) {
@@ -108,6 +133,7 @@ pub fn register_types(context: &mut config::ConfigContext) {
     context.insert_grouped_type("Material", "Emission", decode_emission);
     context.insert_grouped_type("Material", "Mirror", decode_mirror);
     context.insert_grouped_type("Material", "Mix", decode_mix);
+    context.insert_grouped_type("Material", "FresnelMix", decode_fresnel_mix);
 }
 
 pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
@@ -165,5 +191,36 @@ pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, confi
         factor: factor,
         a: a,
         b: b
+    } as Box<Material + 'static + Send + Sync>)
+}
+
+pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+    let mut fields = fields;
+
+    let ior = match fields.pop_equiv(&"ior") {
+        Some(v) => try!(FromConfig::from_config(v), "ior"),
+        None => return Err(String::from_str("missing field 'ior'"))
+    };
+
+    let env_ior = match fields.pop_equiv(&"env_ior") {
+        Some(v) => try!(FromConfig::from_config(v), "env_ior"),
+        None => 1.0
+    };
+
+    let reflect = match fields.pop_equiv(&"reflect") {
+        Some(v) => try!(context.decode_structure_from_group("Material", v), "reflect"),
+        None => return Err(String::from_str("missing field 'reflect'"))
+    };
+
+    let refract = match fields.pop_equiv(&"refract") {
+        Some(v) => try!(context.decode_structure_from_group("Material", v), "refract"),
+        None => return Err(String::from_str("missing field 'refract'"))
+    };
+
+    Ok(box FresnelMix {
+        ior: ior,
+        env_ior: env_ior,
+        reflect: reflect,
+        refract: refract
     } as Box<Material + 'static + Send + Sync>)
 }

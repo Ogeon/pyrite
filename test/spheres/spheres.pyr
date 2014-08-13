@@ -42,9 +42,9 @@ world.objects = [
 
 	ball {
 		position.x = -3
-		material = Material.Mix {
-			factor = 0.1
-			a = Material.Diffuse {
+		material = Material.FresnelMix {
+			ior = 1.5
+			refract = Material.Diffuse {
 				color = Math.Curve {
 					input = Value.Wavelength
 					points = [
@@ -56,7 +56,7 @@ world.objects = [
 					]
 				}
 			}
-			b = Material.Mirror { color = 1.0 }
+			reflect = Material.Mirror { color = 1.0 }
 		}
 	},
 
