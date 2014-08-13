@@ -9,10 +9,10 @@ pub use self::parser::Number;
 mod parser;
 
 pub type PrimitiveType = parser::Value;
+type IncludeFn<'a> = |&String|:'a -> Result<(String, Vec<String>), String>;
 
-pub fn parse<C: Iterator<char>>(source: C) -> Result<HashMap<String, ConfigItem>, String> {
+pub fn parse<C: Iterator<char>>(source: C, include: &mut IncludeFn) -> Result<HashMap<String, ConfigItem>, String> {
     let mut items = HashMap::new();
-
     let instructions = parser::parse(source);
 
     for instruction in try!(instructions).move_iter() {
@@ -20,59 +20,87 @@ pub fn parse<C: Iterator<char>>(source: C) -> Result<HashMap<String, ConfigItem>
             parser::Assign(path, parser::Struct(template, instructions)) => {
                 let (ty, mut fields) = try!(get_template(&items, &template), path.as_slice().connect("."));
 
-                match evaluate(instructions, &mut fields, &items) {
+                match evaluate(instructions, &mut fields, &items, include) {
                     Ok(()) => deep_insert(&mut items, path.as_slice(), Structure(ty, fields)),
                     Err(e) => return Err(format!("{}: {}", path.as_slice().connect("."), e))
                 }
             },
             parser::Assign(path, parser::List(elements)) => {
-                let elements = try!(evaluate_list(elements, &items), path.as_slice().connect("."));
+                let elements = try!(evaluate_list(elements, &items, include), path.as_slice().connect("."));
 
                 deep_insert(&mut items, path.as_slice(), List(elements))
             },
-            parser::Assign(path, primitive) => deep_insert(&mut items, path.as_slice(), Primitive(primitive))
+            parser::Assign(path, primitive) => deep_insert(&mut items, path.as_slice(), Primitive(primitive)),
+            parser::Include(source, path) => {
+                let (code, source_path) = try!((*include)(&source));
+                let path = match path {
+                    Some(path) => path,
+                    None => source_path
+                };
+
+                if path.len() == 0 {
+                    return Err(format!("{} could not be turned into a path", source));
+                } else {
+                    let sub_structure = try!(parse(code.as_slice().chars(), include), source);
+                    deep_insert(&mut items, path.as_slice(), Structure(Untyped, sub_structure))
+                }
+            }
         })
     }
 
     Ok(items)
 }
 
-fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, ConfigItem>, context: &HashMap<String, ConfigItem>) -> Result<(), String> {
+fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, ConfigItem>, context: &HashMap<String, ConfigItem>, include: &mut IncludeFn) -> Result<(), String> {
     for instruction in instructions.move_iter() {
         try!(match instruction {
             parser::Assign(path, parser::Struct(template, instructions)) => {
                 let (ty, mut fields) = try!(get_template(context, &template), path.as_slice().connect("."));
 
-                match evaluate(instructions, &mut fields, context) {
+                match evaluate(instructions, &mut fields, context, include) {
                     Ok(()) => deep_insert(scope, path.as_slice(), Structure(ty, fields)),
                     Err(e) => return Err(format!("{}: {}", path.as_slice().connect("."), e))
                 }
             },
             parser::Assign(path, parser::List(elements)) => {
-                let elements = try!(evaluate_list(elements, context), path.as_slice().connect("."));
+                let elements = try!(evaluate_list(elements, context, include), path.as_slice().connect("."));
 
                 deep_insert(scope, path.as_slice(), List(elements))
             },
-            parser::Assign(path, primitive) => deep_insert(scope, path.as_slice(), Primitive(primitive))
+            parser::Assign(path, primitive) => deep_insert(scope, path.as_slice(), Primitive(primitive)),
+            parser::Include(source, path) => {
+                let (code, source_path) = try!((*include)(&source));
+                let path = match path {
+                    Some(path) => path,
+                    None => source_path
+                };
+
+                if path.len() == 0 {
+                    return Err(format!("{} could not be turned into a path", source));
+                } else {
+                    let sub_structure = try!(parse(code.as_slice().chars(), include), source);
+                    deep_insert(scope, path.as_slice(), Structure(Untyped, sub_structure))
+                }
+            }
         })
     }
 
     Ok(())
 }
 
-fn evaluate_list(elements: Vec<parser::Value>, context: &HashMap<String, ConfigItem>) -> Result<Vec<ConfigItem>, String> {
+fn evaluate_list(elements: Vec<parser::Value>, context: &HashMap<String, ConfigItem>, include: &mut IncludeFn) -> Result<Vec<ConfigItem>, String> {
     let mut result = Vec::new();
     for (i, v) in elements.move_iter().enumerate() {
         match v {
             parser::Struct(template, instructions) => {
                 let (ty, mut fields) = try!(get_template(context, &template), format!("[{}]", i));
 
-                match evaluate(instructions, &mut fields, context) {
+                match evaluate(instructions, &mut fields, context, include) {
                     Ok(()) => result.push(Structure(ty, fields)),
                     Err(e) => return Err(format!("[{}]: {}", i, e))
                 }
             },
-            parser::List(elements) => result.push(List(try!(evaluate_list(elements, context), format!("[{}]", i)))),
+            parser::List(elements) => result.push(List(try!(evaluate_list(elements, context, include), format!("[{}]", i)))),
             primitive => result.push(Primitive(primitive))
         }
     }
@@ -407,7 +435,7 @@ impl<T: FromConfig> FromConfig for Vec<T> {
         let mut decoded = Vec::new();
 
         for (i, item) in items.move_iter().enumerate() {
-            decoded.push(try!(FromConfig::from_config(item), format!("[{}]: ", i)))
+            decoded.push(try!(FromConfig::from_config(item), format!("[{}]", i)))
         }
 
         Ok(decoded)

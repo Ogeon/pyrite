@@ -46,7 +46,26 @@ pub enum ParseResult<T> {
 
 pub fn from_file(path: Path) -> ParseResult<Project> {
     let config_src = try_io!(File::open(&path).read_to_string());
-    let mut config = try_parse!(config::parse(config_src.as_slice().chars()));
+    let mut config = try_parse!(
+        config::parse(config_src.as_slice().chars(), &mut |source| {
+            let sub_path = Path::new(source.as_slice());
+
+            let content = match File::open(&path.dir_path().join(&sub_path)).read_to_string() {
+                Ok(s) => s,
+                Err(e) => return Err(format!("error while reading {}: {}", path.display(), e))
+            };
+            
+            let mut object_path = Vec::new();
+            for comp in sub_path.with_extension("").str_components() {
+                match comp {
+                    Some(c) => object_path.push(String::from_str(c)),
+                    None => return Ok((content, Vec::new()))
+                }
+            }
+
+            Ok((content, object_path))
+        })
+    );
 
     let mut context = config::ConfigContext::new();
 

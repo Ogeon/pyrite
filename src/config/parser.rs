@@ -78,7 +78,8 @@ make_tokens! {
 
 #[deriving(Clone, PartialEq, Show)]
 pub enum Action {
-    Assign(Vec<String>, Value)
+    Assign(Vec<String>, Value),
+    Include(String, Option<Vec<String>>)
 }
 
 #[deriving(Clone, PartialEq, Show)]
@@ -200,6 +201,19 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
         tokens
     }
 
+    fn eat_ident(&mut self, expected: &str) -> bool {
+        let ident = self.parse_ident();
+        let matches =
+            ident.len() == expected.len() &&
+            ident.iter().zip(expected.chars()).all(|(t, c)| t.to_char() == c);
+
+        if !matches {
+            self.buffer_all(ident);
+        }
+
+        matches
+    }
+
     fn parse_path(&mut self) -> Result<Option<Vec<String>>, String> {
         let mut idents = Vec::new();
         loop {
@@ -285,11 +299,11 @@ fn format_error<S: Show>((line, column): (uint, uint), message: S) -> String {
 
 pub fn parse<C: Iterator<char>>(source: C) -> Result<Vec<Action>, String> {
     let mut parser = Parser::new(source);
-    parse_assignments(&mut parser, false).map(|v| v.unwrap())
+    parse_actions(&mut parser, false).map(|v| v.unwrap())
 }
 
-fn parse_assignments<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: bool) -> Result<Option<Vec<Action>>, String> {
-    let mut assignments = Vec::new();
+fn parse_actions<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: bool) -> Result<Option<Vec<Action>>, String> {
+    let mut actions = Vec::new();
 
     loop {
         parser.skip_while(|t| match *t {
@@ -298,8 +312,16 @@ fn parse_assignments<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: b
             _ => false
         });
 
+        match try!(parse_include(parser)) {
+            Some(i) => {
+                actions.push(i);
+                continue
+            }
+            _ => {}
+        }
+
         match try!(parse_assign(parser)) {
-            Some(a) => assignments.push(a),
+            Some(a) => actions.push(a),
             None => if expect_rbrace && !parser.eat(RBrace) {
                 return Ok(None)
             } else {
@@ -314,7 +336,7 @@ fn parse_assignments<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: b
         _ => false
     });
 
-    Ok(Some(assignments))
+    Ok(Some(actions))
 }
 
 fn parse_assign<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Action>, String> {
@@ -337,6 +359,38 @@ fn parse_assign<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Acti
     });
 
     Ok(Some(Assign(path, value)))
+}
+
+fn parse_include<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Action>, String> {
+    if !parser.eat_ident("include") {
+        return Ok(None);
+    }
+
+    parser.skip_whitespace();
+
+    let pos = parser.position();
+
+    let source = match try!(parser.parse_string()) {
+        Some(s) => s,
+        None => return Err(format_error(pos, "expected a string"))
+    };
+
+    parser.skip_whitespace();
+
+    if !parser.eat_ident("as") {
+        return Ok(Some(Include(source, None)))
+    }
+
+    parser.skip_whitespace();
+
+    let pos = parser.position();
+
+    let path = match try!(parser.parse_path()) {
+        Some(p) => p,
+        None => return Err(format_error(pos, "expected a path"))
+    };
+
+    Ok(Some(Include(source, Some(path))))
 }
 
 fn parse_list<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String> {
@@ -385,8 +439,8 @@ fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, Strin
     let pos = parser.position();
 
     match parser.next() {
-        Some(LBrace) => match try!(parse_assignments(parser, true)) {
-            Some(assignments) => return Ok(Struct(path, assignments)),
+        Some(LBrace) => match try!(parse_actions(parser, true)) {
+            Some(actions) => return Ok(Struct(path, actions)),
             None => return Err(format_error(pos, "unmatched '{'"))
         },
         Some(t) => {
