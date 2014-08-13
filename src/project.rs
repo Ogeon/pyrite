@@ -96,7 +96,9 @@ pub fn from_file(path: Path) -> ParseResult<Project> {
     };
 
     let world = match config.pop_equiv(&"world") {
-        Some(v) => try_parse!(tracer::decode_world(&context, v), "world"),
+        Some(v) => try_parse!(tracer::decode_world(&context, v, |source| {
+            path.dir_path().join(Path::new(source.as_slice()))
+        }), "world"),
         None => return ParseError(String::from_str("missing world specifications"))
     };
 

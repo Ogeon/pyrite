@@ -1,0 +1,82 @@
+include "../cameras.pyr" as cameras
+include "colors.pyr"
+
+image = {
+	width = 512
+	height = 512
+	format = Image.Png
+	rgb_curves = cameras.canon_40d
+}
+
+renderer = Renderer.Simple {
+	pixel_samples = 4000
+	spectrum_samples = 10
+	spectrum_bins = 50
+	tile_size = 64
+	bounces = 4
+}
+
+camera = Camera.Perspective {
+	fov = 53
+	transform = Transform.LookAt
+	transform.from = Vector { x=-2.78, y=-5.4, z=2.73 }
+	transform.to = Vector { x=-2.78, y=0, z=2.73 }
+	transform.up = Vector { z=1 }
+}
+
+ball = Shape.Sphere {
+	radius = 1.5
+	position = Vector { y=1.4, z=10 }
+}
+
+light = Material.Emission {
+	color = Math.Mul {
+		a = Math.Curve {
+			input = Value.Wavelength
+			points = [
+				[400, 0],
+				[500, 8],
+				[600, 15.6],
+				[700, 18.4]
+			]
+		}
+		b = 4
+	}
+}
+
+white = Material.Diffuse {
+	color = Math.Curve {
+		input = Value.Wavelength
+		points = colors.white
+	}
+}
+
+green = Material.Diffuse {
+	color = Math.Curve {
+		input = Value.Wavelength
+		points = colors.green
+	}
+}
+
+red = Material.Diffuse {
+	color = Math.Curve {
+		input = Value.Wavelength
+		points = colors.red
+	}
+}
+
+world.sky = Sky.Color { color = 0 }
+world.objects = [
+	Shape.Mesh {
+		file = "box.obj"
+		materials.light = light
+		materials.left = red
+		materials.right = green
+
+		materials.tall = white
+		materials.short = white
+		materials.back = white
+		materials.ceiling = white
+		materials.floor = white
+	}
+]

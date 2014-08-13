@@ -1,10 +1,14 @@
 use std::rand::Rng;
+use std::sync::Arc;
 use std::iter::Iterator;
 use std::collections::HashMap;
+use std::io::File;
 
 use cgmath::vector::{EuclideanVector, Vector3};
 use cgmath::ray::Ray3;
-use cgmath::point::Point;
+use cgmath::point::{Point, Point3};
+
+use obj::obj;
 
 use config;
 
@@ -205,7 +209,7 @@ fn decode_sky_color(context: &config::ConfigContext, fields: HashMap<String, con
     Ok(Color(color))
 }
 
-pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem) -> Result<World, String> {
+pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, make_path: |String| -> Path) -> Result<World, String> {
     match item {
         config::Structure(_, mut fields) => {
             let sky = match fields.pop_equiv(&"sky") {
@@ -221,7 +225,48 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem) -
             let mut objects: Vec<shapes::Shape> = Vec::new();
 
             for (i, object) in object_protos.move_iter().enumerate() {
-                objects.push(try!(context.decode_structure_from_group("Shape", object), format!("[{}]", i)))
+                let shape: shapes::ProxyShape = try!(context.decode_structure_from_group("Shape", object), format!("objects: [{}]", i));
+                match shape {
+                    shapes::DecodedShape { shape } => objects.push(shape),
+                    shapes::Mesh { file, mut materials } => {
+                        let path = make_path(file);
+                        let file = match File::open(&path).read_to_string() {
+                            Ok(obj) => obj,
+                            Err(e) => return Err(format!("objects: [{}]: unable to open file '{}': {}", i, path.display(), e))
+                        };
+
+                        let obj = match obj::parse(file) {
+                            Ok(obj) => obj,
+                            Err(e) => return Err(format!("objects: [{}]: parse file '{}': line {}: {}", i, path.display(), e.line_number, e.message))
+                        };
+
+                        for object in obj.objects.iter() {
+                            let object_material: Arc<Box<Material + 'static + Send + Sync>> =
+                                match materials.pop_equiv(&object.name) {
+                                    Some(v) => Arc::new(try!(context.decode_structure_from_group("Material", v))),
+                                    None => return Err(format!("objects: [{}]: missing field '{}'", i, object.name))
+                                };
+
+                            for group in object.geometry.iter() {
+                                for shape in group.shapes.iter() {
+                                    match *shape {
+                                        obj::Triangle((v1, _t1), (v2, _t2), (v3, _t3)) => {
+                                            let triangle = shapes::Triangle {
+                                                v1: convert_vertex(object.verticies[v1]),
+                                                v2: convert_vertex(object.verticies[v2]),
+                                                v3: convert_vertex(object.verticies[v3]),
+                                                material: object_material.clone()
+                                            };
+                                            
+                                            objects.push(triangle);
+                                        },
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Ok(World {
@@ -232,6 +277,10 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem) -
         config::Primitive(v) => Err(format!("unexpected {}", v)),
         config::List(_) => Err(format!("unexpected list"))
     }
+}
+
+fn convert_vertex(vec: obj::Vertex) -> Point3<f64> {
+    Point3::new(vec.x, vec.y, vec.z)
 }
 
 pub fn decode_parametric_number<From>(context: &config::ConfigContext, item: config::ConfigItem) -> Result<Box<ParametricValue<From, f64> + 'static + Send + Sync>, String> {

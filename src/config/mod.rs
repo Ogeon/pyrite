@@ -18,11 +18,18 @@ pub fn parse<C: Iterator<char>>(source: C, include: &mut IncludeFn) -> Result<Ha
     for instruction in try!(instructions).move_iter() {
         try!(match instruction {
             parser::Assign(path, parser::Struct(template, instructions)) => {
-                let (ty, mut fields) = try!(get_template(&items, &template), path.as_slice().connect("."));
+                if instructions.len() == 0 {
+                    match try!(deep_find(&items, &template).map(|v| v.map(|v| (*v).clone()))) {
+                        Some(v) => deep_insert(&mut items, path.as_slice(), v),
+                        None => deep_insert(&mut items, path.as_slice(), Structure(try!(get_typename(&template)), HashMap::new()))
+                    }
+                } else {
+                    let (ty, mut fields) = try!(get_template(&items, &template), path.as_slice().connect("."));
 
-                match evaluate(instructions, &mut fields, &items, include) {
-                    Ok(()) => deep_insert(&mut items, path.as_slice(), Structure(ty, fields)),
-                    Err(e) => return Err(format!("{}: {}", path.as_slice().connect("."), e))
+                    match evaluate(instructions, &mut fields, &items, include) {
+                        Ok(()) => deep_insert(&mut items, path.as_slice(), Structure(ty, fields)),
+                        Err(e) => return Err(format!("{}: {}", path.as_slice().connect("."), e))
+                    }
                 }
             },
             parser::Assign(path, parser::List(elements)) => {
@@ -55,11 +62,18 @@ fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, Confi
     for instruction in instructions.move_iter() {
         try!(match instruction {
             parser::Assign(path, parser::Struct(template, instructions)) => {
-                let (ty, mut fields) = try!(get_template(context, &template), path.as_slice().connect("."));
+                if instructions.len() == 0 {
+                    match try!(deep_find(context, &template).map(|v| v.map(|v| (*v).clone()))) {
+                        Some(v) => deep_insert(scope, path.as_slice(), v),
+                        None => deep_insert(scope, path.as_slice(), Structure(try!(get_typename(&template)), HashMap::new()))
+                    }
+                } else {
+                    let (ty, mut fields) = try!(get_template(context, &template), path.as_slice().connect("."));
 
-                match evaluate(instructions, &mut fields, context, include) {
-                    Ok(()) => deep_insert(scope, path.as_slice(), Structure(ty, fields)),
-                    Err(e) => return Err(format!("{}: {}", path.as_slice().connect("."), e))
+                    match evaluate(instructions, &mut fields, context, include) {
+                        Ok(()) => deep_insert(scope, path.as_slice(), Structure(ty, fields)),
+                        Err(e) => return Err(format!("{}: {}", path.as_slice().connect("."), e))
+                    }
                 }
             },
             parser::Assign(path, parser::List(elements)) => {
@@ -111,14 +125,18 @@ fn evaluate_list(elements: Vec<parser::Value>, context: &HashMap<String, ConfigI
 fn get_template(context: &HashMap<String, ConfigItem>, template: &Vec<String>) -> Result<(Type, HashMap<String, ConfigItem>), String> {
     match deep_find(context, template).map(|v| v.map(|v| (*v).clone())) {
         Ok(Some(Structure(template_type, fields))) => Ok((template_type, fields)),
-        Ok(None) => match template.as_slice() {
-            [ref type_name] => Ok((Single(type_name.clone()), HashMap::new())),
-            [ref group_name, ref type_name] => Ok((Grouped(group_name.clone(), type_name.clone()), HashMap::new())),
-            [] => Ok((Untyped, HashMap::new())),
-            _ => Err(format!("'{}' is not a valid type name", template.as_slice().connect(".")))
-        },
+        Ok(None) => Ok((try!(get_typename(template)), HashMap::new())),
         Ok(Some(_)) => Err(String::from_str("only a structure or a type can be used as a template")),
         Err(e) => Err(e)
+    }
+}
+
+fn get_typename(template: &Vec<String>) -> Result<Type, String> {
+    match template.as_slice() {
+        [ref type_name] => Ok(Single(type_name.clone())),
+        [ref group_name, ref type_name] => Ok(Grouped(group_name.clone(), type_name.clone())),
+        [] => Ok(Untyped),
+        _ => Err(format!("'{}' is not a valid type name", template.as_slice().connect(".")))
     }
 }
 

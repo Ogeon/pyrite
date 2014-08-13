@@ -35,12 +35,12 @@ impl Material for Diffuse {
         };
 
         let mut reflected = n.cross(
-            &if n.x >= n.y && n.x >= n.z {
-                Vector3::new(1.0, 0.0, 0.0)
-            } else if n.y >= n.z {
-                Vector3::new(0.0, 1.0, 0.0)
+            &if n.x.abs() < n.y.abs() && n.x.abs() < n.z.abs() {
+                Vector3::new(n.x.signum(), 0.0, 0.0)
+            } else if n.y.abs() < n.z.abs() {
+                Vector3::new(0.0, n.y.signum(), 0.0)
             } else {
-                Vector3::new(0.0, 0.0, 1.0)
+                Vector3::new(0.0, 0.0, n.z.signum())
             }
         );
 

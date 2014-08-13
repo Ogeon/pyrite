@@ -2,6 +2,7 @@
 
 extern crate cgmath;
 extern crate image;
+extern crate obj = "wavefront-obj";
 
 use std::sync::{TaskPool, Arc, RWLock};
 use std::io::File;
