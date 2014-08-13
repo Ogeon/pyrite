@@ -2,14 +2,14 @@
 name = "pyrite"
 version = "0.0.0"
 dependencies = [
- "cgmath 0.0.1 (git+https://github.com/bjz/cgmath-rs#38364a64398eb09fed6fa3029cbb0ed7e2babddf)",
+ "cgmath 0.0.1 (git+https://github.com/bjz/cgmath-rs#4a45bf3b53955a15fdd6ebc13f4c57741d6ad15a)",
  "image 0.0.0 (git+https://github.com/PistonDevelopers/rust-image#1fa785249a87370e23a3cebee04cf2e548761fd4)",
 ]
 
 [[package]]
 name = "cgmath"
 version = "0.0.1"
-source = "git+https://github.com/bjz/cgmath-rs#38364a64398eb09fed6fa3029cbb0ed7e2babddf"
+source = "git+https://github.com/bjz/cgmath-rs#4a45bf3b53955a15fdd6ebc13f4c57741d6ad15a"
 
 [[package]]
 name = "image"
