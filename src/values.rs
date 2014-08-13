@@ -40,6 +40,6 @@ pub fn register_types(context: &mut config::ConfigContext) {
 
 make_values! {
 	insert_render_numbers: RenderNumber<tracer::RenderContext, f64> {
-		decode_frequency: Frequency => frequency
+		decode_wavelength: Wavelength => wavelength
 	}
 }

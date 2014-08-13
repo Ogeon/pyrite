@@ -106,11 +106,19 @@ pub enum Reflection<'a> {
 }
 
 pub struct RenderContext {
-    pub frequency: f64
+    pub wavelength: f64,
 }
 
+struct Collision<'a> {
+    color: &'a ParametricValue<RenderContext, f64>,
+}
 
-pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, frequency: f64, world: &World, bounces: uint) -> f64 {
+pub struct WavelengthSample {
+    pub wavelength: f64,
+    pub brightness: f64
+}
+
+pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f64>, world: &World, bounces: uint) -> Vec<WavelengthSample> {
     let mut path = Vec::new();
 
     let mut ray = ray;
@@ -118,30 +126,43 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, frequency: f64, wor
     for i in range(0, bounces) {
         match world.intersect(&ray) {
             Some((normal, _distance, material)) => match material.reflect(&ray, &normal, &mut *rng as &mut FloatRng) {
-                Reflect(out_ray, brightness) => {
-                    path.push(brightness);
-                    ray = out_ray;
-                },
-                Emit(brightness) => {
-                    let context = RenderContext {
-                        frequency: frequency
+                Reflect(out_ray, color) => {
+                    let collision = Collision {
+                        color: color,
                     };
 
-                    return evaluate_contribution(&context, brightness, path)
+                    path.push(collision);
+                    ray = out_ray;
+                },
+                Emit(color) => {
+                    return evaluate_contribution(wavelengths, color, path)
                 }
             },
             None => break
         };
     }
 
-    let context = RenderContext {
-        frequency: frequency
-    };
-    evaluate_contribution(&context, world.sky.color(&ray.direction), path)
+    evaluate_contribution(wavelengths, world.sky.color(&ray.direction), path)
 }
 
-pub fn evaluate_contribution(context: &RenderContext, sky_color: &ParametricValue<RenderContext, f64>, path: Vec<&ParametricValue<RenderContext, f64>>) -> f64 {
-    path.iter().rev().fold(sky_color.get(context), |prod, v| prod * v.get(context))
+pub fn evaluate_contribution(wavelengths: Vec<f64>, sky_color: &ParametricValue<RenderContext, f64>, path: Vec<Collision>) -> Vec<WavelengthSample> {
+    let mut context: Vec<RenderContext> = wavelengths.move_iter().map(|wl|
+        RenderContext {
+            wavelength: wl,
+        }
+    ).collect();
+
+    let initial: Vec<WavelengthSample> = context.iter().map(|context| WavelengthSample {
+        wavelength: context.wavelength,
+        brightness: sky_color.get(context)
+    }).collect();
+
+    path.move_iter().fold(initial, |samples, v| {
+        samples.move_iter().zip(context.mut_iter()).map(|(mut sample, context)| {
+            sample.brightness *= v.color.get(context);
+            sample
+        }).collect()
+    })
 }
 
 

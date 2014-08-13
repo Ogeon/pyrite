@@ -8,7 +8,9 @@ image = {
 }
 
 renderer = Renderer.Simple {
-	samples = 500
+	pixel_samples = 500
+	spectrum_samples = 10
+	spectrum_bins = 50
 	tile_size = 32
 }
 
@@ -44,7 +46,7 @@ world.objects = [
 			factor = 0.1
 			a = Material.Diffuse {
 				color = Math.Curve {
-					input = Value.Frequency
+					input = Value.Wavelength
 					points = [
 						[400, 0],
 						[450, 0.3],
@@ -62,7 +64,7 @@ world.objects = [
 		position.x = 3
 		material = Material.Diffuse {
 			color = Math.Curve {
-				input = Value.Frequency
+				input = Value.Wavelength
 				points = [
 					[580, 0],
 					[600, 1],

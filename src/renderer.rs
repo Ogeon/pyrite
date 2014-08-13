@@ -19,18 +19,31 @@ pub fn register_types(context: &mut config::ConfigContext) {
 	context.insert_grouped_type("Renderer", "Simple", decode_simple);
 }
 
-pub enum Renderer {
-	Simple {threads: uint, tile_size: uint, bounces: uint, samples: uint}
+pub struct Renderer {
+    pub threads: uint,
+    bounces: uint,
+    pixel_samples: uint,
+    spectrum_samples: uint,
+    spectrum_bins: uint,
+    algorithm: RenderAlgorithm
 }
 
 impl Renderer {
-	pub fn threads(&self) -> uint {
-		match *self {
-			Simple {threads, ..} => threads,
-		}
-	}
+    pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>) -> Vec<Tile> {
+        self.algorithm.make_tiles(camera, image_size, self.spectrum_bins)
+    }
 
-	pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>) -> Vec<Tile> {
+    pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World) {
+        self.algorithm.render_tile(tile, camera, world, self)
+    }
+}
+
+enum RenderAlgorithm {
+	Simple {tile_size: uint}
+}
+
+impl RenderAlgorithm {
+	pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>, spectrum_bins: uint) -> Vec<Tile> {
 		match *self {
 			Simple {tile_size, ..} => {
 				let tiles_x = (image_size.x as f32 / tile_size as f32).ceil() as uint;
@@ -46,7 +59,7 @@ impl Renderer {
 			            let image_area = Area::new(from, size);
 			            let camera_area = camera.to_view_area(&image_area, image_size);
 
-			            tiles.push(Tile::new(image_area, camera_area, 300.0, 900.0, 64));
+			            tiles.push(Tile::new(image_area, camera_area, 300.0, 900.0, spectrum_bins));
 			        }
 			    }
 
@@ -55,58 +68,85 @@ impl Renderer {
 		}
 	}
 
-	pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World) {
+	pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World, renderer: &Renderer) {
 		match *self {
-			Simple {bounces, samples, ..} => {
+			Simple {..} => {
 				let mut rng: XorShiftRng = rand::task_rng().gen();
 
-				for _ in range(0, tile.pixel_count() * samples) {
+				for _ in range(0, tile.pixel_count() * renderer.pixel_samples) {
 					let position = tile.sample_position(&mut rng);
-					let frequency = tile.sample_frequency(&mut rng);
+					let wavelengths = range(0, renderer.spectrum_samples).map(|_| tile.sample_wavelength(&mut rng)).collect();
 
 					let ray = camera.ray_towards(&position);
-					let sample = Sample {
-						brightness: tracer::trace(&mut rng, ray, frequency, world, bounces),
-						frequency: frequency,
-						weight: 1.0
-					};
+					let samples = tracer::trace(&mut rng, ray, wavelengths, world, renderer.bounces);
 
-					tile.expose(sample, position);
+					for sample in samples.move_iter() {
+						let sample = Sample {
+							brightness: sample.brightness,
+							wavelength: sample.wavelength,
+							weight: 1.0
+						};
+						tile.expose(sample, position);
+					}
 				}
 			}
 		}
 	}
 }
 
-fn decode_simple(_context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Renderer, String> {
-	let mut items = items;
+fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>, algorithm: RenderAlgorithm) -> Result<Renderer, String> {
+    let mut items = items;
 
-	let threads = match items.pop_equiv(&"threads") {
-		Some(v) => try!(FromConfig::from_config(v), "threads"),
-		None => std::rt::default_sched_threads()
-	};
+    let threads = match items.pop_equiv(&"threads") {
+        Some(v) => try!(FromConfig::from_config(v), "threads"),
+        None => std::rt::default_sched_threads()
+    };
+
+    let bounces = match items.pop_equiv(&"bounces") {
+        Some(v) => try!(FromConfig::from_config(v), "bounces"),
+        None => 8
+    };
+
+    let pixel_samples = match items.pop_equiv(&"pixel_samples") {
+        Some(v) => try!(FromConfig::from_config(v), "pixel_samples"),
+        None => 10
+    };
+
+    let spectrum_samples = match items.pop_equiv(&"spectrum_samples") {
+        Some(v) => try!(FromConfig::from_config(v), "spectrum_samples"),
+        None => 5
+    };
+
+    let spectrum_bins = match items.pop_equiv(&"spectrum_bins") {
+        Some(v) => try!(FromConfig::from_config(v), "spectrum_bins"),
+        None => 64
+    };
+
+    Ok(
+        Renderer {
+            threads: threads,
+            bounces: bounces,
+            pixel_samples: pixel_samples,
+            spectrum_samples: spectrum_samples,
+            spectrum_bins: spectrum_bins,
+            algorithm: algorithm
+        }
+    )
+}
+
+fn decode_simple(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Renderer, String> {
+    let mut items = items;
 
 	let tile_size = match items.pop_equiv(&"tile_size") {
 		Some(v) => try!(FromConfig::from_config(v), "tile_size"),
 		None => 64
 	};
 
-	let bounces = match items.pop_equiv(&"bounces") {
-		Some(v) => try!(FromConfig::from_config(v), "bounces"),
-		None => 8
-	};
+    let algorithm = Simple {
+        tile_size: tile_size,
+    };
 
-	let samples = match items.pop_equiv(&"samples") {
-		Some(v) => try!(FromConfig::from_config(v), "samples"),
-		None => 10
-	};
-
-	Ok(Simple {
-		threads: threads,
-		tile_size: tile_size,
-		bounces: bounces,
-		samples: samples
-	})
+    decode_renderer(context, items, algorithm)
 }
 
 
@@ -126,11 +166,11 @@ impl Spectrum {
         }
     }
 
-    pub fn value_at(&self, frequency: f64) -> f64 {
-    	if frequency < self.min || frequency > self.min + self.width {
+    pub fn value_at(&self, wavelength: f64) -> f64 {
+    	if wavelength < self.min || wavelength > self.min + self.width {
     		0.0
     	} else {
-    		let index = ((frequency - self.min) / self.width * self.values.len() as f64) as uint;
+    		let index = ((wavelength - self.min) / self.width * self.values.len() as f64) as uint;
     		self.values[min(index, index - 1)]
     	}
     }
@@ -224,28 +264,28 @@ impl<'a> Iterator<(Spectrum, Vector2<uint>)> for Pixels<'a> {
 
 pub struct Sample {
     pub brightness: f64,
-    pub frequency: f64,
+    pub wavelength: f64,
     pub weight: f64
 }
 
 pub struct Tile {
     screen_area: Area<uint>,
     camera_area: Area<f64>,
-    frequency_from: f64,
-    frequency_to: f64,
-    frequency_width: f64,
+    wavelength_from: f64,
+    wavelength_to: f64,
+    wavelength_width: f64,
     screen_camera_ratio: Vector2<f64>,
     pixels: Vec<Pixel>
 }
 
 impl Tile {
-    pub fn new(screen_area: Area<uint>, camera_area: Area<f64>, frequency_from: f64, frequency_to: f64, spectrum_steps: uint) -> Tile {
+    pub fn new(screen_area: Area<uint>, camera_area: Area<f64>, wavelength_from: f64, wavelength_to: f64, spectrum_steps: uint) -> Tile {
         Tile {
             screen_area: screen_area,
             camera_area: camera_area,
-            frequency_from: frequency_from,
-            frequency_to: frequency_to,
-            frequency_width: frequency_to - frequency_from,
+            wavelength_from: wavelength_from,
+            wavelength_to: wavelength_to,
+            wavelength_width: wavelength_to - wavelength_from,
             screen_camera_ratio: Vector2::new(screen_area.size.x as f64 / camera_area.size.x, screen_area.size.y as f64 / camera_area.size.y),
             pixels: Vec::from_fn(screen_area.area(), |_| Pixel {
                 spectrum: Vec::from_elem(spectrum_steps, (0.0, 0.0))
@@ -271,7 +311,7 @@ impl Tile {
 
     pub fn pixel(&self, x: uint, y: uint) -> Spectrum {
         let values = self.pixels[x + y * self.screen_area.size.x].final_values();
-        Spectrum::new(self.frequency_from, self.frequency_to, values)
+        Spectrum::new(self.wavelength_from, self.wavelength_to, values)
     }
 
     pub fn sample_position<R: Rng>(&self, rng: &mut R) -> Vector2<f64> {
@@ -280,8 +320,8 @@ impl Tile {
         self.camera_area.from.add_v(&Vector2::new(x, y))
     }
 
-    pub fn sample_frequency<R: Rng>(&self, rng: &mut R) -> f64 {
-        rng.gen_range(self.frequency_from, self.frequency_to)
+    pub fn sample_wavelength<R: Rng>(&self, rng: &mut R) -> f64 {
+        rng.gen_range(self.wavelength_from, self.wavelength_to)
     }
 
     pub fn expose(&mut self, sample: Sample, position: Vector2<f64>) {
@@ -290,7 +330,7 @@ impl Tile {
         let y = (offset.y * self.screen_camera_ratio.y) as uint;
         let &Pixel{spectrum: ref mut spectrum} = self.pixels.get_mut(x + y * self.screen_area.size.x);
 
-        let index = ((sample.frequency - self.frequency_from) / self.frequency_width * spectrum.len() as f64) as uint;
+        let index = ((sample.wavelength - self.wavelength_from) / self.wavelength_width * spectrum.len() as f64) as uint;
 
         if index <= spectrum.len() {
             let (ref mut brightness, ref mut weight) = *spectrum.get_mut(min(index, index - 1));

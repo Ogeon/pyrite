@@ -67,7 +67,7 @@ fn render(project: project::Project) {
         renderer: project.renderer
     });
 
-    let mut pool = TaskPool::new(project.renderer.threads(), || {
+    let mut pool = TaskPool::new(project.renderer.threads, || {
         let config = config.clone();
         proc(id: uint) {
             (id, config)
