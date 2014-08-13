@@ -70,12 +70,21 @@ make_operators!{
 
 struct Curve<From> {
     input: Box<tracer::ParametricValue<From, f64> + 'static + Send + Sync>,
-    points: Vec<(f64, f64)>
+    points: Interpolated
 }
 
 impl<From> tracer::ParametricValue<From, f64> for Curve<From> {
     fn get(&self, i: &From) -> f64 {
-        let input = self.input.get(i);
+        self.points.get(self.input.get(i))
+    }
+}
+
+pub struct Interpolated {
+    pub points: Vec<(f64, f64)>
+}
+
+impl Interpolated {
+    pub fn get(&self, input: f64) -> f64 {
         let mut points = self.points.iter();
 
         let mut min = match points.next() {
@@ -83,15 +92,15 @@ impl<From> tracer::ParametricValue<From, f64> for Curve<From> {
             None => return 0.0
         };
 
-        let mut max = min;
+        let mut max = *self.points.last().unwrap();
 
         for &(x, y) in points {
             if input == x {
                 return y;
             } else if input > x {
-                min = max;
-                max = (x, y);
+                min = (x, y);
             } else {
+                max = (x, y);
                 break;
             }
         }
@@ -106,6 +115,7 @@ impl<From> tracer::ParametricValue<From, f64> for Curve<From> {
         } else {
             min_y + (max_y - min_y) * (input - min_x) / (max_x - min_x)
         }
+
     }
 }
 
@@ -125,7 +135,7 @@ fn decode_curve<From>(context: &config::ConfigContext, fields: HashMap<String, c
     Ok(
         box Curve::<From> {
             input: input,
-            points: points
+            points: Interpolated { points: points }
         } as Box<tracer::ParametricValue<From, f64> + 'static + Send + Sync>
     )
 }

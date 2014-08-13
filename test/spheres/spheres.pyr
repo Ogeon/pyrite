@@ -1,7 +1,10 @@
+include "../cameras.pyr" as cameras
+
 image = {
 	width = 512
 	height = 256
 	format = Image.Png
+	rgb_curves = cameras.canon_40d
 }
 
 renderer = Renderer.Simple {

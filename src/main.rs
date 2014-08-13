@@ -90,6 +90,20 @@ fn render(project: project::Project) {
     let mut tile_counter = 0;
 
     let mut pixels = image::ImageBuf::new(image_size.x as u32, image_size.y as u32);
+
+    let (red, green, blue) = project.image.rgb_curves;
+
+    let red = math::Interpolated {
+        points: red
+    };
+
+    let green = math::Interpolated {
+        points: green
+    };
+
+    let blue = math::Interpolated {
+        points: blue
+    };
     
     while tile_counter < tile_count {
         std::io::timer::sleep(4000);
@@ -99,9 +113,10 @@ fn render(project: project::Project) {
             match config.completed.write().pop() {
                 Some(tile) => {
                     for (spectrum, position) in tile.pixels() {
-                        let r = clamp_channel(spectrum.value_at(400.0));
-                        let g = clamp_channel(spectrum.value_at(600.0));
-                        let b = clamp_channel(spectrum.value_at(800.0));
+                        let r = clamp_channel(calculate_channel(&spectrum, &red));
+                        let g = clamp_channel(calculate_channel(&spectrum, &green));
+                        let b = clamp_channel(calculate_channel(&spectrum, &blue));
+                        
                         pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb(r, g, b))
                     }
 
@@ -118,6 +133,30 @@ fn render(project: project::Project) {
     }
 
     println!("Done!")
+}
+
+fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::Interpolated) -> f64 {
+    let mut sum = 0.0;
+    let mut weight = 0.0;
+
+    for segment in spectrum.segments() {
+        let mut offset = 0.0;
+
+        while offset < segment.width {
+            let start = segment.start + offset;
+            let start_resp = response.get(start);
+            let end_resp = response.get(start + (segment.width - offset).min(5.0));
+
+            let w = start_resp + end_resp;
+            sum += segment.value * w;
+            weight += w;
+
+            offset += 1.0;
+        }
+        
+    }
+
+    sum / weight
 }
 
 struct RenderContext {

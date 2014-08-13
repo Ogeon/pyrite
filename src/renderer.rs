@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::cmp::min;
 use std::rand;
 use std::rand::{Rng, XorShiftRng};
+use std::iter::Enumerate;
+use std::slice::Items;
 
 use cgmath::vector::{Vector, Vector2};
 
@@ -44,7 +46,7 @@ impl Renderer {
 			            let image_area = Area::new(from, size);
 			            let camera_area = camera.to_view_area(&image_area, image_size);
 
-			            tiles.push(Tile::new(image_area, camera_area, 300.0, 900.0, 3));
+			            tiles.push(Tile::new(image_area, camera_area, 300.0, 900.0, 64));
 			        }
 			    }
 
@@ -110,8 +112,8 @@ fn decode_simple(_context: &config::ConfigContext, items: HashMap<String, config
 
 
 pub struct Spectrum {
-    min: f64,
-    width: f64,
+    pub min: f64,
+    pub width: f64,
     values: Vec<f64>
 }
 
@@ -132,6 +134,39 @@ impl Spectrum {
     		self.values[min(index, index - 1)]
     	}
     }
+
+    pub fn segments(&self) -> SpectrumSegments {
+    	SpectrumSegments {
+    		start: self.min,
+    		segment_width: self.width / self.values.len() as f64,
+    		values: self.values.iter().enumerate()
+    	}
+    }
+}
+
+pub struct SpectrumSegments<'a> {
+    start: f64,
+    segment_width: f64,
+    values: Enumerate<Items<'a, f64>>
+}
+
+impl<'a> std::iter::Iterator<Segment> for SpectrumSegments<'a> {
+	fn next(&mut self) -> Option<Segment> {
+		match self.values.next() {
+			Some((i, &v)) => Some(Segment {
+				start: self.start + i as f64 * self.segment_width,
+				width: self.segment_width,
+				value: v
+			}),
+			None => None
+		}
+	}
+}
+
+pub struct Segment {
+    pub start: f64,
+    pub width: f64,
+    pub value: f64
 }
 
 pub struct Area<S> {

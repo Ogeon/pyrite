@@ -118,6 +118,7 @@ pub struct ImageSpec {
     pub width: uint,
     pub height: uint,
     pub format: ImageFormat,
+    pub rgb_curves: (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>)
 }
 
 fn decode_image_spec(context: &config::ConfigContext, item: config::ConfigItem) -> Result<ImageSpec, String> {
@@ -138,15 +139,43 @@ fn decode_image_spec(context: &config::ConfigContext, item: config::ConfigItem) 
                 None => return Err(String::from_str("missing field 'format'"))
             };
 
+            let rgb_curves = match fields.pop_equiv(&"rgb_curves") {
+                Some(config::Structure(_, f)) => try!(decode_rgb_curves(f), "rgb_curves"),
+                Some(_) => return Err(format!("expected a structure")),
+                None => return Err(String::from_str("missing field 'rgb_curves'"))
+            };
+
             Ok(ImageSpec {
                 width: width,
                 height: height,
-                format: format
+                format: format,
+                rgb_curves: rgb_curves
             })
         },
         config::Primitive(v) => Err(format!("unexpected {}", v)),
         config::List(_) => Err(format!("unexpected list"))
     }
+}
+
+fn decode_rgb_curves(fields: HashMap<String, config::ConfigItem>) -> Result<(Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>), String> {
+    let mut fields = fields;
+
+    let red = match fields.pop_equiv(&"red") {
+        Some(v) => try!(FromConfig::from_config(v), "red"),
+        None => return Err(String::from_str("missing field 'red'"))
+    };
+
+    let green = match fields.pop_equiv(&"green") {
+        Some(v) => try!(FromConfig::from_config(v), "green"),
+        None => return Err(String::from_str("missing field 'green'"))
+    };
+        
+    let blue = match fields.pop_equiv(&"blue") {
+        Some(v) => try!(FromConfig::from_config(v), "blue"),
+        None => return Err(String::from_str("missing field 'blue'"))
+    };
+
+    Ok((red, green, blue))
 }
 
 fn register_types(context: &mut config::ConfigContext) {
