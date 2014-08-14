@@ -157,7 +157,7 @@ fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::utils::Inte
         
     }
 
-    sum / weight
+    (sum / weight).powf(0.45)
 }
 
 struct RenderContext {

@@ -10,10 +10,10 @@ image = {
 
 renderer = Renderer.Simple {
 	pixel_samples = 4000
-	spectrum_samples = 10
+	spectrum_samples = 5
 	spectrum_bins = 50
 	tile_size = 64
-	bounces = 4
+	bounces = 80
 }
 
 camera = Camera.Perspective {
@@ -30,17 +30,14 @@ ball = Shape.Sphere {
 }
 
 light = Material.Emission {
-	color = Math.Mul {
-		a = Math.Curve {
-			input = Value.Wavelength
-			points = [
-				[400, 0],
-				[500, 8],
-				[600, 15.6],
-				[700, 18.4]
-			]
-		}
-		b = 4
+	color =  Math.Curve {
+		input = Value.Wavelength
+		points = [
+			[400, 0],
+			[500, 8],
+			[600, 15.6],
+			[700, 18.4]
+		]
 	}
 }
 
