@@ -3,22 +3,22 @@ use std::sync::Arc;
 use std::iter::Iterator;
 use std::collections::HashMap;
 use std::io::File;
+use std::simd;
 
 use cgmath::vector::{EuclideanVector, Vector3};
 use cgmath::ray::Ray3;
 use cgmath::point::{Point, Point3};
 
 use obj::obj;
-
 use config;
-
 use shapes;
+use bkdtree;
 
 pub trait Material {
     fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection;
 }
 
-impl Material for Box<Material + Send + Sync> {
+impl Material for Box<Material + 'static + Send + Sync> {
     fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
         self.reflect(ray_in, normal, rng)
     }
@@ -51,33 +51,82 @@ impl<R: Rng> FloatRng for R {
 }
 
 pub trait ObjectContainer {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, f64, &Material)>;
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)>;
 }
 
 impl ObjectContainer for Vec<shapes::Shape> {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, f64, &Material)> {
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
         let mut closest: Option<(Ray3<f64>, f64, &Material)> = None;
 
         for object in self.iter() {
-            closest = object.intersect(ray).map(|(normal, material)| {
-
-                let new_dist = ray.origin.sub_p(&normal.origin).length2();
-
+            closest = object.intersect(ray).map(|(new_dist, normal)| {
                 match closest {
                     Some((closest_normal, closest_dist, closest_material)) => {
                         if new_dist > 0.000001 && new_dist < closest_dist {
-                            (normal, new_dist, material as &Material)
+                            (normal, new_dist, object.get_material())
                         } else {
                             (closest_normal, closest_dist, closest_material)
                         }
                     },
-                    None => (normal, new_dist, material as &Material)
+                    None => (normal, new_dist, object.get_material())
                 }
 
             }).or(closest);
         }
 
-        closest
+        closest.map(|(normal, _, material)| (normal, material))
+    }
+}
+
+impl ObjectContainer for bkdtree::BkdTree<shapes::Shape> {
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
+        let ray = BkdRay(ray);
+        self.find(&ray).map(|(normal, object)| (normal, object.get_material()))
+    }
+}
+
+pub struct BkdRay<'a>(pub &'a Ray3<f64>);
+
+impl<'a> bkdtree::Ray for BkdRay<'a> {
+    fn plane_intersections(&self, min: f64, max: f64, axis: uint) -> Option<(f64, f64)> {
+        let &BkdRay(ray) = self;
+
+        let (origin, direction) = match axis {
+            0 => (simd::f64x2(ray.origin.x, ray.origin.x), simd::f64x2(ray.direction.x, ray.direction.x)),
+            1 => (simd::f64x2(ray.origin.y, ray.origin.y), simd::f64x2(ray.direction.y, ray.direction.y)),
+            _ => (simd::f64x2(ray.origin.z, ray.origin.z), simd::f64x2(ray.direction.z, ray.direction.z))
+        };
+
+        let plane = simd::f64x2(min, max);
+        let simd::f64x2(min, max) = (plane - origin) / direction;
+        let far = min.max(max);
+
+        if far > 0.0 {
+            let near = min.min(max);
+            Some((near, far))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn plane_distance(&self, min: f64, max: f64, axis: uint) -> (f64, f64) {
+        let &BkdRay(ray) = self;
+
+        let (origin, direction) = match axis {
+            0 => (simd::f64x2(ray.origin.x, ray.origin.x), simd::f64x2(ray.direction.x, ray.direction.x)),
+            1 => (simd::f64x2(ray.origin.y, ray.origin.y), simd::f64x2(ray.direction.y, ray.direction.y)),
+            _ => (simd::f64x2(ray.origin.z, ray.origin.z), simd::f64x2(ray.direction.z, ray.direction.z))
+        };
+
+        let plane = simd::f64x2(min, max);
+        let simd::f64x2(min, max) = (plane - origin) / direction;
+        
+        if min < max {
+            (min, max)
+        } else {
+            (max, min)
+        }
     }
 }
 
@@ -99,7 +148,7 @@ pub struct World {
 }
 
 impl World {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, f64, &Material)> {
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
         self.objects.intersect(ray)
     }
 }
@@ -115,80 +164,92 @@ pub struct RenderContext {
     pub incident: Vector3<f64>
 }
 
-struct Collision<'a> {
-    color: &'a ParametricValue<RenderContext, f64>,
-    normal: Vector3<f64>,
-    incident: Vector3<f64>
-}
-
 pub struct WavelengthSample {
     pub wavelength: f64,
     pub brightness: f64
 }
 
 pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f64>, world: &World, bounces: uint) -> Vec<WavelengthSample> {
-    let mut path = Vec::new();
-
     let mut ray = ray;
+
+    let mut traced: Vec<(f64, f64)> = wavelengths.move_iter().map(|wl| (wl, 1.0)).collect();
+    let mut completed = Vec::new();
 
     for i in range(0, bounces) {
         match world.intersect(&ray) {
-            Some((normal, _distance, material)) => match material.reflect(&ray, &normal, &mut *rng as &mut FloatRng) {
+            Some((normal, material)) => match material.reflect(&ray, &normal, &mut *rng as &mut FloatRng) {
                 Reflect(out_ray, color) => {
-                    let collision = Collision {
-                        color: color,
-                        normal: normal.direction,
-                        incident: ray.direction
-                    };
+                    let mut i = 0;
+                    while i < traced.len() {
+                        let (wl, brightness) = traced[i];
+                        let context = RenderContext {
+                            wavelength: wl,
+                            normal: normal.direction,
+                            incident: ray.direction
+                        };
 
-                    path.push(collision);
+                        let brightness = brightness * color.get(&context);
+
+                        if brightness == 0.0 {
+                            traced.swap_remove(i);
+                            completed.push(WavelengthSample {
+                                wavelength: wl,
+                                brightness: 0.0
+                            });
+                        } else {
+                            let &(_, ref mut b) = traced.get_mut(i);
+                            *b = brightness;
+                            i += 1;
+                        }
+                    }
+
                     ray = out_ray;
                 },
                 Emit(color) => {
-                    let sky = Collision {
-                        color: color,
-                        normal: normal.direction,
+                    for (wl, brightness) in traced.move_iter() {
+                        let context = RenderContext {
+                            wavelength: wl,
+                            normal: normal.direction,
+                            incident: ray.direction
+                        };
+
+                        completed.push(WavelengthSample {
+                            wavelength: wl,
+                            brightness: brightness * color.get(&context)
+                        });
+                    }
+
+                    return completed
+                }
+            },
+            None => {
+                let sky = world.sky.color(&ray.direction);
+                for (wl, brightness) in traced.move_iter() {
+                    let context = RenderContext {
+                        wavelength: wl,
+                        normal: Vector3::new(0.0, 0.0, 0.0),
                         incident: ray.direction
                     };
 
-                    return evaluate_contribution(wavelengths, sky, path)
+                    completed.push(WavelengthSample {
+                        wavelength: wl,
+                        brightness: brightness * sky.get(&context)
+                    });
                 }
-            },
-            None => break
+
+                return completed
+            }
         };
     }
 
-    let sky = Collision {
-        color: world.sky.color(&ray.direction),
-        normal: Vector3::new(0.0, 0.0, 0.0),
-        incident: ray.direction
-    };
-
-    evaluate_contribution(wavelengths, sky, path)
-}
-
-pub fn evaluate_contribution(wavelengths: Vec<f64>, sky: Collision, path: Vec<Collision>) -> Vec<WavelengthSample> {
-    let mut context: Vec<RenderContext> = wavelengths.move_iter().map(|wl|
-        RenderContext {
+    for (wl, brightness) in traced.move_iter() {
+        completed.push(WavelengthSample {
             wavelength: wl,
-            normal: sky.normal,
-            incident: sky.incident
-        }
-    ).collect();
+            brightness: 0.0
+        });
+    }
 
-    let initial: Vec<WavelengthSample> = context.iter().map(|context| WavelengthSample {
-        wavelength: context.wavelength,
-        brightness: sky.color.get(context)
-    }).collect();
-
-    path.move_iter().fold(initial, |samples, v| {
-        samples.move_iter().zip(context.mut_iter()).map(|(mut sample, context)| {
-            context.normal = v.normal;
-            context.incident = v.incident;
-            sample.brightness *= v.color.get(context);
-            sample
-        }).collect()
-    })
+    completed
 }
 
 
@@ -257,7 +318,7 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
                                                 v3: convert_vertex(object.verticies[v3]),
                                                 material: object_material.clone()
                                             };
-                                            
+
                                             objects.push(triangle);
                                         },
                                         _ => {}
@@ -269,9 +330,11 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
                 }
             }
 
+            println!("the scene contains {} objects", objects.len())
+
             Ok(World {
                 sky: sky,
-                objects: box objects as Box<ObjectContainer + 'static + Send + Sync>
+                objects: box bkdtree::BkdTree::new(objects, 3) as Box<ObjectContainer + 'static + Send + Sync>
             })
         },
         config::Primitive(v) => Err(format!("unexpected {}", v)),

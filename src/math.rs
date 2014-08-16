@@ -63,28 +63,43 @@ pub mod utils {
 
     impl Interpolated {
         pub fn get(&self, input: f64) -> f64 {
-            let mut points = self.points.iter();
+            if self.points.len() == 0 {
+                return 0.0
+            }
 
-            let mut min = match points.next() {
-                Some(v) => *v,
-                None => return 0.0
-            };
+            let mut min = 0;
+            let mut max = self.points.len() - 1;
 
-            let mut max = *self.points.last().unwrap();
+            let (min_x, min_y) = self.points[min];
 
-            for &(x, y) in points {
-                if input == x {
-                    return y;
-                } else if input > x {
-                    min = (x, y);
+            if min_x >= input {
+                return min_y
+            }
+
+            let (max_x, max_y) = self.points[max];
+
+            if max_x <= input {
+                return max_y
+            }
+
+
+            while max > min + 1 {
+                let check = (max + min) / 2;
+                let (check_x, check_y) = self.points[check];
+
+                if check_x == input {
+                    return check_y
+                }
+
+                if check_x > input {
+                    max = check
                 } else {
-                    max = (x, y);
-                    break;
+                    min = check
                 }
             }
 
-            let (min_x, min_y) = min;
-            let (max_x, max_y) = max;
+            let (min_x, min_y) = self.points[min];
+            let (max_x, max_y) = self.points[max];
 
             if input < min_x {
                 min_y
@@ -93,7 +108,6 @@ pub mod utils {
             } else {
                 min_y + (max_y - min_y) * (input - min_x) / (max_x - min_x)
             }
-
         }
     }
 

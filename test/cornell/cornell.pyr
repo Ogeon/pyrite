@@ -12,14 +12,13 @@ renderer = Renderer.Simple {
 	pixel_samples = 4000
 	spectrum_samples = 5
 	spectrum_bins = 50
-	tile_size = 64
-	bounces = 80
+	tile_size = 32
 }
 
 camera = Camera.Perspective {
-	fov = 53
+	fov = 37.7
 	transform = Transform.LookAt
-	transform.from = Vector { x=-2.78, y=-5.4, z=2.73 }
+	transform.from = Vector { x=-2.78, y=-8, z=2.73 }
 	transform.to = Vector { x=-2.78, y=0, z=2.73 }
 	transform.up = Vector { z=1 }
 }

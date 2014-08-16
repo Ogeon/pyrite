@@ -7,10 +7,13 @@ use cgmath::point::{Point, Point3};
 use cgmath::intersect::Intersect;
 use cgmath::ray::{Ray, Ray3};
 
+use tracer;
 use tracer::Material;
 
 use config;
 use config::{FromConfig, Type};
+
+use bkdtree;
 
 pub enum ProxyShape {
 	DecodedShape { pub shape: Shape },
@@ -23,19 +26,18 @@ pub enum Shape {
 }
 
 impl Shape {
-	pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Box<Material + Send + Sync>)> {
+	pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(f64, Ray3<f64>)> {
 		match *self {
-			Sphere {ref position, radius, ref material} => {
+			Sphere {ref position, radius, ..} => {
 				let sphere = sphere::Sphere {
 					radius: radius,
 					center: position.clone()
 				};
 				(sphere, ray.clone())
 					.intersection()
-					.map(|intersection| Ray::new(intersection, intersection.sub_p(position).normalize()))
-					.map(|normal| (normal, material))
+					.map(|intersection| (intersection.sub_p(&ray.origin).length(), Ray::new(intersection, intersection.sub_p(position).normalize())) )
 			},
-			Triangle {ref v1, ref v2, ref v3, ref material} => {
+			Triangle {ref v1, ref v2, ref v3, ..} => {
 				//Möller–Trumbore intersection algorithm
 				let epsilon = 0.000001f64;
 				let e1 = v2.sub_p(v1);
@@ -68,13 +70,47 @@ impl Shape {
 				let dist = e2.dot(&q) * inv_det;
 				if dist > epsilon {
 					let hit_position = ray.origin.add_v(&ray.direction.mul_s(dist));
-					Some((Ray::new(hit_position, e1.cross(&e2)), material.deref()))
+					Some(( dist, Ray::new(hit_position, e1.cross(&e2).normalize()) ))
 				} else {
 					None
 				}
 			}
 		}
 	}
+
+	pub fn get_material(&self) -> &Material {
+		match *self {
+    		Sphere { ref material, .. } => material as &Material,
+    		Triangle { ref material, .. } => material.deref() as &Material
+    	}
+	}
+}
+
+impl<'a> bkdtree::Element<tracer::BkdRay<'a>, Ray3<f64>> for Shape {
+    fn get_bounds_interval(&self, axis: uint) -> (f64, f64) {
+    	match *self {
+    		Sphere { ref position, radius, .. } => match axis {
+    			0 => (position.x - radius, position.x + radius),
+    			1 => (position.y - radius, position.y + radius),
+    			_ => (position.z - radius, position.z + radius)
+    		},
+    		Triangle { ref v1, ref v2, ref v3, .. } => {
+    			let min = v1.min(v2).min(v3);
+    			let max = v1.max(v2).max(v3);
+
+    			match axis {
+	    			0 => (min.x, max.x),
+	    			1 => (min.y, max.y),
+	    			_ => (min.z, max.z)
+	    		}
+    		}
+    	}
+    }
+
+    fn intersect(&self, ray: &tracer::BkdRay) -> Option<(f64, Ray3<f64>)> {
+    	let &tracer::BkdRay(ray) = ray;
+    	self.intersect(ray)
+    }
 }
 
 

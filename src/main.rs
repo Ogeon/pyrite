@@ -30,6 +30,7 @@ macro_rules! try(
 )
 
 mod tracer;
+mod bkdtree;
 mod cameras;
 mod shapes;
 mod materials;
@@ -142,17 +143,18 @@ fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::utils::Inte
 
     for segment in spectrum.segments() {
         let mut offset = 0.0;
+        let mut start_resp = response.get(segment.start);
 
         while offset < segment.width {
-            let start = segment.start + offset;
-            let start_resp = response.get(start);
-            let end_resp = response.get(start + (segment.width - offset).min(5.0));
+            let step = (segment.width - offset).min(5.0);
+            let end_resp = response.get(segment.start + offset + step);
 
-            let w = start_resp + end_resp;
+            let w = (start_resp + end_resp) * step;
             sum += segment.value * w;
             weight += w;
 
-            offset += 1.0;
+            start_resp = end_resp;
+            offset += step;
         }
         
     }
