@@ -1,11 +1,12 @@
-include "../cameras.pyr" as cameras
+include "../cameras/canon_40d.pyr" as response_curves
 include "colors.pyr"
+include "lamp.pyr"
 
 image = {
 	width = 512
 	height = 512
 	format = Image.Png
-	rgb_curves = cameras.canon_40d
+	rgb_curves = response_curves
 }
 
 renderer = Renderer.Simple {
@@ -23,20 +24,10 @@ camera = Camera.Perspective {
 	transform.up = Vector { z=1 }
 }
 
-ball = Shape.Sphere {
-	radius = 1.5
-	position = Vector { y=1.4, z=10 }
-}
-
 light = Material.Emission {
-	color =  Math.Curve {
+	color = Math.Curve {
 		input = Value.Wavelength
-		points = [
-			[400, 0],
-			[500, 8],
-			[600, 15.6],
-			[700, 18.4]
-		]
+		points = lamp.color
 	}
 }
 

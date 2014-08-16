@@ -59,7 +59,7 @@ impl RenderAlgorithm {
 			            let image_area = Area::new(from, size);
 			            let camera_area = camera.to_view_area(&image_area, image_size);
 
-			            tiles.push(Tile::new(image_area, camera_area, 300.0, 900.0, spectrum_bins));
+			            tiles.push(Tile::new(image_area, camera_area, 400.0, 700.0, spectrum_bins));
 			        }
 			    }
 

@@ -1,10 +1,10 @@
-include "../cameras.pyr" as cameras
+include "../cameras/canon_40d.pyr" as response_curves
 
 image = {
 	width = 512
 	height = 256
 	format = Image.Png
-	rgb_curves = cameras.canon_40d
+	rgb_curves = response_curves
 }
 
 renderer = Renderer.Simple {

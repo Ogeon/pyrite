@@ -73,13 +73,13 @@ pub mod utils {
             let (min_x, min_y) = self.points[min];
 
             if min_x >= input {
-                return min_y
+                return 0.0 // min_y
             }
 
             let (max_x, max_y) = self.points[max];
 
             if max_x <= input {
-                return max_y
+                return 0.0 // max_y
             }
 
 
@@ -102,9 +102,9 @@ pub mod utils {
             let (max_x, max_y) = self.points[max];
 
             if input < min_x {
-                min_y
+                0.0 //min_y
             } else if input > max_x {
-                max_y
+                0.0 //max_y
             } else {
                 min_y + (max_y - min_y) * (input - min_x) / (max_x - min_x)
             }
