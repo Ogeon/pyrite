@@ -155,7 +155,7 @@ impl World {
 
 pub enum Reflection<'a> {
     Emit(&'a ParametricValue<RenderContext, f64>),
-    Reflect(Ray3<f64>, &'a ParametricValue<RenderContext, f64>)
+    Reflect(Ray3<f64>, &'a ParametricValue<RenderContext, f64>, f64)
 }
 
 pub struct RenderContext {
@@ -178,7 +178,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
     for i in range(0, bounces) {
         match world.intersect(&ray) {
             Some((normal, material)) => match material.reflect(&ray, &normal, &mut *rng as &mut FloatRng) {
-                Reflect(out_ray, color) => {
+                Reflect(out_ray, color, weight) => {
                     let mut i = 0;
                     while i < traced.len() {
                         let (wl, brightness) = traced[i];
@@ -188,7 +188,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                             incident: ray.direction
                         };
 
-                        let brightness = brightness * color.get(&context);
+                        let brightness = brightness * color.get(&context) * weight;
 
                         if brightness == 0.0 {
                             traced.swap_remove(i);
