@@ -6,7 +6,7 @@ use std::rand::{Rng, XorShiftRng};
 use std::iter::Enumerate;
 use std::slice::Items;
 
-use cgmath::vector::{Vector, Vector2};
+use cgmath::{Vector, Vector2};
 
 use config;
 use config::FromConfig;

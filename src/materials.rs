@@ -1,8 +1,8 @@
 use std;
 use std::collections::HashMap;
 
-use cgmath::vector::{EuclideanVector, Vector, Vector3};
-use cgmath::ray::{Ray, Ray3};
+use cgmath::{EuclideanVector, Vector, Vector3};
+use cgmath::{Ray, Ray3};
 
 use tracer;
 use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect};

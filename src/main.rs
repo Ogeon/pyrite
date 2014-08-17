@@ -6,8 +6,9 @@ extern crate obj = "wavefront-obj";
 
 use std::sync::{TaskPool, Arc, RWLock};
 use std::io::File;
+use std::time::duration::Duration;
 
-use cgmath::vector::Vector2;
+use cgmath::Vector2;
 
 use image::GenericImage;
 
@@ -108,7 +109,7 @@ fn render(project: project::Project) {
     };
     
     while tile_counter < tile_count {
-        std::io::timer::sleep(4000);
+        std::io::timer::sleep(Duration::seconds(4));
 
 
         loop {

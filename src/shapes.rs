@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cgmath::sphere;
-use cgmath::vector::{Vector, EuclideanVector};
-use cgmath::point::{Point, Point3};
-use cgmath::intersect::Intersect;
-use cgmath::ray::{Ray, Ray3};
+use cgmath;
+use cgmath::{Vector, EuclideanVector};
+use cgmath::{Point, Point3};
+use cgmath::Intersect;
+use cgmath::{Ray, Ray3};
 
 use tracer;
 use tracer::Material;
@@ -29,7 +29,7 @@ impl Shape {
 	pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(f64, Ray3<f64>)> {
 		match *self {
 			Sphere {ref position, radius, ..} => {
-				let sphere = sphere::Sphere {
+				let sphere = cgmath::Sphere {
 					radius: radius,
 					center: position.clone()
 				};

@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use std::io::File;
 use std::simd;
 
-use cgmath::vector::{EuclideanVector, Vector3};
-use cgmath::ray::Ray3;
-use cgmath::point::{Point, Point3};
+use cgmath::{EuclideanVector, Vector3};
+use cgmath::Ray3;
+use cgmath::{Point, Point3};
 
 use obj::obj;
 use config;

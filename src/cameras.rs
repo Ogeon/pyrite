@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use cgmath::vector::{Vector, EuclideanVector, Vector2, Vector3};
-use cgmath::point::Point;
-use cgmath::transform::{AffineMatrix3, Transform};
-use cgmath::angle::{Angle, ToRad, cos, sin, deg};
-use cgmath::ray::{Ray, Ray3};
+use cgmath::{Vector, EuclideanVector, Vector2, Vector3};
+use cgmath::Point;
+use cgmath::{AffineMatrix3, Transform};
+use cgmath::{Angle, ToRad, cos, sin, deg};
+use cgmath::{Ray, Ray3};
 
 use renderer::Area;
 

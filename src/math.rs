@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use cgmath::vector::Vector;
+use cgmath::Vector;
 
 use tracer;
 
@@ -55,7 +55,7 @@ macro_rules! make_operators(
 )
 
 pub mod utils {
-    use cgmath::vector::{Vector, Vector3};
+    use cgmath::{Vector, Vector3};
 
     pub struct Interpolated {
         pub points: Vec<(f64, f64)>

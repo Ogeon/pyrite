@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use cgmath::matrix::{Matrix, Matrix4};
-use cgmath::vector::Vector3;
-use cgmath::point::Point;
+use cgmath::{Matrix, Matrix4};
+use cgmath::Vector3;
+use cgmath::Point;
 
 use config;
 use config::{FromConfig, Type};
