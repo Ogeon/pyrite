@@ -82,7 +82,7 @@ impl RenderAlgorithm {
 					let position = tile.sample_position(&mut rng);
 					let wavelengths = range(0, renderer.spectrum_samples).map(|_| tile.sample_wavelength(&mut rng)).collect();
 
-					let ray = camera.ray_towards(&position);
+					let ray = camera.ray_towards(&position, &mut rng);
 					let samples = tracer::trace(&mut rng, ray, wavelengths, world, renderer.bounces);
 
 					for sample in samples.move_iter() {

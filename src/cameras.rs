@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use std::simd;
+use std::f64::consts;
+use std::rand::Rng;
 
 use cgmath::{Vector, EuclideanVector, Vector2, Vector3};
-use cgmath::Point;
+use cgmath::{Point, Point3};
 use cgmath::{AffineMatrix3, Transform};
 use cgmath::{Angle, ToRad, cos, sin, deg};
 use cgmath::{Ray, Ray3};
@@ -18,7 +21,9 @@ pub fn register_types(context: &mut config::ConfigContext) {
 pub enum Camera {
     Perspective {
         transform: AffineMatrix3<f64>,
-        view_plane: f64
+        view_plane: f64,
+        focus_distance: f64,
+        aperture: f64
     }
 }
 
@@ -34,12 +39,29 @@ impl Camera {
         Area::new(from, size)
     }
 
-    pub fn ray_towards(&self, target: &Vector2<f64>) -> Ray3<f64> {
+    pub fn ray_towards<R: Rng>(&self, target: &Vector2<f64>, rng: &mut R) -> Ray3<f64> {
         match *self {
-            Perspective { transform: ref transform, view_plane: view_plane} => {
-                let mut direction = Vector3::new(target.x, -target.y, -view_plane);
+            Perspective { ref transform, view_plane, focus_distance, aperture } => {
+                let v_plane = simd::f64x2(view_plane, view_plane);
+                let f_distance = simd::f64x2(focus_distance, focus_distance);
+                let target = simd::f64x2(target.x, target.y);
+                let simd::f64x2(focus_x, focus_y) = target / v_plane * f_distance;
+
+                let mut target = Point3::new(focus_x, -focus_y, -focus_distance);
+
+                let (origin, mut direction) = if aperture > 0.0 {
+                    let sqrt_r = (aperture * rng.gen()).sqrt();
+                    let psi = consts::PI * 2.0 * rng.gen();
+                    let lens_x = sqrt_r * psi.cos();
+                    let lens_y = sqrt_r * psi.sin();
+                    let origin = Point3::new(lens_x, lens_y, 0.0);
+                    (origin, target.sub_p(&origin))
+                } else {
+                    (Point::origin(), target.to_vec())
+                };
+
                 direction.normalize_self();
-                transform.transform_ray(&Ray::new(Point::origin(), direction))
+                transform.transform_ray(&Ray::new(origin, direction))
             }
         }
     }
@@ -60,11 +82,23 @@ fn decode_perspective(context: &config::ConfigContext, items: HashMap<String, co
         None => return Err(String::from_str("missing field of view ('fov')"))
     };
 
+    let focus_distance: f64 = match items.pop_equiv(&"focus_distance") {
+        Some(v) => try!(FromConfig::from_config(v), "focus_distance"),
+        None => 1.0
+    };
+
+    let aperture: f64 = match items.pop_equiv(&"aperture") {
+        Some(v) => try!(FromConfig::from_config(v), "aperture"),
+        None => 0.0
+    };
+
     let a = deg(fov / 2.0).to_rad();
     let dist = cos(a) / sin(a);
 
     Ok(Perspective {
         transform: transform,
-        view_plane: dist
+        view_plane: dist,
+        focus_distance: focus_distance,
+        aperture: aperture
     })
 }
