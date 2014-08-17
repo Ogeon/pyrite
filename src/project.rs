@@ -44,8 +44,8 @@ pub enum ParseResult<T> {
     ParseError(String)
 }
 
-pub fn from_file(path: Path) -> ParseResult<Project> {
-    let config_src = try_io!(File::open(&path).read_to_string());
+pub fn from_file(path: &Path) -> ParseResult<Project> {
+    let config_src = try_io!(File::open(path).read_to_string());
     let mut config = try_parse!(
         config::parse(config_src.as_slice().chars(), &mut |source| {
             let sub_path = Path::new(source.as_slice());

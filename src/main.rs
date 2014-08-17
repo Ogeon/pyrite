@@ -46,8 +46,9 @@ fn main() {
     let args = std::os::args();
 
     if args.len() > 1 {
-        match project::from_file(Path::new(args[1].clone())) {
-            project::Success(p) => render(p),
+        let project_path = Path::new(args[1].clone());
+        match project::from_file(&project_path) {
+            project::Success(p) => render(p, project_path),
             project::IoError(e) => println!("error while reading project file: {}", e),
             project::ParseError(e) => println!("error while parsing project file: {}", e)
         }
@@ -56,7 +57,7 @@ fn main() {
     }
 }
 
-fn render(project: project::Project) {
+fn render(project: project::Project, project_path: Path) {
     let image_size = Vector2::new(project.image.width, project.image.height);
 
     let tiles = project.renderer.make_tiles(&project.camera, &image_size);
@@ -107,6 +108,8 @@ fn render(project: project::Project) {
     let blue = math::utils::Interpolated {
         points: blue
     };
+
+    let render_path = project_path.dir_path().join("render.png");
     
     while tile_counter < tile_count {
         std::io::timer::sleep(Duration::seconds(4));
@@ -129,7 +132,7 @@ fn render(project: project::Project) {
             }
         }
 
-        match File::create(&Path::new("test.png")).and_then(|f| image::ImageRgb8(pixels.clone()).save(f, image::PNG)) {
+        match File::create(&render_path).and_then(|f| image::ImageRgb8(pixels.clone()).save(f, image::PNG)) {
             Err(e) => println!("error while writing image: {}", e),
             _ => {}
         }
