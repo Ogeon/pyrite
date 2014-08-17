@@ -1,0 +1,106 @@
+glass_template = Material.Refractive {
+	ior = 1.5
+	color = Math.Curve {
+		input = Value.Wavelength
+	}
+}
+
+light = Material.Emission { color = 5 }
+
+floor = Material.Diffuse { color = 1 }
+
+glass_400nm = glass_template
+glass_400nm.color.points = [
+		[370, 0],
+		[380, 1],
+		[420, 1],
+		[430, 0]
+	]
+
+glass_430nm = glass_template
+glass_430nm.color.points = [
+		[400, 0],
+		[410, 1],
+		[450, 1],
+		[460, 0]
+	]
+
+glass_461nm = glass_template
+glass_461nm.color.points = [
+		[431, 0],
+		[441, 1],
+		[481, 1],
+		[491, 0]
+	]
+
+glass_492nm = glass_template
+glass_492nm.color.points = [
+		[462, 0],
+		[472, 1],
+		[512, 1],
+		[522, 0]
+	]
+
+glass_523nm = glass_template
+glass_523nm.color.points = [
+		[493, 0],
+		[503, 1],
+		[543, 1],
+		[553, 0]
+	]
+
+glass_554nm = glass_template
+glass_554nm.color.points = [
+		[524, 0],
+		[534, 1],
+		[574, 1],
+		[584, 0]
+	]
+
+glass_585nm = glass_template
+glass_585nm.color.points = [
+		[555, 0],
+		[565, 1],
+		[605, 1],
+		[615, 0]
+	]
+
+glass_616nm = glass_template
+glass_616nm.color.points = [
+		[586, 0],
+		[596, 1],
+		[636, 1],
+		[646, 0]
+	]
+
+glass_647nm = glass_template
+glass_647nm.color.points = [
+		[615, 0],
+		[627, 1],
+		[667, 1],
+		[675, 0]
+	]
+
+glass_678nm = glass_template
+glass_678nm.color.points = [
+		[648, 0],
+		[658, 1],
+		[698, 1],
+		[708, 0]
+	]
+
+glass_709nm = glass_template
+glass_709nm.color.points = [
+		[689, 0],
+		[699, 1],
+		[719, 1],
+		[729, 0]
+	]
+
+glass_740nm = glass_template
+glass_740nm.color.points = [
+		[710, 0],
+		[720, 1],
+		[760, 1],
+		[770, 0]
+]

@@ -1,0 +1,102 @@
+include "../cameras/kodak_dcs420.pyr" as response_curves
+include "materials.pyr"
+
+image = {
+	width = 512
+	height = 512
+	format = Image.Png
+	rgb_curves = response_curves
+}
+
+renderer = Renderer.Simple {
+	pixel_samples = 500
+	spectrum.samples = 10
+	spectrum.bins = 50
+	spectrum.span = [370, 770]
+	tile_size = 32
+}
+
+camera = Camera.Perspective {
+	fov = 53
+	transform = Transform.LookAt
+	transform.from = Vector { z = 30 }
+	transform.up = Vector { y = 1 }
+}
+
+ball = Shape.Sphere {
+	radius = 1
+	position = Vector { z = 1 }
+}
+
+
+world.sky = Sky.Color { color = 0 }
+world.objects = [
+	Shape.Sphere {
+		radius = 4
+		position = Vector { z = 8 }
+		material = materials.light
+	},
+
+	Shape.Sphere {
+		radius = 200
+		position = Vector { z = -200 }
+		material = materials.floor
+	},
+
+	ball {
+		position.x = 10
+		material = materials.glass_400nm
+	},
+	ball {
+		position.x = 8.66
+		position.y = 5
+		material = materials.glass_430nm
+	},
+	ball {
+		position.x = 5
+		position.y = 8.66
+		material = materials.glass_461nm
+	},
+	ball {
+		position.y = 10
+		material = materials.glass_492nm
+	},
+	ball {
+		position.x = -5
+		position.y = 8.66
+		material = materials.glass_523nm
+	},
+	ball {
+		position.x = -8.66
+		position.y = 5
+		material = materials.glass_554nm
+	},
+	ball {
+		position.x = -10
+		material = materials.glass_585nm
+	},
+	ball {
+		position.x = -8.66
+		position.y = -5
+		material = materials.glass_616nm
+	},
+	ball {
+		position.x = -5
+		position.y = -8.66
+		material = materials.glass_647nm
+	},
+	ball {
+		position.y = -10
+		material = materials.glass_678nm
+	},
+	ball {
+		position.x = 5
+		position.y = -8.66
+		material = materials.glass_709nm
+	},
+	ball {
+		position.x = 8.66
+		position.y = -5
+		material = materials.glass_740nm
+	}
+]
