@@ -10,9 +10,10 @@ image = {
 }
 
 renderer = Renderer.Simple {
-	pixel_samples = 4000
-	spectrum_samples = 5
-	spectrum_bins = 50
+	pixel_samples = 500
+	spectrum.samples = 5
+	spectrum.bins = 50
+	spectrum.span = [400, 700]
 	tile_size = 32
 }
 

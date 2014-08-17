@@ -15,6 +15,10 @@ use cameras;
 
 use tracer;
 
+static DEFAULT_SPECTRUM_SAMPLES: uint = 10;
+static DEFAULT_SPECTRUM_BINS: uint = 64;
+static DEFAULT_SPECTRUM_SPAN: (f64, f64) = (400.0, 700.0);
+
 pub fn register_types(context: &mut config::ConfigContext) {
 	context.insert_grouped_type("Renderer", "Simple", decode_simple);
 }
@@ -25,12 +29,13 @@ pub struct Renderer {
     pixel_samples: uint,
     spectrum_samples: uint,
     spectrum_bins: uint,
+    spectrum_span: (f64, f64),
     algorithm: RenderAlgorithm
 }
 
 impl Renderer {
     pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>) -> Vec<Tile> {
-        self.algorithm.make_tiles(camera, image_size, self.spectrum_bins)
+        self.algorithm.make_tiles(camera, image_size, self.spectrum_bins, self.spectrum_span)
     }
 
     pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World) {
@@ -43,7 +48,7 @@ enum RenderAlgorithm {
 }
 
 impl RenderAlgorithm {
-	pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>, spectrum_bins: uint) -> Vec<Tile> {
+	pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>, spectrum_bins: uint, (spectrum_min, spectrum_max): (f64, f64)) -> Vec<Tile> {
 		match *self {
 			Simple {tile_size, ..} => {
 				let tiles_x = (image_size.x as f32 / tile_size as f32).ceil() as uint;
@@ -59,7 +64,7 @@ impl RenderAlgorithm {
 			            let image_area = Area::new(from, size);
 			            let camera_area = camera.to_view_area(&image_area, image_size);
 
-			            tiles.push(Tile::new(image_area, camera_area, 400.0, 700.0, spectrum_bins));
+			            tiles.push(Tile::new(image_area, camera_area, spectrum_min, spectrum_max, spectrum_bins));
 			        }
 			    }
 
@@ -112,14 +117,10 @@ fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, conf
         None => 10
     };
 
-    let spectrum_samples = match items.pop_equiv(&"spectrum_samples") {
-        Some(v) => try!(FromConfig::from_config(v), "spectrum_samples"),
-        None => 5
-    };
-
-    let spectrum_bins = match items.pop_equiv(&"spectrum_bins") {
-        Some(v) => try!(FromConfig::from_config(v), "spectrum_bins"),
-        None => 64
+    let (spectrum_samples, spectrum_bins, spectrum_span) = match items.pop_equiv(&"spectrum") {
+        Some(config::Structure(_, v)) => try!(decode_spectrum(v), "spectrum"),
+        Some(v) => return Err(format!("spectrum: expected a structure, but found {}", v)),
+        None => (DEFAULT_SPECTRUM_SAMPLES, DEFAULT_SPECTRUM_BINS, DEFAULT_SPECTRUM_SPAN)
     };
 
     Ok(
@@ -129,9 +130,31 @@ fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, conf
             pixel_samples: pixel_samples,
             spectrum_samples: spectrum_samples,
             spectrum_bins: spectrum_bins,
+            spectrum_span: spectrum_span,
             algorithm: algorithm
         }
     )
+}
+
+fn decode_spectrum(items: HashMap<String, config::ConfigItem>) -> Result<(uint, uint, (f64, f64)), String> {
+    let mut items = items;
+
+    let samples = match items.pop_equiv(&"samples") {
+        Some(v) => try!(FromConfig::from_config(v), "samples"),
+        None => DEFAULT_SPECTRUM_SAMPLES
+    };
+
+    let bins = match items.pop_equiv(&"bins") {
+        Some(v) => try!(FromConfig::from_config(v), "bins"),
+        None => DEFAULT_SPECTRUM_BINS
+    };
+
+    let span = match items.pop_equiv(&"span") {
+        Some(v) => try!(FromConfig::from_config(v), "span"),
+        None => DEFAULT_SPECTRUM_SPAN
+    };
+
+    Ok((samples, bins, span))
 }
 
 fn decode_simple(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Renderer, String> {
