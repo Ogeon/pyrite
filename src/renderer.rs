@@ -1,12 +1,12 @@
 use std;
 use std::collections::HashMap;
-use std::cmp::min;
+use std::cmp::{min, PartialEq, Equal};
 use std::rand;
 use std::rand::{Rng, XorShiftRng};
 use std::iter::Enumerate;
 use std::slice::Items;
 
-use cgmath::{Vector, Vector2};
+use cgmath::{Vector, EuclideanVector, Vector2};
 
 use config;
 use config::FromConfig;
@@ -68,6 +68,12 @@ impl RenderAlgorithm {
 			        }
 			    }
 
+                tiles.sort_by(|a, b| {
+                    let a = Vector2::new(a.screen_area.from.x as f32, a.screen_area.from.y as f32);
+                    let b = Vector2::new(b.screen_area.from.x as f32, b.screen_area.from.y as f32);
+                    let half_size = Vector2::new(image_size.x as f32 / 2.0, image_size.y as f32 / 2.0);
+                    b.sub_v(&half_size).length2().partial_cmp(&a.sub_v(&half_size).length2()).unwrap_or(Equal)
+                });
 			    tiles
 			}
 		}
