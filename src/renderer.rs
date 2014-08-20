@@ -20,7 +20,7 @@ static DEFAULT_SPECTRUM_BINS: uint = 64;
 static DEFAULT_SPECTRUM_SPAN: (f64, f64) = (400.0, 700.0);
 
 pub fn register_types(context: &mut config::ConfigContext) {
-	context.insert_grouped_type("Renderer", "Simple", decode_simple);
+    context.insert_grouped_type("Renderer", "Simple", decode_simple);
 }
 
 pub struct Renderer {
@@ -44,29 +44,29 @@ impl Renderer {
 }
 
 enum RenderAlgorithm {
-	Simple {tile_size: uint}
+    Simple {tile_size: uint}
 }
 
 impl RenderAlgorithm {
-	pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>, spectrum_bins: uint, (spectrum_min, spectrum_max): (f64, f64)) -> Vec<Tile> {
-		match *self {
-			Simple {tile_size, ..} => {
-				let tiles_x = (image_size.x as f32 / tile_size as f32).ceil() as uint;
-			    let tiles_y = (image_size.y as f32 / tile_size as f32).ceil() as uint;
+    pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>, spectrum_bins: uint, (spectrum_min, spectrum_max): (f64, f64)) -> Vec<Tile> {
+        match *self {
+            Simple {tile_size, ..} => {
+                let tiles_x = (image_size.x as f32 / tile_size as f32).ceil() as uint;
+                let tiles_y = (image_size.y as f32 / tile_size as f32).ceil() as uint;
 
-			    let mut tiles = Vec::new();
+                let mut tiles = Vec::new();
 
-			    for y in range(0, tiles_y) {
-			        for x in range(0, tiles_x) {
-			            let from = Vector2::new(x * tile_size, y * tile_size);
-			            let size = Vector2::new(min(image_size.x - from.x, tile_size), min(image_size.y - from.y, tile_size));
+                for y in range(0, tiles_y) {
+                    for x in range(0, tiles_x) {
+                        let from = Vector2::new(x * tile_size, y * tile_size);
+                        let size = Vector2::new(min(image_size.x - from.x, tile_size), min(image_size.y - from.y, tile_size));
 
-			            let image_area = Area::new(from, size);
-			            let camera_area = camera.to_view_area(&image_area, image_size);
+                        let image_area = Area::new(from, size);
+                        let camera_area = camera.to_view_area(&image_area, image_size);
 
-			            tiles.push(Tile::new(image_area, camera_area, spectrum_min, spectrum_max, spectrum_bins));
-			        }
-			    }
+                        tiles.push(Tile::new(image_area, camera_area, spectrum_min, spectrum_max, spectrum_bins));
+                    }
+                }
 
                 tiles.sort_by(|a, b| {
                     let a = Vector2::new(a.screen_area.from.x as f32, a.screen_area.from.y as f32);
@@ -74,35 +74,35 @@ impl RenderAlgorithm {
                     let half_size = Vector2::new(image_size.x as f32 / 2.0, image_size.y as f32 / 2.0);
                     b.sub_v(&half_size).length2().partial_cmp(&a.sub_v(&half_size).length2()).unwrap_or(Equal)
                 });
-			    tiles
-			}
-		}
-	}
+                tiles
+            }
+        }
+    }
 
-	pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World, renderer: &Renderer) {
-		match *self {
-			Simple {..} => {
-				let mut rng: XorShiftRng = rand::task_rng().gen();
+    pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World, renderer: &Renderer) {
+        match *self {
+            Simple {..} => {
+                let mut rng: XorShiftRng = rand::task_rng().gen();
 
-				for _ in range(0, tile.pixel_count() * renderer.pixel_samples) {
-					let position = tile.sample_position(&mut rng);
-					let wavelengths = range(0, renderer.spectrum_samples).map(|_| tile.sample_wavelength(&mut rng)).collect();
+                for _ in range(0, tile.pixel_count() * renderer.pixel_samples) {
+                    let position = tile.sample_position(&mut rng);
+                    let wavelengths = range(0, renderer.spectrum_samples).map(|_| tile.sample_wavelength(&mut rng)).collect();
 
-					let ray = camera.ray_towards(&position, &mut rng);
-					let samples = tracer::trace(&mut rng, ray, wavelengths, world, renderer.bounces);
+                    let ray = camera.ray_towards(&position, &mut rng);
+                    let samples = tracer::trace(&mut rng, ray, wavelengths, world, renderer.bounces);
 
-					for sample in samples.move_iter() {
-						let sample = Sample {
-							brightness: sample.brightness,
-							wavelength: sample.wavelength,
-							weight: 1.0
-						};
-						tile.expose(sample, position);
-					}
-				}
-			}
-		}
-	}
+                    for sample in samples.move_iter() {
+                        let sample = Sample {
+                            brightness: sample.brightness,
+                            wavelength: sample.wavelength,
+                            weight: 1.0
+                        };
+                        tile.expose(sample, position);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>, algorithm: RenderAlgorithm) -> Result<Renderer, String> {
@@ -166,10 +166,10 @@ fn decode_spectrum(items: HashMap<String, config::ConfigItem>) -> Result<(uint, 
 fn decode_simple(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Renderer, String> {
     let mut items = items;
 
-	let tile_size = match items.pop_equiv(&"tile_size") {
-		Some(v) => try!(FromConfig::from_config(v), "tile_size"),
-		None => 64
-	};
+    let tile_size = match items.pop_equiv(&"tile_size") {
+        Some(v) => try!(FromConfig::from_config(v), "tile_size"),
+        None => 64
+    };
 
     let algorithm = Simple {
         tile_size: tile_size,
@@ -196,11 +196,11 @@ impl Spectrum {
     }
 
     pub fn segments(&self) -> SpectrumSegments {
-    	SpectrumSegments {
-    		start: self.min,
-    		segment_width: self.width / self.values.len() as f64,
-    		values: self.values.iter().enumerate()
-    	}
+        SpectrumSegments {
+            start: self.min,
+            segment_width: self.width / self.values.len() as f64,
+            values: self.values.iter().enumerate()
+        }
     }
 }
 
@@ -211,16 +211,16 @@ pub struct SpectrumSegments<'a> {
 }
 
 impl<'a> std::iter::Iterator<Segment> for SpectrumSegments<'a> {
-	fn next(&mut self) -> Option<Segment> {
-		match self.values.next() {
-			Some((i, &v)) => Some(Segment {
-				start: self.start + i as f64 * self.segment_width,
-				width: self.segment_width,
-				value: v
-			}),
-			None => None
-		}
-	}
+    fn next(&mut self) -> Option<Segment> {
+        match self.values.next() {
+            Some((i, &v)) => Some(Segment {
+                start: self.start + i as f64 * self.segment_width,
+                width: self.segment_width,
+                value: v
+            }),
+            None => None
+        }
+    }
 }
 
 pub struct Segment {
