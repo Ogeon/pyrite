@@ -1,0 +1,3 @@
+script:
+  - cargo test -v
+  - cargo build -v
