@@ -3,7 +3,7 @@ use std::simd;
 use std::f64::consts;
 use std::rand::Rng;
 
-use cgmath::{Vector, EuclideanVector, Vector2, Vector3};
+use cgmath::{Vector, EuclideanVector, Vector2};
 use cgmath::{Point, Point3};
 use cgmath::{AffineMatrix3, Transform};
 use cgmath::{Angle, ToRad, cos, sin, deg};
@@ -47,7 +47,7 @@ impl Camera {
                 let target = simd::f64x2(target.x, target.y);
                 let simd::f64x2(focus_x, focus_y) = target / v_plane * f_distance;
 
-                let mut target = Point3::new(focus_x, -focus_y, -focus_distance);
+                let target = Point3::new(focus_x, -focus_y, -focus_distance);
 
                 let (origin, mut direction) = if aperture > 0.0 {
                     let sqrt_r = (aperture * rng.gen()).sqrt();

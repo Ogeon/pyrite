@@ -205,15 +205,6 @@ impl ConfigContext {
         self.groups.find_or_insert_with(group_name, |_| HashMap::new()).insert(type_name, box Decoder(decoder) as Box<Any>)
     }
 
-    pub fn decode<T: 'static + FromConfig>(&self, item: ConfigItem) -> Result<T, String> {
-        match item {
-            Structure(Untyped, fields) => FromConfig::from_structure(Untyped, fields),
-            Structure(ty, fields) => self.decode_structure(&ty, fields),
-            Primitive(value) => FromConfig::from_primitive(value),
-            List(list) => FromConfig::from_list(list)
-        }
-    }
-
     pub fn decode_structure_from_group<T: 'static, Gr: StrAllocating>(&self, group_name: Gr, item: ConfigItem) -> Result<T, String> {
         let group_name = group_name.into_string();
 
@@ -305,10 +296,6 @@ impl Type {
     pub fn single<Ty: StrAllocating>(type_name: Ty) -> Type {
         Single(type_name.into_string())
     }
-
-    pub fn grouped<Gr: StrAllocating, Ty: StrAllocating>(group_name: Gr, type_name: Ty) -> Type {
-        Grouped(group_name.into_string(), type_name.into_string())
-    }
 }
 
 impl fmt::Show for Type {
@@ -339,48 +326,6 @@ impl fmt::Show for ConfigItem {
 }
 
 impl ConfigItem {
-    pub fn into_float(self) -> Option<f64> {
-        match self {
-            Primitive(parser::Number(f)) => Some(f),
-            _ => None
-        }
-    }
-
-    pub fn is_float(&self) -> bool {
-        match self {
-            &Primitive(parser::Number(_)) => true,
-            _ => false
-        }
-    }
-
-    pub fn into_string(self) -> Option<String> {
-        match self {
-            Primitive(parser::String(s)) => Some(s),
-            _ => None
-        }
-    }
-
-    pub fn is_string(&self) -> bool {
-        match self {
-            &Primitive(parser::String(_)) => true,
-            _ => false
-        }
-    }
-
-    pub fn into_fields(self) -> Option<HashMap<String, ConfigItem>> {
-        match self {
-            Structure(_, fields) => Some(fields),
-            _ => None
-        }
-    }
-
-    pub fn is_structure(&self) -> bool {
-        match self {
-            &Structure(..) => true,
-            _ => false
-        }
-    }
-
     pub fn into_list(self) -> Result<Vec<ConfigItem>, String> {
         match self {
             List(v) => Ok(v),

@@ -11,11 +11,6 @@ pub trait Ray {
     fn plane_distance(&self, min: f64, max: f64, axis: uint) -> (f64, f64);
 }
 
-enum IntervalRelation<T> {
-    Overlaps(T),
-    Disjoint(T)
-}
-
 pub enum BkdTree<E> {
     Node {
         beginning: f64,
@@ -92,13 +87,6 @@ impl<T, R: Ray, E: Element<R, T>> BkdTree<E> {
         match *self {
             Node {beginning, end, axis, ..} => ray.plane_distance(beginning, end, axis),
             Leaf {beginning, end, axis, ..} => ray.plane_distance(beginning, end, axis)
-        }
-    }
-
-    fn plane_intersections(&self, ray: &R) -> Option<(f64, f64)> {
-        match *self {
-            Node {beginning, end, axis, ..} => ray.plane_intersections(beginning, end, axis),
-            Leaf {beginning, end, axis, ..} => ray.plane_intersections(beginning, end, axis)
         }
     }
 }

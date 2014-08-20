@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::io::File;
 use std::simd;
 
-use cgmath::{EuclideanVector, Vector3};
+use cgmath::Vector3;
 use cgmath::Ray3;
 use cgmath::{Point, Point3};
 
@@ -52,30 +52,6 @@ impl<R: Rng> FloatRng for R {
 
 pub trait ObjectContainer {
     fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)>;
-}
-
-impl ObjectContainer for Vec<shapes::Shape> {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
-        let mut closest: Option<(Ray3<f64>, f64, &Material)> = None;
-
-        for object in self.iter() {
-            closest = object.intersect(ray).map(|(new_dist, normal)| {
-                match closest {
-                    Some((closest_normal, closest_dist, closest_material)) => {
-                        if new_dist > 0.000001 && new_dist < closest_dist {
-                            (normal, new_dist, object.get_material())
-                        } else {
-                            (closest_normal, closest_dist, closest_material)
-                        }
-                    },
-                    None => (normal, new_dist, object.get_material())
-                }
-
-            }).or(closest);
-        }
-
-        closest.map(|(normal, _, material)| (normal, material))
-    }
 }
 
 impl ObjectContainer for bkdtree::BkdTree<shapes::Shape> {

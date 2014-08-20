@@ -98,8 +98,8 @@ pub mod utils {
                 }
             }
 
-            let (min_x, min_y) = self.points[min];
-            let (max_x, max_y) = self.points[max];
+            let (min_x, _min_y) = self.points[min];
+            let (max_x, _max_y) = self.points[max];
 
             if input < min_x {
                 0.0 //min_y

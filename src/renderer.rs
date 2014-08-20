@@ -1,6 +1,6 @@
 use std;
 use std::collections::HashMap;
-use std::cmp::{min, PartialEq, Equal};
+use std::cmp::{min, Equal};
 use std::rand;
 use std::rand::{Rng, XorShiftRng};
 use std::iter::Enumerate;
@@ -193,15 +193,6 @@ impl Spectrum {
             width: to - from,
             values: values
         }
-    }
-
-    pub fn value_at(&self, wavelength: f64) -> f64 {
-    	if wavelength < self.min || wavelength > self.min + self.width {
-    		0.0
-    	} else {
-    		let index = ((wavelength - self.min) / self.width * self.values.len() as f64) as uint;
-    		self.values[min(index, index - 1)]
-    	}
     }
 
     pub fn segments(&self) -> SpectrumSegments {
