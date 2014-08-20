@@ -70,13 +70,13 @@ pub mod utils {
             let mut min = 0;
             let mut max = self.points.len() - 1;
 
-            let (min_x, min_y) = self.points[min];
+            let (min_x, _min_y) = self.points[min];
 
             if min_x >= input {
                 return 0.0 // min_y
             }
 
-            let (max_x, max_y) = self.points[max];
+            let (max_x, _max_y) = self.points[max];
 
             if max_x <= input {
                 return 0.0 // max_y
@@ -98,8 +98,8 @@ pub mod utils {
                 }
             }
 
-            let (min_x, _min_y) = self.points[min];
-            let (max_x, _max_y) = self.points[max];
+            let (min_x, min_y) = self.points[min];
+            let (max_x, max_y) = self.points[max];
 
             if input < min_x {
                 0.0 //min_y
