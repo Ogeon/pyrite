@@ -1,0 +1,79 @@
+include "../cameras/canon_40d.pyr" as response_curves
+
+image = {
+	width = 512
+	height = 512
+	format = Image.Png
+	rgb_curves = response_curves
+}
+
+renderer = Renderer.Simple {
+	pixel_samples = 1000
+	spectrum.samples = 10
+	spectrum.bins = 50
+	spectrum.span = [400, 700]
+	tile_size = 32
+	bounces = 256
+}
+
+camera = Camera.Perspective {
+	fov = 11
+	transform = Transform.LookAt
+	transform.from = Vector { x = 20, y = -10, z = 50 }
+	transform.up = Vector { y = 1 }
+	focus_distance = 54.75
+	aperture = 3
+}
+
+ice = Material.Refractive {
+	ior = 1.30144
+	dispersion = 0.00287
+	color = 1
+}
+
+background = Material.Diffuse {
+	color = Math.Curve {
+		input = Value.Wavelength
+		points = [
+			[400, 0.025],
+			[600, 0.0175],
+			[700, 0.01]
+		]
+	}
+}
+
+world.sky = Sky.Color {
+	color = Math.Curve {
+		input = Value.Wavelength
+		points = [
+			[400, 0.3],
+			[600, 0.2],
+			[700, 0.1]
+		]
+	}
+}
+
+world.objects = [
+	Shape.Mesh {
+		file = "snowflake.obj"
+		materials.snowflake = ice
+	}
+
+	Shape.Sphere {
+		position = Vector { x = 0, y = 150, z = 50 }
+		radius = 100
+		material = Material.Emission { color = 2 }
+	}
+
+	Shape.Sphere {
+		position = Vector { x = 100, y = -100, z = 50 }
+		radius = 50
+		material = Material.Emission { color = 1 }
+	}
+
+	Shape.Sphere {
+		radius = 200
+		position = Vector { z = -201 }
+		material = background
+	}
+]
