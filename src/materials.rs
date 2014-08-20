@@ -5,19 +5,22 @@ use cgmath::{EuclideanVector, Vector, Vector3};
 use cgmath::{Ray, Ray3};
 
 use tracer;
-use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect};
+use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect, Disperse};
 
 use config;
 use config::FromConfig;
 
 use math;
 
+type MaterialBox = Box<Material + 'static + Send + Sync>;
+type ColorBox = Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>;
+
 pub struct Diffuse {
-    pub color: Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
+    pub color: ColorBox
 }
 
 impl Material for Diffuse {
-    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, _wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
         let u = rng.next_float();
         let v = rng.next_float();
         let theta = 2.0f64 * std::f64::consts::PI * u;
@@ -59,21 +62,21 @@ impl Material for Diffuse {
 }
 
 pub struct Emission {
-    pub color: Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
+    pub color: ColorBox
 }
 
 impl Material for Emission {
-    fn reflect(&self, _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, _wavelengths: &[f64], _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
         Emit(&self.color as &ParametricValue<tracer::RenderContext, f64>)
     }
 }
 
 pub struct Mirror {
-    pub color: Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
+    pub color: ColorBox
 }
 
 impl Material for Mirror {
-    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, _wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
 
         let mut n = if ray_in.direction.dot(&normal.direction) < 0.0 {
             normal.direction
@@ -89,94 +92,123 @@ impl Material for Mirror {
 
 pub struct Mix {
     factor: f64,
-    pub a: Box<Material + 'static + Send + Sync>,
-    pub b: Box<Material + 'static + Send + Sync>
+    pub a: MaterialBox,
+    pub b: MaterialBox
 }
 
 impl Material for Mix {
-    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
         if self.factor < rng.next_float() {
-            self.a.reflect(ray_in, normal, rng)
+            self.a.reflect(wavelengths, ray_in, normal, rng)
         } else {
-            self.b.reflect(ray_in, normal, rng)
+            self.b.reflect(wavelengths, ray_in, normal, rng)
         }
     }
 }
 
 struct FresnelMix {
     ior: f64,
+    dispersion: f64,
     env_ior: f64,
-    pub reflect: Box<Material + 'static + Send + Sync>,
-    pub refract: Box<Material + 'static + Send + Sync>
+    env_dispersion: f64,
+    pub reflect: MaterialBox,
+    pub refract: MaterialBox
 }
 
 impl Material for FresnelMix {
-    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
-        let factor = if ray_in.direction.dot(&normal.direction) < 0.0 {
-            math::utils::schlick(self.env_ior, self.ior, &normal.direction, &ray_in.direction)
+    fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+        if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
+            let reflections = wavelengths.iter().map(|&wl| {
+                let wl = wl * 0.001;
+                let ior = self.ior + self.dispersion / (wl * wl);
+                let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
+                let wavelengths = [wl];
+                fresnel_mix(wavelengths.as_slice(), ior, env_ior, &self.reflect, &self.refract, ray_in, normal, rng)
+            }).collect();
+            Disperse(reflections)
         } else {
-            math::utils::schlick(self.ior, self.env_ior, &-normal.direction, &ray_in.direction)
-        };
-
-        if factor > rng.next_float() {
-            self.reflect.reflect(ray_in, normal, rng)
-        } else {
-            self.refract.reflect(ray_in, normal, rng)
+            fresnel_mix(wavelengths, self.ior, self.env_ior, &self.reflect, &self.refract, ray_in, normal, rng)
         }
+    }
+}
+
+fn fresnel_mix<'a>(wavelengths: &[f64], ior: f64, env_ior: f64, reflect: &'a MaterialBox, refract: &'a MaterialBox, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a> {
+    let factor = if ray_in.direction.dot(&normal.direction) < 0.0 {
+        math::utils::schlick(env_ior, ior, &normal.direction, &ray_in.direction)
+    } else {
+        math::utils::schlick(ior, env_ior, &-normal.direction, &ray_in.direction)
+    };
+
+    if factor > rng.next_float() {
+        reflect.reflect(wavelengths, ray_in, normal, rng)
+    } else {
+        refract.reflect(wavelengths, ray_in, normal, rng)
     }
 }
 
 struct Refractive {
-    color: Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>,
+    color: ColorBox,
     ior: f64,
-    env_ior: f64
+    dispersion: f64,
+    env_ior: f64,
+    env_dispersion: f64
 }
 
 impl Material for Refractive {
-    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
-        let nl = if normal.direction.dot(&ray_in.direction) < 0.0 {
-            normal.direction
+    fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+        if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
+            let reflections = wavelengths.iter().map(|&wl| {
+                let wl = wl * 0.001;
+                let ior = self.ior + self.dispersion / (wl * wl);
+                let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
+                refract(ior, env_ior, &self.color, ray_in, normal, rng)
+            }).collect();
+            Disperse(reflections)
         } else {
-            -normal.direction
-        };
-
-        let reflected = ray_in.direction.sub_v(&normal.direction.mul_s(2.0 * normal.direction.dot(&ray_in.direction)));
-
-        let into = normal.direction.dot(&nl) > 0.0;
-
-        let nc = self.env_ior;
-        let nt = self.ior;
-
-        let nnt = if into { nc/nt } else { nt/nc };
-        let ddn = ray_in.direction.dot(&nl);
-        
-        let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
-        if cos2t < 0.0 { // Total internal reflection
-            return Reflect(Ray::new(normal.origin, reflected), self.color, 1.0);
-        }
-
-        let s = if into { 1.0 } else { -1.0 }*(ddn * nnt + cos2t.sqrt());
-        let tdir = ray_in.direction.mul_s(nnt).sub_v(&normal.direction.mul_s(s)).normalize();
-
-        let a = nt - nc;
-        let b = nt + nc;
-        let r0 = a * a / (b * b);
-        let c = 1.0 - if into { -ddn } else { tdir.dot(&normal.direction) };
-
-        let re = r0 + (1.0 - r0) * c*c*c*c*c;
-        let tr = 1.0 - re;
-        let p = 0.25 + 0.5 * re;
-        let rp = re / p;
-        let tp = tr / (1.0 - p);
-
-        if rng.next_float() < p {
-            return Reflect(Ray::new(normal.origin, reflected), self.color, rp);
-        } else {
-            return Reflect(Ray::new(normal.origin, tdir), self.color, tp);
+            refract(self.ior, self.env_ior, &self.color, ray_in, normal, rng)
         }
     }
 }
 
+fn refract<'a>(ior: f64, env_ior: f64, color: &'a ColorBox, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a> {
+    let nl = if normal.direction.dot(&ray_in.direction) < 0.0 {
+        normal.direction
+    } else {
+        -normal.direction
+    };
+
+    let reflected = ray_in.direction.sub_v(&normal.direction.mul_s(2.0 * normal.direction.dot(&ray_in.direction)));
+
+    let into = normal.direction.dot(&nl) > 0.0;
+
+    let nnt = if into { env_ior/ior } else { ior/env_ior };
+    let ddn = ray_in.direction.dot(&nl);
+    
+    let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
+    if cos2t < 0.0 { // Total internal reflection
+        return Reflect(Ray::new(normal.origin, reflected), color, 1.0);
+    }
+
+    let s = if into { 1.0 } else { -1.0 }*(ddn * nnt + cos2t.sqrt());
+    let tdir = ray_in.direction.mul_s(nnt).sub_v(&normal.direction.mul_s(s)).normalize();
+
+    let a = ior - env_ior;
+    let b = ior + env_ior;
+    let r0 = a * a / (b * b);
+    let c = 1.0 - if into { -ddn } else { tdir.dot(&normal.direction) };
+
+    let re = r0 + (1.0 - r0) * c*c*c*c*c;
+    let tr = 1.0 - re;
+    let p = 0.25 + 0.5 * re;
+    let rp = re / p;
+    let tp = tr / (1.0 - p);
+
+    if rng.next_float() < p {
+        return Reflect(Ray::new(normal.origin, reflected), color, rp);
+    } else {
+        return Reflect(Ray::new(normal.origin, tdir), color, tp);
+    }
+}
 
 
 
@@ -190,7 +222,7 @@ pub fn register_types(context: &mut config::ConfigContext) {
     context.insert_grouped_type("Material", "FresnelMix", decode_fresnel_mix);
 }
 
-pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
@@ -198,10 +230,10 @@ pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, c
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(box Diffuse { color: color } as Box<Material + 'static + Send + Sync>)
+    Ok(box Diffuse { color: color } as MaterialBox)
 }
 
-pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
@@ -209,10 +241,10 @@ pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, 
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(box Emission { color: color } as Box<Material + 'static + Send + Sync>)
+    Ok(box Emission { color: color } as MaterialBox)
 }
 
-pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
@@ -220,10 +252,10 @@ pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, co
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(box Mirror { color: color } as Box<Material + 'static + Send + Sync>)
+    Ok(box Mirror { color: color } as MaterialBox)
 }
 
-pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
     let mut fields = fields;
 
     let factor = match fields.pop_equiv(&"factor") {
@@ -245,10 +277,10 @@ pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, confi
         factor: factor,
         a: a,
         b: b
-    } as Box<Material + 'static + Send + Sync>)
+    } as MaterialBox)
 }
 
-pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
     let mut fields = fields;
 
     let ior = match fields.pop_equiv(&"ior") {
@@ -259,6 +291,16 @@ pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<Strin
     let env_ior = match fields.pop_equiv(&"env_ior") {
         Some(v) => try!(FromConfig::from_config(v), "env_ior"),
         None => 1.0
+    };
+
+    let dispersion = match fields.pop_equiv(&"dispersion") {
+        Some(v) => try!(FromConfig::from_config(v), "dispersion"),
+        None => 0.0
+    };
+
+    let env_dispersion = match fields.pop_equiv(&"env_dispersion") {
+        Some(v) => try!(FromConfig::from_config(v), "env_dispersion"),
+        None => 0.0
     };
 
     let reflect = match fields.pop_equiv(&"reflect") {
@@ -273,13 +315,15 @@ pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<Strin
 
     Ok(box FresnelMix {
         ior: ior,
+        dispersion: dispersion,
         env_ior: env_ior,
+        env_dispersion: env_dispersion,
         reflect: reflect,
         refract: refract
-    } as Box<Material + 'static + Send + Sync>)
+    } as MaterialBox)
 }
 
-pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<Material + 'static + Send + Sync>, String> {
+pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
     let mut fields = fields;
 
     let ior = match fields.pop_equiv(&"ior") {
@@ -292,6 +336,16 @@ pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String
         None => 1.0
     };
 
+    let dispersion = match fields.pop_equiv(&"dispersion") {
+        Some(v) => try!(FromConfig::from_config(v), "dispersion"),
+        None => 0.0
+    };
+
+    let env_dispersion = match fields.pop_equiv(&"env_dispersion") {
+        Some(v) => try!(FromConfig::from_config(v), "env_dispersion"),
+        None => 0.0
+    };
+
     let color = match fields.pop_equiv(&"color") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
@@ -299,7 +353,9 @@ pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String
 
     Ok(box Refractive {
         ior: ior,
+        dispersion: dispersion,
         env_ior: env_ior,
+        env_dispersion: env_dispersion,
         color: color
-    } as Box<Material + 'static + Send + Sync>)
+    } as MaterialBox)
 }

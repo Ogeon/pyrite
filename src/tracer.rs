@@ -15,12 +15,12 @@ use shapes;
 use bkdtree;
 
 pub trait Material {
-    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection;
+    fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection;
 }
 
 impl Material for Box<Material + 'static + Send + Sync> {
-    fn reflect(&self, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
-        self.reflect(ray_in, normal, rng)
+    fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+        self.reflect(wavelengths, ray_in, normal, rng)
     }
 }
 
@@ -155,7 +155,8 @@ impl World {
 
 pub enum Reflection<'a> {
     Emit(&'a ParametricValue<RenderContext, f64>),
-    Reflect(Ray3<f64>, &'a ParametricValue<RenderContext, f64>, f64)
+    Reflect(Ray3<f64>, &'a ParametricValue<RenderContext, f64>, f64),
+    Disperse(Vec<Reflection<'a>>)
 }
 
 pub struct RenderContext {
@@ -172,33 +173,38 @@ pub struct WavelengthSample {
 pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f64>, world: &World, bounces: uint) -> Vec<WavelengthSample> {
     let mut ray = ray;
 
-    let mut traced: Vec<(f64, f64)> = wavelengths.move_iter().map(|wl| (wl, 1.0)).collect();
+    let mut wavelengths = wavelengths;
+    let mut traced: Vec<WavelengthSample> = wavelengths.iter().map(|&wl| WavelengthSample {
+        wavelength: wl,
+        brightness: 1.0
+    }).collect();
     let mut completed = Vec::new();
 
     for i in range(0, bounces) {
         match world.intersect(&ray) {
-            Some((normal, material)) => match material.reflect(&ray, &normal, &mut *rng as &mut FloatRng) {
+            Some((normal, material)) => match material.reflect(wavelengths.as_slice(), &ray, &normal, &mut *rng as &mut FloatRng) {
                 Reflect(out_ray, color, weight) => {
                     let mut i = 0;
                     while i < traced.len() {
-                        let (wl, brightness) = traced[i];
+                        let WavelengthSample {wavelength, brightness} = traced[i];
                         let context = RenderContext {
-                            wavelength: wl,
+                            wavelength: wavelength,
                             normal: normal.direction,
                             incident: ray.direction
                         };
 
-                        let brightness = brightness * color.get(&context) * weight;
+                        let new_brightness = brightness * color.get(&context) * weight;
 
-                        if brightness == 0.0 {
+                        if new_brightness == 0.0 {
                             traced.swap_remove(i);
+                            wavelengths.swap_remove(i);
                             completed.push(WavelengthSample {
-                                wavelength: wl,
+                                wavelength: wavelength,
                                 brightness: 0.0
                             });
                         } else {
-                            let &(_, ref mut b) = traced.get_mut(i);
-                            *b = brightness;
+                            let &WavelengthSample {ref mut brightness, ..} = traced.get_mut(i);
+                            *brightness = new_brightness;
                             i += 1;
                         }
                     }
@@ -206,35 +212,59 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                     ray = out_ray;
                 },
                 Emit(color) => {
-                    for (wl, brightness) in traced.move_iter() {
+                    for mut sample in traced.move_iter() {
                         let context = RenderContext {
-                            wavelength: wl,
+                            wavelength: sample.wavelength,
                             normal: normal.direction,
                             incident: ray.direction
                         };
 
-                        completed.push(WavelengthSample {
-                            wavelength: wl,
-                            brightness: brightness * color.get(&context)
-                        });
+                        sample.brightness *= color.get(&context);
+                        completed.push(sample);
                     }
 
                     return completed
+                },
+                Disperse(reflections) => {
+                    let bounces = bounces - (i + 1);
+                    for (mut sample, mut reflection) in traced.move_iter().zip(reflections.move_iter()) {
+                        let context = RenderContext {
+                            wavelength: sample.wavelength,
+                            normal: normal.direction,
+                            incident: ray.direction
+                        };
+
+                        loop {
+                            match reflection {
+                                Disperse(mut reflections) => reflection = reflections.pop().expect("internal error: no reflections"),
+                                Reflect(out_ray, color, weight) => {
+                                    sample.brightness *= color.get(&context) * weight;
+                                    completed.push(trace_branch(rng, out_ray, sample, world, bounces));
+                                    break;
+                                },
+                                Emit(color) => {
+                                    sample.brightness *= color.get(&context);
+                                    completed.push(sample);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    return completed;
                 }
             },
             None => {
                 let sky = world.sky.color(&ray.direction);
-                for (wl, brightness) in traced.move_iter() {
+                for mut sample in traced.move_iter() {
                     let context = RenderContext {
-                        wavelength: wl,
+                        wavelength: sample.wavelength,
                         normal: Vector3::new(0.0, 0.0, 0.0),
                         incident: ray.direction
                     };
 
-                    completed.push(WavelengthSample {
-                        wavelength: wl,
-                        brightness: brightness * sky.get(&context)
-                    });
+                    sample.brightness *= sky.get(&context);
+                    completed.push(sample);
                 }
 
                 return completed
@@ -242,9 +272,9 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
         };
     }
 
-    for (wl, brightness) in traced.move_iter() {
+    for sample in traced.move_iter() {
         completed.push(WavelengthSample {
-            wavelength: wl,
+            wavelength: sample.wavelength,
             brightness: 0.0
         });
     }
@@ -252,6 +282,65 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
     completed
 }
 
+fn trace_branch<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, sample: WavelengthSample, world: &World, bounces: uint) -> WavelengthSample {
+    let mut ray = ray;
+    let mut sample = sample;
+    let wl = [sample.wavelength];
+
+    for i in range(0, bounces) {
+        match world.intersect(&ray) {
+            Some((normal, material)) => {
+                let mut reflection = material.reflect(wl.as_slice(), &ray, &normal, &mut *rng as &mut FloatRng);
+                loop {
+                    match reflection {
+                        Disperse(mut reflections) => reflection = reflections.pop().expect("internal error: no reflections in branch"),
+                        Reflect(out_ray, color, weight) => {
+                            let context = RenderContext {
+                                wavelength: sample.wavelength,
+                                normal: normal.direction,
+                                incident: ray.direction
+                            };
+
+                            sample.brightness *= color.get(&context) * weight;
+
+                            if sample.brightness == 0.0 {
+                                return sample;
+                            }
+
+                            ray = out_ray;
+                            break;
+                        },
+                        Emit(color) => {
+                            let context = RenderContext {
+                                wavelength: sample.wavelength,
+                                normal: normal.direction,
+                                incident: ray.direction
+                            };
+
+                            sample.brightness *= color.get(&context);
+                            return sample;
+                        }
+                    }
+                }
+            },
+            None => {
+                let sky = world.sky.color(&ray.direction);
+                
+                let context = RenderContext {
+                    wavelength: sample.wavelength,
+                    normal: Vector3::new(0.0, 0.0, 0.0),
+                    incident: ray.direction
+                };
+
+                sample.brightness *= sky.get(&context);
+                return sample
+            }
+        };
+    }
+
+    sample.brightness = 0.0;
+    sample
+}
 
 
 
