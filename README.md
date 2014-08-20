@@ -1,42 +1,45 @@
-# Pyrite (super pre alpha)
+# Pyrite (super pre alpha or something)
 Pyrite is an experimental render engine, written in Rust. It uses path
 tracing and colors based on wavelengths.
 
-## Getting started
+## Getting Started
 Pyrite is currently only tested on Linux, but it may work on other systems too.
-It will ususaly be buildable using the [rust-nightly](http://www.rust-ci.org/) Ubuntu package.
+To download and build Pyrite using Git and Cargo:
 
-To download and build Pyrite to the `bin/` folder:
-
-
-    git clone --recursive https://github.com/Ogeon/pyrite.git
+    git clone https://github.com/Ogeon/pyrite.git
     cd pyrite
-    make deps
-    make
-
-
-Run `make update` before `make deps` to trigger a dependency update.
+    cargo build --release
 
 To run Pyrite:
 
-
-    cd bin/
-    ./pyrite --render path/to/project.json
-
-To run Pyrite in CLI mode:
-
-
-    cd bin/
-    ./pyrite path/to/project.json
-    > render
-    ...
-    > exit
+    target/release/pyrite path/to/project.pyr
 
 This will result in an image called `render.png` in `path/to/`. Example
 projects can be found in `test/`.
 
 ## Dependencies
-Pyrite requires the following libraries:
+Pyrite uses the following libraries:
 
-* [nalgebra](https://github.com/sebcrozet/nalgebra) for linear algebra.
-* [Ogeon/rust-png](https://github.com/Ogeon/rust-png) for saving and loading PNG images. A fork of [mozilla-servo/rust-png](https://github.com/mozilla-servo/rust-png), but it will be compatible with the same version of Rust as Pyrite (usually master).
+* [cgmath-rs](https://github.com/bjz/cgmath-rs) for linear algebra.
+* [rust-image](https://github.com/PistonDevelopers/rust-image) for saving and loading image images.
+* [wavefront-obj](https://github.com/PistonDevelopers/wavefront-obj) for loading `.obj` files.
+
+They are automatically downloaded and built by Cargo, so don't worry.
+
+## Project Configuration
+The configuration language for the project files was created especially for the needs of Pyrite.
+The reason why it's used instead of an other language, like JSON, YAML or TOML, is both that this kind of
+application has some special needs which may be hard for some languages to fulfill and that the more
+powerful languages can be a bit too big or just not human friendly enough.
+
+This language has an optional type system which allows some parts of the project files to be strictly defined,
+while other parts can be a bit more dynamic. It allows structures to be built in several steps and one structure
+can use an other one as a template to minimize repetitions.
+
+Study the demo files in `test/` to see it in action.
+
+## Contributing
+Pyrite exists because it's fun to write and experiment with and you are most welcome to help if you feel
+like it would be a fun thing to do. Optimizations, beautiful materials, response curves, cool shapes or
+other improvements are all welcome. Just make sure things works by running the tests and maybe add a new test
+for your feature.
