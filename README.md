@@ -1,4 +1,7 @@
 # Pyrite (super pre alpha or something)
+
+[![Build Status](https://travis-ci.org/Ogeon/pyrite.svg)](https://travis-ci.org/Ogeon/pyrite)
+
 Pyrite is an experimental render engine, written in Rust. It uses path
 tracing and colors based on wavelengths.
 
