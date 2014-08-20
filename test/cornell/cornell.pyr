@@ -10,7 +10,7 @@ image = {
 }
 
 renderer = Renderer.Simple {
-	pixel_samples = 5000
+	pixel_samples = 500
 	spectrum.samples = 5
 	spectrum.bins = 50
 	spectrum.span = [400, 700]
@@ -23,8 +23,6 @@ camera = Camera.Perspective {
 	transform.from = Vector { x=-2.78, y=-8, z=2.73 }
 	transform.to = Vector { x=-2.78, y=0, z=2.73 }
 	transform.up = Vector { z=1 }
-	focus_distance = 10
-	aperture = 0.1
 }
 
 light = Material.Emission {
