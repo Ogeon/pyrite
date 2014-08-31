@@ -27,6 +27,7 @@ pub struct Renderer {
     pub threads: uint,
     bounces: uint,
     pixel_samples: uint,
+    light_samples: uint,
     spectrum_samples: uint,
     spectrum_bins: uint,
     spectrum_span: (f64, f64),
@@ -89,13 +90,13 @@ impl RenderAlgorithm {
                     let wavelengths = range(0, renderer.spectrum_samples).map(|_| tile.sample_wavelength(&mut rng)).collect();
 
                     let ray = camera.ray_towards(&position, &mut rng);
-                    let samples = tracer::trace(&mut rng, ray, wavelengths, world, renderer.bounces);
+                    let samples = tracer::trace(&mut rng, ray, wavelengths, world, renderer.bounces, renderer.light_samples);
 
                     for sample in samples.move_iter() {
                         let sample = Sample {
                             brightness: sample.brightness,
                             wavelength: sample.wavelength,
-                            weight: 1.0
+                            weight: sample.weight
                         };
                         tile.expose(sample, position);
                     }
@@ -123,6 +124,11 @@ fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, conf
         None => 10
     };
 
+    let light_samples = match items.pop_equiv(&"light_samples") {
+        Some(v) => try!(FromConfig::from_config(v), "light_samples"),
+        None => 4
+    };
+
     let (spectrum_samples, spectrum_bins, spectrum_span) = match items.pop_equiv(&"spectrum") {
         Some(config::Structure(_, v)) => try!(decode_spectrum(v), "spectrum"),
         Some(v) => return Err(format!("spectrum: expected a structure, but found {}", v)),
@@ -134,6 +140,7 @@ fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, conf
             threads: threads,
             bounces: bounces,
             pixel_samples: pixel_samples,
+            light_samples: light_samples,
             spectrum_samples: spectrum_samples,
             spectrum_bins: spectrum_bins,
             spectrum_span: spectrum_span,

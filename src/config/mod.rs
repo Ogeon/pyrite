@@ -180,8 +180,8 @@ fn deep_find<'a>(items: &'a HashMap<String, ConfigItem>, path: &Vec<String>) -> 
 
 
 pub struct ConfigContext {
-    groups: HashMap<String, HashMap<String, Box<Any>>>,
-    types: HashMap<String, Box<Any>>
+    groups: HashMap<String, HashMap<String, Box<Any + 'static>>>,
+    types: HashMap<String, Box<Any + 'static>>
 }
 
 impl ConfigContext {

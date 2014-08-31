@@ -1,8 +1,9 @@
+use std;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use cgmath;
-use cgmath::{Vector, EuclideanVector};
+use cgmath::{Vector, EuclideanVector, Vector3};
 use cgmath::{Point, Point3};
 use cgmath::Intersect;
 use cgmath::{Ray, Ray3};
@@ -14,15 +15,16 @@ use config;
 use config::{FromConfig, Type};
 
 use bkdtree;
+use materials;
 
 pub enum ProxyShape {
-    DecodedShape { pub shape: Shape },
+    DecodedShape { pub shape: Shape, pub emissive: bool },
     Mesh { pub file: String, pub materials: HashMap<String, config::ConfigItem> }
 }
 
 pub enum Shape {
-    Sphere { position: Point3<f64>, radius: f64, material: Box<Material + 'static + Send + Sync> },
-    Triangle { pub v1: Point3<f64>, pub v2: Point3<f64>, pub v3: Point3<f64>, pub material: Arc<Box<Material + 'static + Send + Sync>> }
+    Sphere { position: Point3<f64>, radius: f64, material: materials::MaterialBox },
+    Triangle { pub v1: Point3<f64>, pub v2: Point3<f64>, pub v3: Point3<f64>, pub material: Arc<materials::MaterialBox> }
 }
 
 impl Shape {
@@ -84,11 +86,55 @@ impl Shape {
             Triangle { ref material, .. } => material.deref() as &Material
         }
     }
+
+    pub fn sample_point<R: std::rand::Rng>(&self, rng: &mut R) -> Ray3<f64> {
+        match *self {
+            Sphere { ref position, radius, .. } => {
+                let u = rng.gen();
+                let v = rng.gen();
+                let theta = 2.0f64 * std::f64::consts::PI * u;
+                let phi = (2.0f64 * v - 1.0).acos();
+                let sphere_point = Vector3::new(
+                    phi.sin() * theta.cos(),
+                    phi.sin() * theta.sin(),
+                    phi.cos()
+                );
+
+                Ray::new(position.add_v(&sphere_point.mul_s(radius)), sphere_point)
+            },
+            Triangle { ref v1, ref v2, ref v3, .. } => {
+                let u: f64 = rng.gen();
+                let v = rng.gen();
+
+                let a = v2.sub_p(v1);
+                let b = v3.sub_p(v1);
+
+                let position = if u + v > 1.0 {
+                    v1.add_v(&a.mul_s(1.0 - u)).add_v(&b.mul_s(1.0 - v))
+                } else {
+                    v1.add_v(&a.mul_s(u)).add_v(&b.mul_s(v))
+                };
+
+                Ray::new(position, a.cross(&b).normalize())
+            }
+        }
+    }
+
+    pub fn surface_area(&self) -> f64 {
+        match *self {
+            Sphere { radius, .. } => radius * radius * 4.0 * std::f64::consts::PI,
+            Triangle { ref v1, ref v2, ref v3, .. } => {
+                let a = v2.sub_p(v1);
+                let b = v3.sub_p(v1);
+                0.5 * a.cross(&b).length()
+            }
+        }
+    }
 }
 
-impl<'a> bkdtree::Element<tracer::BkdRay<'a>, Ray3<f64>> for Shape {
+impl<'a> bkdtree::Element<tracer::BkdRay<'a>, Ray3<f64>> for Arc<Shape> {
     fn get_bounds_interval(&self, axis: uint) -> (f64, f64) {
-        match *self {
+        match *self.deref() {
             Sphere { ref position, radius, .. } => match axis {
                 0 => (position.x - radius, position.x + radius),
                 1 => (position.y - radius, position.y + radius),
@@ -133,7 +179,7 @@ fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config:
         None => return Err(String::from_str("missing field 'radius'"))
     };
 
-    let material = match items.pop_equiv(&"material") {
+    let (material, emissive): (materials::MaterialBox, bool) = match items.pop_equiv(&"material") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "material"),
         None => return Err(String::from_str("missing field 'material'"))
     };
@@ -143,7 +189,8 @@ fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config:
             position: Point::from_vec(&position),
             radius: radius,
             material: material
-        }
+        },
+        emissive: emissive
     })
 }
 

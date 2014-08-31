@@ -10,11 +10,12 @@ image = {
 }
 
 renderer = Renderer.Simple {
-	pixel_samples = 500
+	pixel_samples = 50
 	spectrum.samples = 5
 	spectrum.bins = 50
 	spectrum.span = [400, 700]
 	tile_size = 32
+	light_samples = 5
 }
 
 camera = Camera.Perspective {

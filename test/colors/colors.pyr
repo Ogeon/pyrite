@@ -9,7 +9,7 @@ image = {
 }
 
 renderer = Renderer.Simple {
-	pixel_samples = 500
+	pixel_samples = 300
 	spectrum.samples = 10
 	spectrum.bins = 50
 	spectrum.span = [370, 770]

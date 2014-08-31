@@ -117,11 +117,11 @@ pub mod utils {
 
         if ref_index1 > ref_index2 {
             let n = ref_index1 / ref_index2;
-            let sinT2 = n * n * (1.0 - cos_psi * cos_psi);
-            if sinT2 > 1.0 {
+            let sin_t2 = n * n * (1.0 - cos_psi * cos_psi);
+            if sin_t2 > 1.0 {
                 return 1.0;
             }
-            cos_psi = (1.0 - sinT2).sqrt();
+            cos_psi = (1.0 - sin_t2).sqrt();
         }
 
         let inv_cos = 1.0 - cos_psi;

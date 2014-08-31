@@ -12,7 +12,7 @@ use config::FromConfig;
 
 use math;
 
-type MaterialBox = Box<Material + 'static + Send + Sync>;
+pub type MaterialBox = Box<Material + 'static + Send + Sync>;
 type ColorBox = Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>;
 
 pub struct Diffuse {
@@ -57,8 +57,16 @@ impl Material for Diffuse {
         n.normalize_self_to(sphere_point.z);
         reflected.add_self_v(&n);
 
-        Reflect(Ray::new(normal.origin, reflected), &self.color as &ParametricValue<tracer::RenderContext, f64>, 1.0)
+        Reflect(Ray::new(normal.origin, reflected), &self.color as &ParametricValue<tracer::RenderContext, f64>, 1.0, Some(lambertian))
     }
+
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+        None
+    }
+}
+
+fn lambertian(_ray_in: &Vector3<f64>, ray_out: &Vector3<f64>, normal: &Vector3<f64>) -> f64 {
+    2.0 * normal.dot(ray_out).abs()
 }
 
 pub struct Emission {
@@ -68,6 +76,10 @@ pub struct Emission {
 impl Material for Emission {
     fn reflect(&self, _wavelengths: &[f64], _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
         Emit(&self.color as &ParametricValue<tracer::RenderContext, f64>)
+    }
+
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+        Some(&self.color as &ParametricValue<tracer::RenderContext, f64>)
     }
 }
 
@@ -86,7 +98,11 @@ impl Material for Mirror {
 
         let perp = ray_in.direction.dot(&n) * 2.0;
         n.mul_self_s(perp);
-        Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), &self.color as &ParametricValue<tracer::RenderContext, f64>, 1.0)
+        Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), &self.color as &ParametricValue<tracer::RenderContext, f64>, 1.0, None)
+    }
+
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+        None
     }
 }
 
@@ -102,6 +118,14 @@ impl Material for Mix {
             self.a.reflect(wavelengths, ray_in, normal, rng)
         } else {
             self.b.reflect(wavelengths, ray_in, normal, rng)
+        }
+    }
+
+    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+        if self.factor < rng.next_float() {
+            self.a.get_emission(wavelengths, ray_in, normal, rng)
+        } else {
+            self.b.get_emission(wavelengths, ray_in, normal, rng)
         }
     }
 }
@@ -123,26 +147,46 @@ impl Material for FresnelMix {
                 let ior = self.ior + self.dispersion / (wl * wl);
                 let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
                 let wavelengths = [wl];
-                fresnel_mix(wavelengths.as_slice(), ior, env_ior, &self.reflect, &self.refract, ray_in, normal, rng)
+                let child = fresnel_mix(ior, env_ior, &self.reflect, &self.refract, &ray_in.direction, normal, rng);
+                child.reflect(wavelengths, ray_in, normal, rng)
             }).collect();
             Disperse(reflections)
         } else {
-            fresnel_mix(wavelengths, self.ior, self.env_ior, &self.reflect, &self.refract, ray_in, normal, rng)
+            let child = fresnel_mix(self.ior, self.env_ior, &self.reflect, &self.refract, &ray_in.direction, normal, rng);
+            child.reflect(wavelengths, ray_in, normal, rng)
+        }
+    }
+
+    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+        if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
+            /*let reflections = wavelengths.iter().map(|&wl| {
+                let wl = wl * 0.001;
+                let ior = self.ior + self.dispersion / (wl * wl);
+                let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
+                let wavelengths = [wl];
+                let child = fresnel_mix(wavelengths.as_slice(), ior, env_ior, &self.reflect, &self.refract, ray_in, normal, rng);
+                child.get_emission(wavelengths, ray_in, normal, rng)
+            }).collect();
+            Disperse(reflections)*/
+            None
+        } else {
+            let child = fresnel_mix(self.ior, self.env_ior, &self.reflect, &self.refract, ray_in, normal, rng);
+            child.get_emission(wavelengths, ray_in, normal, rng)
         }
     }
 }
 
-fn fresnel_mix<'a>(wavelengths: &[f64], ior: f64, env_ior: f64, reflect: &'a MaterialBox, refract: &'a MaterialBox, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a> {
-    let factor = if ray_in.direction.dot(&normal.direction) < 0.0 {
-        math::utils::schlick(env_ior, ior, &normal.direction, &ray_in.direction)
+fn fresnel_mix<'a>(ior: f64, env_ior: f64, reflect: &'a MaterialBox, refract: &'a MaterialBox, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> &'a MaterialBox {
+    let factor = if ray_in.dot(&normal.direction) < 0.0 {
+        math::utils::schlick(env_ior, ior, &normal.direction, ray_in)
     } else {
-        math::utils::schlick(ior, env_ior, &-normal.direction, &ray_in.direction)
+        math::utils::schlick(ior, env_ior, &-normal.direction, ray_in)
     };
 
     if factor > rng.next_float() {
-        reflect.reflect(wavelengths, ray_in, normal, rng)
+        reflect
     } else {
-        refract.reflect(wavelengths, ray_in, normal, rng)
+        refract
     }
 }
 
@@ -168,6 +212,10 @@ impl Material for Refractive {
             refract(self.ior, self.env_ior, &self.color, ray_in, normal, rng)
         }
     }
+
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+        None
+    }
 }
 
 fn refract<'a>(ior: f64, env_ior: f64, color: &'a ColorBox, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a> {
@@ -186,7 +234,7 @@ fn refract<'a>(ior: f64, env_ior: f64, color: &'a ColorBox, ray_in: &Ray3<f64>, 
     
     let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
     if cos2t < 0.0 { // Total internal reflection
-        return Reflect(Ray::new(normal.origin, reflected), color, 1.0);
+        return Reflect(Ray::new(normal.origin, reflected), color, 1.0, None);
     }
 
     let s = if into { 1.0 } else { -1.0 }*(ddn * nnt + cos2t.sqrt());
@@ -204,9 +252,9 @@ fn refract<'a>(ior: f64, env_ior: f64, color: &'a ColorBox, ray_in: &Ray3<f64>, 
     let tp = tr / (1.0 - p);
 
     if rng.next_float() < p {
-        return Reflect(Ray::new(normal.origin, reflected), color, rp);
+        return Reflect(Ray::new(normal.origin, reflected), color, rp, None);
     } else {
-        return Reflect(Ray::new(normal.origin, tdir), color, tp);
+        return Reflect(Ray::new(normal.origin, tdir), color, tp, None);
     }
 }
 
@@ -222,7 +270,7 @@ pub fn register_types(context: &mut config::ConfigContext) {
     context.insert_grouped_type("Material", "FresnelMix", decode_fresnel_mix);
 }
 
-pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
+pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
@@ -230,10 +278,10 @@ pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, c
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(box Diffuse { color: color } as MaterialBox)
+    Ok((box Diffuse { color: color } as MaterialBox, false))
 }
 
-pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
+pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
@@ -241,10 +289,10 @@ pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, 
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(box Emission { color: color } as MaterialBox)
+    Ok((box Emission { color: color } as MaterialBox, true))
 }
 
-pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
+pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
     let color = match fields.pop_equiv(&"color") {
@@ -252,10 +300,10 @@ pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, co
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(box Mirror { color: color } as MaterialBox)
+    Ok((box Mirror { color: color } as MaterialBox, false))
 }
 
-pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
+pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
     let factor = match fields.pop_equiv(&"factor") {
@@ -263,24 +311,24 @@ pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, confi
         None => return Err(String::from_str("missing field 'factor'"))
     };
 
-    let a = match fields.pop_equiv(&"a") {
+    let (a, a_emissive): (MaterialBox, bool) = match fields.pop_equiv(&"a") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "a"),
         None => return Err(String::from_str("missing field 'a'"))
     };
 
-    let b = match fields.pop_equiv(&"b") {
+    let (b, b_emissive): (MaterialBox, bool) = match fields.pop_equiv(&"b") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "b"),
         None => return Err(String::from_str("missing field 'b'"))
     };
 
-    Ok(box Mix {
+    Ok((box Mix {
         factor: factor,
         a: a,
         b: b
-    } as MaterialBox)
+    } as MaterialBox, a_emissive || b_emissive))
 }
 
-pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
+pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
     let ior = match fields.pop_equiv(&"ior") {
@@ -303,27 +351,27 @@ pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<Strin
         None => 0.0
     };
 
-    let reflect = match fields.pop_equiv(&"reflect") {
+    let (reflect, reflect_emissive): (MaterialBox, bool) = match fields.pop_equiv(&"reflect") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "reflect"),
         None => return Err(String::from_str("missing field 'reflect'"))
     };
 
-    let refract = match fields.pop_equiv(&"refract") {
+    let (refract, refract_emissive): (MaterialBox, bool) = match fields.pop_equiv(&"refract") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "refract"),
         None => return Err(String::from_str("missing field 'refract'"))
     };
 
-    Ok(box FresnelMix {
+    Ok((box FresnelMix {
         ior: ior,
         dispersion: dispersion,
         env_ior: env_ior,
         env_dispersion: env_dispersion,
         reflect: reflect,
         refract: refract
-    } as MaterialBox)
+    } as MaterialBox, refract_emissive || reflect_emissive))
 }
 
-pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<MaterialBox, String> {
+pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
     let ior = match fields.pop_equiv(&"ior") {
@@ -351,11 +399,11 @@ pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(box Refractive {
+    Ok((box Refractive {
         ior: ior,
         dispersion: dispersion,
         env_ior: env_ior,
         env_dispersion: env_dispersion,
         color: color
-    } as MaterialBox)
+    } as MaterialBox, false))
 }
