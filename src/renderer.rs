@@ -92,7 +92,7 @@ impl RenderAlgorithm {
                     let ray = camera.ray_towards(&position, &mut rng);
                     let samples = tracer::trace(&mut rng, ray, wavelengths, world, renderer.bounces, renderer.light_samples);
 
-                    for sample in samples.move_iter() {
+                    for sample in samples.into_iter() {
                         let sample = Sample {
                             brightness: sample.brightness,
                             wavelength: sample.wavelength,

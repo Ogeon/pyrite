@@ -2,23 +2,23 @@
 name = "pyrite"
 version = "0.0.0"
 dependencies = [
- "cgmath 0.0.1 (git+https://github.com/bjz/cgmath-rs#9ade4ce92d639d2a67c0932816ff26f9ec516616)",
- "image 0.0.0 (git+https://github.com/PistonDevelopers/rust-image#b12e4237248f8032ea7a53b767cddefc50cd79f2)",
- "wavefront-obj 0.0.0 (git+https://github.com/PistonDevelopers/wavefront-obj#b646ae45a6d1467eda23a5f65720a9521dd38b31)",
+ "cgmath 0.0.1 (git+https://github.com/bjz/cgmath-rs#d2053a8366b65606b57150757f9bcd6531e82f18)",
+ "image 0.0.0 (git+https://github.com/PistonDevelopers/rust-image#2dacfa9a0f0090778f214e595820bbaa4b2b4a0f)",
+ "wavefront-obj 0.0.0 (git+https://github.com/PistonDevelopers/wavefront-obj#b6d65857107ac66a0e7939e9d346ca330af6a1cb)",
 ]
 
 [[package]]
 name = "cgmath"
 version = "0.0.1"
-source = "git+https://github.com/bjz/cgmath-rs#9ade4ce92d639d2a67c0932816ff26f9ec516616"
+source = "git+https://github.com/bjz/cgmath-rs#d2053a8366b65606b57150757f9bcd6531e82f18"
 
 [[package]]
 name = "image"
 version = "0.0.0"
-source = "git+https://github.com/PistonDevelopers/rust-image#b12e4237248f8032ea7a53b767cddefc50cd79f2"
+source = "git+https://github.com/PistonDevelopers/rust-image#2dacfa9a0f0090778f214e595820bbaa4b2b4a0f"
 
 [[package]]
 name = "wavefront-obj"
 version = "0.0.0"
-source = "git+https://github.com/PistonDevelopers/wavefront-obj#b646ae45a6d1467eda23a5f65720a9521dd38b31"
+source = "git+https://github.com/PistonDevelopers/wavefront-obj#b6d65857107ac66a0e7939e9d346ca330af6a1cb"
 

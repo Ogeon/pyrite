@@ -57,10 +57,10 @@ impl Material for Diffuse {
         n.normalize_self_to(sphere_point.z);
         reflected.add_self_v(&n);
 
-        Reflect(Ray::new(normal.origin, reflected), &self.color as &ParametricValue<tracer::RenderContext, f64>, 1.0, Some(lambertian))
+        Reflect(Ray::new(normal.origin, reflected), & *self.color, 1.0, Some(lambertian))
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
         None
     }
 }
@@ -75,11 +75,11 @@ pub struct Emission {
 
 impl Material for Emission {
     fn reflect(&self, _wavelengths: &[f64], _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
-        Emit(&self.color as &ParametricValue<tracer::RenderContext, f64>)
+        Emit(& *self.color)
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
-        Some(&self.color as &ParametricValue<tracer::RenderContext, f64>)
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
+        Some(& *self.color)
     }
 }
 
@@ -98,10 +98,10 @@ impl Material for Mirror {
 
         let perp = ray_in.direction.dot(&n) * 2.0;
         n.mul_self_s(perp);
-        Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), &self.color as &ParametricValue<tracer::RenderContext, f64>, 1.0, None)
+        Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), & *self.color, 1.0, None)
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
         None
     }
 }
@@ -121,7 +121,7 @@ impl Material for Mix {
         }
     }
 
-    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
         if self.factor < rng.next_float() {
             self.a.get_emission(wavelengths, ray_in, normal, rng)
         } else {
@@ -157,7 +157,7 @@ impl Material for FresnelMix {
         }
     }
 
-    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             /*let reflections = wavelengths.iter().map(|&wl| {
                 let wl = wl * 0.001;
@@ -213,7 +213,7 @@ impl Material for Refractive {
         }
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
         None
     }
 }
@@ -234,7 +234,7 @@ fn refract<'a>(ior: f64, env_ior: f64, color: &'a ColorBox, ray_in: &Ray3<f64>, 
     
     let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
     if cos2t < 0.0 { // Total internal reflection
-        return Reflect(Ray::new(normal.origin, reflected), color, 1.0, None);
+        return Reflect(Ray::new(normal.origin, reflected), & **color, 1.0, None);
     }
 
     let s = if into { 1.0 } else { -1.0 }*(ddn * nnt + cos2t.sqrt());
@@ -252,9 +252,9 @@ fn refract<'a>(ior: f64, env_ior: f64, color: &'a ColorBox, ray_in: &Ray3<f64>, 
     let tp = tr / (1.0 - p);
 
     if rng.next_float() < p {
-        return Reflect(Ray::new(normal.origin, reflected), color, rp, None);
+        return Reflect(Ray::new(normal.origin, reflected), & **color, rp, None);
     } else {
-        return Reflect(Ray::new(normal.origin, tdir), color, tp, None);
+        return Reflect(Ray::new(normal.origin, tdir), & **color, tp, None);
     }
 }
 

@@ -28,7 +28,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(f64, Ray3<f64>)> {
+    pub fn ray_intersect(&self, ray: &Ray3<f64>) -> Option<(f64, Ray3<f64>)> {
         match *self {
             Sphere {ref position, radius, ..} => {
                 let sphere = cgmath::Sphere {
@@ -82,8 +82,8 @@ impl Shape {
 
     pub fn get_material(&self) -> &Material {
         match *self {
-            Sphere { ref material, .. } => material as &Material,
-            Triangle { ref material, .. } => material.deref() as &Material
+            Sphere { ref material, .. } => & **material,
+            Triangle { ref material, .. } => & **material.deref()
         }
     }
 
@@ -155,7 +155,7 @@ impl<'a> bkdtree::Element<tracer::BkdRay<'a>, Ray3<f64>> for Arc<Shape> {
 
     fn intersect(&self, ray: &tracer::BkdRay) -> Option<(f64, Ray3<f64>)> {
         let &tracer::BkdRay(ray) = ray;
-        self.intersect(ray)
+        self.ray_intersect(ray)
     }
 }
 

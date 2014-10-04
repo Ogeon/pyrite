@@ -1,8 +1,8 @@
-#![feature(macro_rules, struct_variant)]
+#![feature(macro_rules, struct_variant, advanced_slice_patterns)]
 
 extern crate cgmath;
 extern crate image;
-extern crate obj = "wavefront-obj";
+extern crate "wavefront-obj" as obj;
 
 use std::sync::{TaskPool, Arc, RWLock};
 use std::io::File;

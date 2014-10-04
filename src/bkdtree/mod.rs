@@ -120,7 +120,7 @@ fn construct_tree<T, R: Ray, E: Element<R, T>>(elements: Vec<E>, dimensions: uin
 
         let len = elements.len();
         let median = len / 2;
-        let mut element_iter = elements.move_iter();
+        let mut element_iter = elements.into_iter();
 
         let left = element_iter.by_ref().take(median).collect();
         let right = element_iter.take(len - median).collect();

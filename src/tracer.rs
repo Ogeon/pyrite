@@ -19,27 +19,11 @@ pub type Brdf = fn(ray_in: &Vector3<f64>, ray_out: &Vector3<f64>, normal: &Vecto
 
 pub trait Material {
     fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection;
-    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<RenderContext, f64>>;
-}
-
-impl Material for Box<Material + 'static + Send + Sync> {
-    fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
-        self.reflect(wavelengths, ray_in, normal, rng)
-    }
-
-    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<RenderContext, f64>> {
-        self.get_emission(wavelengths, ray_in, normal, rng)
-    }
+    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<RenderContext, f64> + Send + Sync>;
 }
 
 pub trait ParametricValue<From, To> {
     fn get(&self, i: &From) -> To; 
-}
-
-impl<From, To> ParametricValue<From, To> for Box<ParametricValue<From, To> + 'static + Send + Sync> {
-    fn get(&self, i: &From) -> To {
-        self.get(i)
-    }
 }
 
 impl<From> ParametricValue<From, f64> for f64 {
@@ -121,7 +105,7 @@ pub enum Sky {
 impl Sky {
     pub fn color(&self, _direction: &Vector3<f64>) -> &ParametricValue<RenderContext, f64> {
         match *self {
-            Color(ref c) => c as &ParametricValue<RenderContext, f64>,
+            Color(ref c) => & **c,
         }
     }
 }
@@ -139,8 +123,8 @@ impl World {
 }
 
 pub enum Reflection<'a> {
-    Emit(&'a ParametricValue<RenderContext, f64> + 'a),
-    Reflect(Ray3<f64>, &'a ParametricValue<RenderContext, f64> + 'a, f64, Option<Brdf>),
+    Emit(&'a ParametricValue<RenderContext, f64> + Send + Sync),
+    Reflect(Ray3<f64>, &'a ParametricValue<RenderContext, f64> + Send + Sync, f64, Option<Brdf>),
     Disperse(Vec<Reflection<'a>>)
 }
 
@@ -175,7 +159,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
         match world.intersect(&ray) {
             Some((normal, material)) => match material.reflect(wavelengths.as_slice(), &ray, &normal, &mut *rng as &mut FloatRng) {
                 Reflect(out_ray, color, scale, brdf) => {
-                    for sample in traced.mut_iter() {
+                    for sample in traced.iter_mut() {
                         let context = RenderContext {
                             wavelength: sample.wavelength,
                             normal: normal.direction,
@@ -188,7 +172,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                     brdf.map(|brdf| {
                         let direct_light = trace_direct(rng, light_samples, wavelengths.as_slice(), &ray.direction, &normal, world, brdf);
 
-                        for (sample, light_sum) in traced.mut_iter().zip(direct_light.move_iter()) {
+                        for (sample, light_sum) in traced.iter_mut().zip(direct_light.into_iter()) {
                             if light_sum > 0.0 {
                                 sample.brightness += sample.reflectance * light_sum;
                                 sample.sample_light = false;
@@ -221,7 +205,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                     ray = out_ray;
                 },
                 Emit(color) => {
-                    for mut sample in traced.move_iter() {
+                    for mut sample in traced.into_iter() {
                         let context = RenderContext {
                             wavelength: sample.wavelength,
                             normal: normal.direction,
@@ -238,7 +222,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                 },
                 Disperse(reflections) => {
                     let bounces = bounces - (bounce + 1);
-                    for (mut sample, mut reflection) in traced.move_iter().zip(reflections.move_iter()) {
+                    for (mut sample, mut reflection) in traced.into_iter().zip(reflections.into_iter()) {
                         let context = RenderContext {
                             wavelength: sample.wavelength,
                             normal: normal.direction,
@@ -284,7 +268,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
             },
             None => {
                 let sky = world.sky.color(&ray.direction);
-                for mut sample in traced.move_iter() {
+                for mut sample in traced.into_iter() {
                     let context = RenderContext {
                         wavelength: sample.wavelength,
                         normal: Vector3::new(0.0, 0.0, 0.0),
@@ -300,7 +284,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
         };
     }
 
-    for sample in traced.move_iter() {
+    for sample in traced.into_iter() {
         completed.push(sample);
     }
 
@@ -312,7 +296,7 @@ fn trace_branch<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, sample: Waveleng
     let mut sample = sample;
     let wl = [sample.wavelength];
 
-    for i in range(0, bounces) {
+    for _ in range(0, bounces) {
         match world.intersect(&ray) {
             Some((normal, material)) => {
                 let mut reflection = material.reflect(wl.as_slice(), &ray, &normal, &mut *rng as &mut FloatRng);
@@ -408,7 +392,7 @@ fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: uint, wavelengths: 
             let scale = weight * cos_in * brdf(ray_in, &normal.direction, &ray_out.direction) / distance;
 
             color.map(|color| match world.intersect(&ray_out) {
-                None => for (&wavelength, mut sum) in wavelengths.iter().zip(sum.mut_iter()) {
+                None => for (&wavelength, mut sum) in wavelengths.iter().zip(sum.iter_mut()) {
                     let context = RenderContext {
                         wavelength: wavelength,
                         normal: target_normal.direction,
@@ -418,7 +402,7 @@ fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: uint, wavelengths: 
                     *sum += color.get(&context) * scale;
                 },
                 Some((hit_normal, _)) if hit_normal.origin.sub_p(&normal.origin).length2() >= distance - 0.0000001
-                  => for (&wavelength, mut sum) in wavelengths.iter().zip(sum.mut_iter()) {
+                  => for (&wavelength, mut sum) in wavelengths.iter().zip(sum.iter_mut()) {
                     let context = RenderContext {
                         wavelength: wavelength,
                         normal: target_normal.direction,
@@ -468,7 +452,7 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
             let mut objects: Vec<Arc<shapes::Shape>> = Vec::new();
             let mut lights: Vec<Arc<shapes::Shape>> = Vec::new();
 
-            for (i, object) in object_protos.move_iter().enumerate() {
+            for (i, object) in object_protos.into_iter().enumerate() {
                 let shape: shapes::ProxyShape = try!(context.decode_structure_from_group("Shape", object), format!("objects: [{}]", i));
                 match shape {
                     shapes::DecodedShape { shape, emissive } => {
@@ -549,13 +533,13 @@ pub fn decode_parametric_number<From>(context: &config::ConfigContext, item: con
 
     let name_collection = match group_names.as_slice() {
         [name] => format!("'{}'", name),
-        [..names, last] => format!("'{}' or '{}'", names.connect("', '"), last),
+        [names.., last] => format!("'{}' or '{}'", names.connect("', '"), last),
         [] => return Err(String::from_str("internal error: trying to decode structure from one of 0 groups"))
     };
 
     match item {
         config::Structure(..) => context.decode_structure_from_groups(group_names, item),
-        config::Primitive(config::Number(n)) => Ok(box n as Box<ParametricValue<From, f64> + 'static + Send + Sync>),
+        config::Primitive(config::parser::Number(n)) => Ok(box n as Box<ParametricValue<From, f64> + 'static + Send + Sync>),
         v => return Err(format!("expected a number or a structure from group {}, but found {}", name_collection, v))
     }
 }

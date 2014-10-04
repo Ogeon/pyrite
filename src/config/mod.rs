@@ -1,12 +1,11 @@
 use std::collections::HashMap;
+use std::collections::hashmap::{Vacant, Occupied};
 use std::any::{Any, AnyRefExt};
 use std::str::StrAllocating;
 use std::fmt;
+use std::str::Str;
 
-pub use self::parser::String;
-pub use self::parser::Number;
-
-mod parser;
+pub mod parser;
 
 pub type PrimitiveType = parser::Value;
 type IncludeFn<'a> = |&String|:'a -> Result<(String, Vec<String>), String>;
@@ -15,7 +14,7 @@ pub fn parse<C: Iterator<char>>(source: C, include: &mut IncludeFn) -> Result<Ha
     let mut items = HashMap::new();
     let instructions = parser::parse(source);
 
-    for instruction in try!(instructions).move_iter() {
+    for instruction in try!(instructions).into_iter() {
         try!(match instruction {
             parser::Assign(path, parser::Struct(template, instructions)) => {
                 if instructions.len() == 0 {
@@ -59,7 +58,7 @@ pub fn parse<C: Iterator<char>>(source: C, include: &mut IncludeFn) -> Result<Ha
 }
 
 fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, ConfigItem>, context: &HashMap<String, ConfigItem>, include: &mut IncludeFn) -> Result<(), String> {
-    for instruction in instructions.move_iter() {
+    for instruction in instructions.into_iter() {
         try!(match instruction {
             parser::Assign(path, parser::Struct(template, instructions)) => {
                 if instructions.len() == 0 {
@@ -104,7 +103,7 @@ fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, Confi
 
 fn evaluate_list(elements: Vec<parser::Value>, context: &HashMap<String, ConfigItem>, include: &mut IncludeFn) -> Result<Vec<ConfigItem>, String> {
     let mut result = Vec::new();
-    for (i, v) in elements.move_iter().enumerate() {
+    for (i, v) in elements.into_iter().enumerate() {
         match v {
             parser::Struct(template, instructions) => {
                 let (ty, mut fields) = try!(get_template(context, &template), format!("[{}]", i));
@@ -146,8 +145,13 @@ fn deep_insert(items: &mut HashMap<String, ConfigItem>, path: &[String], item: C
             items.insert(segment.clone(), item);
             Ok(())
         },
-        [ref segment, ..rest] => {
-            match items.find_or_insert_with(segment.clone(), |_| Structure(Untyped, HashMap::new()) ) {
+        [ref segment, rest..] => {
+            let parent = match items.entry(segment.clone()) {
+                Vacant(entry) => entry.set(Structure(Untyped, HashMap::new())),
+                Occupied(entry) => entry.into_mut()
+            };
+
+            match parent {
                 &Structure(_, ref mut fields) => deep_insert(fields, rest, item).map_err(|e| format!("{}.{}", segment, e)),
                 &Primitive(ref v) => Err(format!("{}: expected a structure, but found primitive value '{}'", segment, v)),
                 &List(_) => Err(format!("{}: expected a structure, but found a list", segment))
@@ -201,8 +205,12 @@ impl ConfigContext {
     pub fn insert_grouped_type<T: 'static, Gr: StrAllocating, Ty: StrAllocating>(&mut self, group_name: Gr, type_name: Ty, decoder: DecoderFn<T>) -> bool {
         let group_name = group_name.into_string();
         let type_name = type_name.into_string();
-
-        self.groups.find_or_insert_with(group_name, |_| HashMap::new()).insert(type_name, box Decoder(decoder) as Box<Any>)
+        let group = match self.groups.entry(group_name) {
+            Vacant(entry) => entry.set(HashMap::new()),
+            Occupied(entry) => entry.into_mut()
+        };
+        
+        group.insert(type_name, box Decoder(decoder) as Box<Any>)
     }
 
     pub fn decode_structure_from_group<T: 'static, Gr: StrAllocating>(&self, group_name: Gr, item: ConfigItem) -> Result<T, String> {
@@ -219,11 +227,11 @@ impl ConfigContext {
     }
 
     pub fn decode_structure_from_groups<T: 'static, Gr: StrAllocating>(&self, group_names: Vec<Gr>, item: ConfigItem) -> Result<T, String> {
-        let group_names = group_names.move_iter().map(|n| n.into_string()).collect::<Vec<String>>();
+        let group_names = group_names.into_iter().map(|n| n.into_string()).collect::<Vec<String>>();
 
         let name_collection = match group_names.as_slice() {
             [ref name] => format!("'{}'", name),
-            [..names, ref last] => format!("'{}' or '{}'", names.connect("', '"), last),
+            [names.., ref last] => format!("'{}' or '{}'", names.connect("', '"), last),
             [] => return Err(String::from_str("internal error: trying to decode structure from one of 0 groups"))
         };
 
@@ -387,7 +395,7 @@ impl FromConfig for uint {
 impl FromConfig for String {
     fn from_primitive(item: PrimitiveType) -> Result<String, String> {
         match item {
-            parser::String(s) => Ok(s),
+            parser::Str(s) => Ok(s),
             _ => Err(String::from_str("expected a string"))
         }
     }
@@ -397,7 +405,7 @@ impl<T: FromConfig> FromConfig for Vec<T> {
     fn from_list(items: Vec<ConfigItem>) -> Result<Vec<T>, String> {
         let mut decoded = Vec::new();
 
-        for (i, item) in items.move_iter().enumerate() {
+        for (i, item) in items.into_iter().enumerate() {
             decoded.push(try!(FromConfig::from_config(item), format!("[{}]", i)))
         }
 
@@ -410,7 +418,7 @@ impl<A: FromConfig, B: FromConfig> FromConfig for (A, B) {
         if items.len() != 2 {
             Err(format!("expected a list of length 2, but found a list of length {}", items.len()))
         } else {
-            let mut items = items.move_iter();
+            let mut items = items.into_iter();
             let a = try!(FromConfig::from_config(items.next().unwrap()), "[0]");
             let b = try!(FromConfig::from_config(items.next().unwrap()), "[1]");
             Ok((a, b))

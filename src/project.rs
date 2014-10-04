@@ -1,4 +1,5 @@
-use std::io::{File, IoError};
+use std;
+use std::io::File;
 use std::collections::HashMap;
 
 use config;
@@ -40,7 +41,7 @@ macro_rules! try_parse(
 
 pub enum ParseResult<T> {
     Success(T),
-    IoError(IoError),
+    IoError(std::io::IoError),
     ParseError(String)
 }
 

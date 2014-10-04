@@ -86,7 +86,7 @@ pub enum Action {
 pub enum Value {
     Struct(Vec<String>, Vec<Action>),
     List(Vec<Value>),
-    String(String),
+    Str(String),
     Number(f64)
 }
 
@@ -145,7 +145,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
     }
 
     fn buffer_all(&mut self, tokens: Vec<Token>) {
-        for token in tokens.move_iter().rev() {
+        for token in tokens.into_iter().rev() {
             self.buffer(token);
         }
     }
@@ -221,7 +221,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
             let ident = self.parse_ident();
             if ident.len() == 0 {
                 if idents.len() > 0 {
-                    for ident in idents.move_iter().rev() {
+                    for ident in idents.into_iter().rev() {
                         self.buffer(Period);
                         self.buffer_all(ident);
                     }
@@ -241,7 +241,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
             }
         }
 
-        Ok(Some(idents.move_iter().map(|ident| ident.move_iter().map(|t| t.to_char()).collect()).collect()))
+        Ok(Some(idents.into_iter().map(|ident| ident.into_iter().map(|t| t.to_char()).collect()).collect()))
     }
 
     fn parse_string(&mut self) -> Result<Option<String>, String> {
@@ -255,7 +255,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
         loop {
             match self.next() {
                 Some(Quote) => break,
-                Some(t) => string.push_char(t.to_char()),
+                Some(t) => string.push(t.to_char()),
                 None => return Err(format_error(pos, "unmatched '\"'"))
             }
         }
@@ -268,15 +268,15 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
         let mut integer = true;
 
         if self.eat(Minus) {
-            num_str.push_char('-');
+            num_str.push('-');
         }
 
         loop {
             match self.next() {
-                Some(Num(c)) => num_str.push_char(c),
+                Some(Num(c)) => num_str.push(c),
                 Some(Period) => if integer {
                     integer = false;
-                    num_str.push_char('.');
+                    num_str.push('.');
                 } else {
                     return Err(format_error(self.previous_position(), "unexpected '.'"))
                 },
@@ -421,7 +421,7 @@ fn parse_list<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String
 
 fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String> {
     match try!(parser.parse_string()) {
-        Some(s) => return Ok(String(s)),
+        Some(s) => return Ok(Str(s)),
         None => {}
     }
 
