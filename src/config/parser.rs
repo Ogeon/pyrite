@@ -455,7 +455,7 @@ fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, Strin
 mod test {
     use super::{
         Assign,
-        String,
+        Str,
         Number,
         List
     };
@@ -472,7 +472,7 @@ mod test {
     #[test]
     fn parse_assign_string() {
         let mut parser = super::Parser::new("path = \"helo\"".chars());
-        assert_eq!(super::parse_assign(&mut parser), Ok(Some(Assign(vec![String::from_str("path")], String(String::from_str("helo"))))));
+        assert_eq!(super::parse_assign(&mut parser), Ok(Some(Assign(vec![String::from_str("path")], Str(String::from_str("helo"))))));
     }
 
     #[test]
@@ -490,9 +490,9 @@ mod test {
     #[test]
     fn parse_assign_list() {
         let mut parser = super::Parser::new("path = [\"helo\" 42]".chars());
-        assert_eq!( super::parse_assign(&mut parser), Ok(Some(Assign( vec![String::from_str("path")], List(vec![String(String::from_str("helo")), Number(42.0)]) ))) );
+        assert_eq!( super::parse_assign(&mut parser), Ok(Some(Assign( vec![String::from_str("path")], List(vec![Str(String::from_str("helo")), Number(42.0)]) ))) );
 
         let mut parser = super::Parser::new("path = [\"helo\", 42]".chars());
-        assert_eq!( super::parse_assign(&mut parser), Ok(Some(Assign( vec![String::from_str("path")], List(vec![String(String::from_str("helo")), Number(42.0)]) ))) );
+        assert_eq!( super::parse_assign(&mut parser), Ok(Some(Assign( vec![String::from_str("path")], List(vec![Str(String::from_str("helo")), Number(42.0)]) ))) );
     }
 }
