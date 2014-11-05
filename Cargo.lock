@@ -4,7 +4,7 @@ version = "0.0.0"
 dependencies = [
  "cgmath 0.0.1 (git+https://github.com/bjz/cgmath-rs#f514fb28830ef55da8f4eccda8a1cfaf170b63f5)",
  "image 0.0.0 (git+https://github.com/PistonDevelopers/rust-image#82197dabbc055c4fc19c51e42934297b1d3b70c9)",
- "wavefront-obj 0.0.0 (git+https://github.com/PistonDevelopers/wavefront-obj#b6d65857107ac66a0e7939e9d346ca330af6a1cb)",
+ "obj-rs 0.1.0 (git+https://github.com/csherratt/obj-rs#437f5493599797e2cff1d1404b459042ce5026fd)",
 ]
 
 [[package]]
@@ -13,12 +13,20 @@ version = "0.0.1"
 source = "git+https://github.com/bjz/cgmath-rs#f514fb28830ef55da8f4eccda8a1cfaf170b63f5"
 
 [[package]]
+name = "genmesh"
+version = "0.1.0"
+source = "git+https://github.com/csherratt/genmesh.git#8fc064208cfed8ee0f6539862a8065bab7319303"
+
+[[package]]
 name = "image"
 version = "0.0.0"
 source = "git+https://github.com/PistonDevelopers/rust-image#82197dabbc055c4fc19c51e42934297b1d3b70c9"
 
 [[package]]
-name = "wavefront-obj"
-version = "0.0.0"
-source = "git+https://github.com/PistonDevelopers/wavefront-obj#b6d65857107ac66a0e7939e9d346ca330af6a1cb"
+name = "obj-rs"
+version = "0.1.0"
+source = "git+https://github.com/csherratt/obj-rs#437f5493599797e2cff1d1404b459042ce5026fd"
+dependencies = [
+ "genmesh 0.1.0 (git+https://github.com/csherratt/genmesh.git#8fc064208cfed8ee0f6539862a8065bab7319303)",
+]
 

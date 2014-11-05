@@ -3,14 +3,16 @@ use std::rand::Rng;
 use std::sync::Arc;
 use std::iter::Iterator;
 use std::collections::HashMap;
-use std::io::File;
+use std::io::{File, BufferedReader};
 use std::simd;
 
 use cgmath::{Vector, EuclideanVector, Vector3};
 use cgmath::{Ray, Ray3};
 use cgmath::{Point, Point3};
 
-use obj::obj;
+use obj;
+use genmesh;
+
 use config;
 use shapes;
 use bkdtree;
@@ -367,6 +369,10 @@ fn trace_branch<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, sample: Waveleng
 }
 
 fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: uint, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, world: &'a World, brdf: Brdf) -> Vec<f64> {
+    if world.lights.len() == 0 {
+        return Vec::from_elem(samples as uint, 0.0f64);
+    }
+
     let n = if ray_in.dot(&normal.direction) < 0.0 {
         normal.direction
     } else {
@@ -464,35 +470,33 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
                     },
                     shapes::Mesh { file, mut materials } => {
                         let path = make_path(file);
-                        let file = match File::open(&path).read_to_string() {
-                            Ok(obj) => obj,
-                            Err(e) => return Err(format!("objects: [{}]: unable to open file '{}': {}", i, path.display(), e))
-                        };
-
-                        let obj = match obj::parse(file) {
-                            Ok(obj) => obj,
-                            Err(e) => return Err(format!("objects: [{}]: parse file '{}': line {}: {}", i, path.display(), e.line_number, e.message))
-                        };
-
-                        for object in obj.objects.iter() {
+                        let mut file = BufferedReader::new(File::open(&path));
+                        let obj = obj::Obj::load(&mut file);
+                        for object in obj.object_iter() {
+                            println!("adding object '{}'", object.name);
+                            
                             let (object_material, emissive) = match materials.pop_equiv(&object.name) {
-                                    Some(v) => {
-                                        let (material, emissive): (Box<Material + 'static + Send + Sync>, bool) =
-                                            try!(context.decode_structure_from_group("Material", v));
+                                Some(v) => {
+                                    let (material, emissive): (Box<Material + 'static + Send + Sync>, bool) =
+                                        try!(context.decode_structure_from_group("Material", v));
 
-                                        (Arc::new(material), emissive)
-                                    },
-                                    None => return Err(format!("objects: [{}]: missing field '{}'", i, object.name))
-                                };
+                                    (Arc::new(material), emissive)
+                                },
+                                None => return Err(format!("objects: [{}]: missing field '{}'", i, object.name))
+                            };
 
-                            for group in object.geometry.iter() {
-                                for shape in group.shapes.iter() {
+                            for group in object.group_iter() {
+                                for shape in group.indices().iter() {
                                     match *shape {
-                                        obj::Triangle((v1, _t1), (v2, _t2), (v3, _t3)) => {
+                                        genmesh::PolyTri(genmesh::Triangle{
+                                            x: (v1, _t1, _n1),
+                                            y: (v2, _t2, _n2),
+                                            z: (v3, _t3, _n3)
+                                        }) => {
                                             let triangle = Arc::new(shapes::Triangle {
-                                                v1: convert_vertex(object.vertices[v1]),
-                                                v2: convert_vertex(object.vertices[v2]),
-                                                v3: convert_vertex(object.vertices[v3]),
+                                                v1: convert_vertex(&obj.position()[v1]),
+                                                v2: convert_vertex(&obj.position()[v2]),
+                                                v3: convert_vertex(&obj.position()[v3]),
                                                 material: object_material.clone()
                                             });
 
@@ -512,11 +516,13 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
             }
 
             println!("the scene contains {} objects", objects.len())
-
+            println!("building BKD-Tree... ")
+            let tree = bkdtree::BkdTree::new(objects, 3);
+            println!("done building BKD-Tree")
             Ok(World {
                 sky: sky,
                 lights: lights,
-                objects: box bkdtree::BkdTree::new(objects, 3) as Box<ObjectContainer + 'static + Send + Sync>
+                objects: box tree as Box<ObjectContainer + 'static + Send + Sync>
             })
         },
         config::Primitive(v) => Err(format!("unexpected {}", v)),
@@ -524,8 +530,8 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
     }
 }
 
-fn convert_vertex(vec: obj::Vertex) -> Point3<f64> {
-    Point3::new(vec.x, vec.y, vec.z)
+fn convert_vertex(&[x, y, z]: &[f32, ..3]) -> Point3<f64> {
+    Point3::new(x as f64, y as f64, z as f64)
 }
 
 pub fn decode_parametric_number<From>(context: &config::ConfigContext, item: config::ConfigItem) -> Result<Box<ParametricValue<From, f64> + 'static + Send + Sync>, String> {

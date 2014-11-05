@@ -17,6 +17,6 @@ git = "https://github.com/bjz/cgmath-rs"
 
 git = "https://github.com/PistonDevelopers/rust-image"
 
-[dependencies.wavefront-obj]
+[dependencies.obj-rs]
 
-git = "https://github.com/PistonDevelopers/wavefront-obj"
+git = "https://github.com/csherratt/obj-rs"
