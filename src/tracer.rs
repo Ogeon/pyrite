@@ -488,17 +488,8 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
                             for group in object.group_iter() {
                                 for shape in group.indices().iter() {
                                     match *shape {
-                                        genmesh::PolyTri(genmesh::Triangle{
-                                            x: (v1, _t1, _n1),
-                                            y: (v2, _t2, _n2),
-                                            z: (v3, _t3, _n3)
-                                        }) => {
-                                            let triangle = Arc::new(shapes::Triangle {
-                                                v1: convert_vertex(&obj.position()[v1]),
-                                                v2: convert_vertex(&obj.position()[v2]),
-                                                v3: convert_vertex(&obj.position()[v3]),
-                                                material: object_material.clone()
-                                            });
+                                        genmesh::PolyTri(genmesh::Triangle{x, y, z}) => {
+                                            let triangle = Arc::new(make_triangle(&obj, x, y, z, object_material.clone()));
 
                                             if emissive {
                                                 lights.push(triangle.clone());
@@ -530,8 +521,46 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
     }
 }
 
-fn convert_vertex(&[x, y, z]: &[f32, ..3]) -> Point3<f64> {
+fn vertex_to_point(&[x, y, z]: &[f32, ..3]) -> Point3<f64> {
     Point3::new(x as f64, y as f64, z as f64)
+}
+
+fn vertex_to_vector(&[x, y, z]: &[f32, ..3]) -> Vector3<f64> {
+    Vector3::new(x as f64, y as f64, z as f64)
+}
+
+fn make_triangle<M>(
+    obj: &obj::Obj<M>,
+    (v1, _t1, n1): (uint, Option<uint>, Option<uint>),
+    (v2, _t2, n2): (uint, Option<uint>, Option<uint>),
+    (v3, _t3, n3): (uint, Option<uint>, Option<uint>),
+    material: Arc<Box<Material + 'static + Send + Sync>>
+) -> shapes::Shape {
+    let v1 = vertex_to_point(&obj.position()[v1]);
+    let v2 = vertex_to_point(&obj.position()[v2]);
+    let v3 = vertex_to_point(&obj.position()[v3]);
+
+    let (n1, n2, n3) = match (n1, n2, n3) {
+        (Some(n1), Some(n2), Some(n3)) => {
+            let n1 = vertex_to_vector(&obj.normal()[n1]);
+            let n2 = vertex_to_vector(&obj.normal()[n2]);
+            let n3 = vertex_to_vector(&obj.normal()[n3]);
+            (n1, n2, n3)
+        },
+        _ => {
+            let a = v2.sub_p(&v1);
+            let b = v3.sub_p(&v1);
+            let normal = a.cross(&b).normalize();
+            (normal, normal, normal)
+        }
+    };
+
+    shapes::Triangle {
+        v1: shapes::Vertex { position: v1, normal: n1 },
+        v2: shapes::Vertex { position: v2, normal: n2 },
+        v3: shapes::Vertex { position: v3, normal: n3 },
+        material: material
+    }
 }
 
 pub fn decode_parametric_number<From>(context: &config::ConfigContext, item: config::ConfigItem) -> Result<Box<ParametricValue<From, f64> + 'static + Send + Sync>, String> {

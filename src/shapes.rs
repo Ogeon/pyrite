@@ -17,6 +17,11 @@ use config::{FromConfig, Type};
 use bkdtree;
 use materials;
 
+pub struct Vertex<S> {
+    pub position: Point3<S>,
+    pub normal: Vector3<S>
+}
+
 pub enum ProxyShape {
     DecodedShape { pub shape: Shape, pub emissive: bool },
     Mesh { pub file: String, pub materials: HashMap<String, config::ConfigItem> }
@@ -24,7 +29,7 @@ pub enum ProxyShape {
 
 pub enum Shape {
     Sphere { position: Point3<f64>, radius: f64, material: materials::MaterialBox },
-    Triangle { pub v1: Point3<f64>, pub v2: Point3<f64>, pub v3: Point3<f64>, pub material: Arc<materials::MaterialBox> }
+    Triangle { pub v1: Vertex<f64>, pub v2: Vertex<f64>, pub v3: Vertex<f64>, pub material: Arc<materials::MaterialBox> }
 }
 
 impl Shape {
@@ -42,8 +47,8 @@ impl Shape {
             Triangle {ref v1, ref v2, ref v3, ..} => {
                 //Möller–Trumbore intersection algorithm
                 let epsilon = 0.000001f64;
-                let e1 = v2.sub_p(v1);
-                let e2 = v3.sub_p(v1);
+                let e1 = v2.position.sub_p(&v1.position);
+                let e2 = v3.position.sub_p(&v1.position);
 
                 let p = ray.direction.cross(&e2);
                 let det = e1.dot(&p);
@@ -53,7 +58,7 @@ impl Shape {
                 }
 
                 let inv_det = 1.0 / det;
-                let t = ray.origin.sub_p(v1);
+                let t = ray.origin.sub_p(&v1.position);
                 let u = t.dot(&p) * inv_det;
 
                 //Outside triangle
@@ -72,7 +77,8 @@ impl Shape {
                 let dist = e2.dot(&q) * inv_det;
                 if dist > epsilon {
                     let hit_position = ray.origin.add_v(&ray.direction.mul_s(dist));
-                    Some(( dist, Ray::new(hit_position, e1.cross(&e2).normalize()) ))
+                    let normal = v1.normal.mul_s(1.0 - (u + v)).add_v(&v2.normal.mul_s(u)).add_v(&v3.normal.mul_s(v));
+                    Some(( dist, Ray::new(hit_position, normal.normalize()) ))
                 } else {
                     None
                 }
@@ -106,16 +112,19 @@ impl Shape {
                 let u: f64 = rng.gen();
                 let v = rng.gen();
 
-                let a = v2.sub_p(v1);
-                let b = v3.sub_p(v1);
+                let a = v2.position.sub_p(&v1.position);
+                let b = v3.position.sub_p(&v1.position);
 
-                let position = if u + v > 1.0 {
-                    v1.add_v(&a.mul_s(1.0 - u)).add_v(&b.mul_s(1.0 - v))
+                let (u, v) = if u + v > 1.0 {
+                    (1.0 - u, 1.0 - v)
                 } else {
-                    v1.add_v(&a.mul_s(u)).add_v(&b.mul_s(v))
+                    (u, v)
                 };
 
-                Ray::new(position, a.cross(&b).normalize())
+                let position = v1.position.add_v(&a.mul_s(u)).add_v(&b.mul_s(v));
+                let normal = v1.normal.mul_s(1.0 - (u + v)).add_v(&v2.normal.mul_s(u)).add_v(&v3.normal.mul_s(v));
+
+                Ray::new(position, normal.normalize())
             }
         }
     }
@@ -124,8 +133,8 @@ impl Shape {
         match *self {
             Sphere { radius, .. } => radius * radius * 4.0 * std::f64::consts::PI,
             Triangle { ref v1, ref v2, ref v3, .. } => {
-                let a = v2.sub_p(v1);
-                let b = v3.sub_p(v1);
+                let a = v2.position.sub_p(&v1.position);
+                let b = v3.position.sub_p(&v1.position);
                 0.5 * a.cross(&b).length()
             }
         }
@@ -141,8 +150,8 @@ impl<'a> bkdtree::Element<tracer::BkdRay<'a>, Ray3<f64>> for Arc<Shape> {
                 _ => (position.z - radius, position.z + radius)
             },
             Triangle { ref v1, ref v2, ref v3, .. } => {
-                let min = v1.min(v2).min(v3);
-                let max = v1.max(v2).max(v3);
+                let min = v1.position.min(&v2.position).min(&v3.position);
+                let max = v1.position.max(&v2.position).max(&v3.position);
 
                 match axis {
                     0 => (min.x, max.x),
