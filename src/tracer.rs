@@ -1,10 +1,10 @@
 use std;
 use std::rand::Rng;
 use std::sync::Arc;
-use std::iter::Iterator;
 use std::collections::HashMap;
 use std::io::{File, BufferedReader};
 use std::simd;
+use std::num::{Float, FloatMath};
 
 use cgmath::{Vector, EuclideanVector, Vector3};
 use cgmath::{Ray, Ray3};
@@ -16,6 +16,8 @@ use genmesh;
 use config;
 use shapes;
 use bkdtree;
+
+pub use self::Reflection::{Reflect, Emit, Disperse};
 
 pub type Brdf = fn(ray_in: &Vector3<f64>, ray_out: &Vector3<f64>, normal: &Vector3<f64>) -> f64;
 
@@ -107,7 +109,7 @@ pub enum Sky {
 impl Sky {
     pub fn color(&self, _direction: &Vector3<f64>) -> &ParametricValue<RenderContext, f64> {
         match *self {
-            Color(ref c) => & **c,
+            Sky::Color(ref c) => & **c,
         }
     }
 }
@@ -197,7 +199,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                             wavelengths.swap_remove(i);
                             sample.map(|sample| completed.push(sample));
                         } else {
-                            let &WavelengthSample {ref mut reflectance, ref mut sample_light, ..} = traced.get_mut(i);
+                            let &WavelengthSample {ref mut reflectance, ref mut sample_light, ..} = &mut traced[i];
                             *reflectance = new_reflectance;
                             *sample_light = brdf.is_none() || *sample_light;
                             i += 1;
@@ -434,23 +436,23 @@ pub fn register_types(context: &mut config::ConfigContext) {
 fn decode_sky_color(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Sky, String> {
     let mut fields = fields;
 
-    let color = match fields.pop_equiv(&"color") {
+    let color = match fields.remove("color") {
         Some(v) => try!(decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
     };
 
-    Ok(Color(color))
+    Ok(Sky::Color(color))
 }
 
 pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, make_path: |String| -> Path) -> Result<World, String> {
     match item {
         config::Structure(_, mut fields) => {
-            let sky = match fields.pop_equiv(&"sky") {
+            let sky = match fields.remove("sky") {
                 Some(v) => try!(context.decode_structure_from_group("Sky", v), "sky"),
                 None => return Err(String::from_str("missing field 'sky'"))
             };
 
-            let object_protos = match fields.pop_equiv(&"objects") {
+            let object_protos = match fields.remove("objects") {
                 Some(v) => try!(v.into_list(), "objects"),
                 None => return Err(String::from_str("missing field 'objects'"))
             };
@@ -475,7 +477,7 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
                         for object in obj.object_iter() {
                             println!("adding object '{}'", object.name);
                             
-                            let (object_material, emissive) = match materials.pop_equiv(&object.name) {
+                            let (object_material, emissive) = match materials.remove(&object.name) {
                                 Some(v) => {
                                     let (material, emissive): (Box<Material + 'static + Send + Sync>, bool) =
                                         try!(context.decode_structure_from_group("Material", v));
@@ -488,7 +490,7 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
                             for group in object.group_iter() {
                                 for shape in group.indices().iter() {
                                     match *shape {
-                                        genmesh::PolyTri(genmesh::Triangle{x, y, z}) => {
+                                        genmesh::Polygon::PolyTri(genmesh::Triangle{x, y, z}) => {
                                             let triangle = Arc::new(make_triangle(&obj, x, y, z, object_material.clone()));
 
                                             if emissive {
@@ -574,7 +576,7 @@ pub fn decode_parametric_number<From>(context: &config::ConfigContext, item: con
 
     match item {
         config::Structure(..) => context.decode_structure_from_groups(group_names, item),
-        config::Primitive(config::parser::Number(n)) => Ok(box n as Box<ParametricValue<From, f64> + 'static + Send + Sync>),
+        config::Primitive(config::parser::Value::Number(n)) => Ok(box n as Box<ParametricValue<From, f64> + 'static + Send + Sync>),
         v => return Err(format!("expected a number or a structure from group {}, but found {}", name_collection, v))
     }
 }

@@ -18,7 +18,7 @@ macro_rules! try_io(
     ($e:expr) => (
         match $e {
             Ok(v) => v,
-            Err(e) => return IoError(e)
+            Err(e) => return ParseResult::IoError(e)
         }
     )
 )
@@ -27,14 +27,14 @@ macro_rules! try_parse(
     ($e:expr) => (
         match $e {
             Ok(v) => v,
-            Err(e) => return ParseError(e)
+            Err(e) => return ParseResult::ParseError(e)
         }
     );
 
     ($e:expr, $under:expr) => (
         match $e {
             Ok(v) => v,
-            Err(e) => return ParseError(format!("{}: {}", $under, e))
+            Err(e) => return ParseResult::ParseError(format!("{}: {}", $under, e))
         }
     )
 )
@@ -81,29 +81,29 @@ pub fn from_file(path: &Path) -> ParseResult<Project> {
     math::register_specific_types(&mut context);
     register_types(&mut context);
 
-    let image_spec = match config.pop_equiv(&"image") {
+    let image_spec = match config.remove("image") {
         Some(v) => try_parse!(decode_image_spec(&context, v), "image"),
-        None => return ParseError(String::from_str("missing image specifications"))
+        None => return ParseResult::ParseError(String::from_str("missing image specifications"))
     };
 
-    let renderer = match config.pop_equiv(&"renderer") {
+    let renderer = match config.remove("renderer") {
         Some(v) => try_parse!(context.decode_structure_from_group("Renderer", v), "renderer"),
-        None => return ParseError(String::from_str("missing renderer specifications"))
+        None => return ParseResult::ParseError(String::from_str("missing renderer specifications"))
     };
 
-    let camera = match config.pop_equiv(&"camera") {
+    let camera = match config.remove("camera") {
         Some(v) => try_parse!(context.decode_structure_from_group("Camera", v), "camera"),
-        None => return ParseError(String::from_str("missing camera specifications"))
+        None => return ParseResult::ParseError(String::from_str("missing camera specifications"))
     };
 
-    let world = match config.pop_equiv(&"world") {
+    let world = match config.remove("world") {
         Some(v) => try_parse!(tracer::decode_world(&context, v, |source| {
             path.dir_path().join(Path::new(source.as_slice()))
         }), "world"),
-        None => return ParseError(String::from_str("missing world specifications"))
+        None => return ParseResult::ParseError(String::from_str("missing world specifications"))
     };
 
-    Success(Project {
+    ParseResult::Success(Project {
         image: image_spec,
         renderer: renderer,
         camera: camera,
@@ -128,22 +128,22 @@ pub struct ImageSpec {
 fn decode_image_spec(context: &config::ConfigContext, item: config::ConfigItem) -> Result<ImageSpec, String> {
     match item {
         config::Structure(_, mut fields) => {
-            let width = match fields.pop_equiv(&"width") {
+            let width = match fields.remove("width") {
                 Some(v) => try!(FromConfig::from_config(v), "width"),
                 None => return Err(String::from_str("missing field 'width'"))
             };
 
-            let height = match fields.pop_equiv(&"height") {
+            let height = match fields.remove("height") {
                 Some(v) => try!(FromConfig::from_config(v), "height"),
                 None => return Err(String::from_str("missing field 'height'"))
             };
 
-            let format = match fields.pop_equiv(&"format") {
+            let format = match fields.remove("format") {
                 Some(v) => try!(context.decode_structure_from_group("Image", v), "format"),
                 None => return Err(String::from_str("missing field 'format'"))
             };
 
-            let rgb_curves = match fields.pop_equiv(&"rgb_curves") {
+            let rgb_curves = match fields.remove("rgb_curves") {
                 Some(config::Structure(_, f)) => try!(decode_rgb_curves(f), "rgb_curves"),
                 Some(_) => return Err(format!("expected a structure")),
                 None => return Err(String::from_str("missing field 'rgb_curves'"))
@@ -164,17 +164,17 @@ fn decode_image_spec(context: &config::ConfigContext, item: config::ConfigItem) 
 fn decode_rgb_curves(fields: HashMap<String, config::ConfigItem>) -> Result<(Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>), String> {
     let mut fields = fields;
 
-    let red = match fields.pop_equiv(&"red") {
+    let red = match fields.remove("red") {
         Some(v) => try!(FromConfig::from_config(v), "red"),
         None => return Err(String::from_str("missing field 'red'"))
     };
 
-    let green = match fields.pop_equiv(&"green") {
+    let green = match fields.remove("green") {
         Some(v) => try!(FromConfig::from_config(v), "green"),
         None => return Err(String::from_str("missing field 'green'"))
     };
         
-    let blue = match fields.pop_equiv(&"blue") {
+    let blue = match fields.remove("blue") {
         Some(v) => try!(FromConfig::from_config(v), "blue"),
         None => return Err(String::from_str("missing field 'blue'"))
     };
@@ -191,5 +191,5 @@ pub enum ImageFormat {
 }
 
 fn decode_png(_context: &config::ConfigContext, _items: HashMap<String, config::ConfigItem>) -> Result<ImageFormat, String> {
-    Ok(Png)
+    Ok(ImageFormat::Png)
 }

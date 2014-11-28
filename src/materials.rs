@@ -1,5 +1,6 @@
 use std;
 use std::collections::HashMap;
+use std::num::{Float, FloatMath};
 
 use cgmath::{EuclideanVector, Vector, Vector3};
 use cgmath::{Ray, Ray3};
@@ -146,7 +147,7 @@ impl Material for FresnelMix {
                 let wl = wl * 0.001;
                 let ior = self.ior + self.dispersion / (wl * wl);
                 let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
-                let wavelengths = [wl];
+                let wavelengths = &[wl];
                 let child = fresnel_mix(ior, env_ior, &self.reflect, &self.refract, &ray_in.direction, normal, rng);
                 child.reflect(wavelengths, ray_in, normal, rng)
             }).collect();
@@ -273,7 +274,7 @@ pub fn register_types(context: &mut config::ConfigContext) {
 pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
-    let color = match fields.pop_equiv(&"color") {
+    let color = match fields.remove("color") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
     };
@@ -284,7 +285,7 @@ pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, c
 pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
-    let color = match fields.pop_equiv(&"color") {
+    let color = match fields.remove("color") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
     };
@@ -295,7 +296,7 @@ pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, 
 pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
-    let color = match fields.pop_equiv(&"color") {
+    let color = match fields.remove("color") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
     };
@@ -306,17 +307,17 @@ pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, co
 pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
-    let factor = match fields.pop_equiv(&"factor") {
+    let factor = match fields.remove("factor") {
         Some(v) => try!(FromConfig::from_config(v), "factor"),
         None => return Err(String::from_str("missing field 'factor'"))
     };
 
-    let (a, a_emissive): (MaterialBox, bool) = match fields.pop_equiv(&"a") {
+    let (a, a_emissive): (MaterialBox, bool) = match fields.remove("a") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "a"),
         None => return Err(String::from_str("missing field 'a'"))
     };
 
-    let (b, b_emissive): (MaterialBox, bool) = match fields.pop_equiv(&"b") {
+    let (b, b_emissive): (MaterialBox, bool) = match fields.remove("b") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "b"),
         None => return Err(String::from_str("missing field 'b'"))
     };
@@ -331,32 +332,32 @@ pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, confi
 pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
-    let ior = match fields.pop_equiv(&"ior") {
+    let ior = match fields.remove("ior") {
         Some(v) => try!(FromConfig::from_config(v), "ior"),
         None => return Err(String::from_str("missing field 'ior'"))
     };
 
-    let env_ior = match fields.pop_equiv(&"env_ior") {
+    let env_ior = match fields.remove("env_ior") {
         Some(v) => try!(FromConfig::from_config(v), "env_ior"),
         None => 1.0
     };
 
-    let dispersion = match fields.pop_equiv(&"dispersion") {
+    let dispersion = match fields.remove("dispersion") {
         Some(v) => try!(FromConfig::from_config(v), "dispersion"),
         None => 0.0
     };
 
-    let env_dispersion = match fields.pop_equiv(&"env_dispersion") {
+    let env_dispersion = match fields.remove("env_dispersion") {
         Some(v) => try!(FromConfig::from_config(v), "env_dispersion"),
         None => 0.0
     };
 
-    let (reflect, reflect_emissive): (MaterialBox, bool) = match fields.pop_equiv(&"reflect") {
+    let (reflect, reflect_emissive): (MaterialBox, bool) = match fields.remove("reflect") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "reflect"),
         None => return Err(String::from_str("missing field 'reflect'"))
     };
 
-    let (refract, refract_emissive): (MaterialBox, bool) = match fields.pop_equiv(&"refract") {
+    let (refract, refract_emissive): (MaterialBox, bool) = match fields.remove("refract") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "refract"),
         None => return Err(String::from_str("missing field 'refract'"))
     };
@@ -374,27 +375,27 @@ pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<Strin
 pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
     let mut fields = fields;
 
-    let ior = match fields.pop_equiv(&"ior") {
+    let ior = match fields.remove("ior") {
         Some(v) => try!(FromConfig::from_config(v), "ior"),
         None => return Err(String::from_str("missing field 'ior'"))
     };
 
-    let env_ior = match fields.pop_equiv(&"env_ior") {
+    let env_ior = match fields.remove("env_ior") {
         Some(v) => try!(FromConfig::from_config(v), "env_ior"),
         None => 1.0
     };
 
-    let dispersion = match fields.pop_equiv(&"dispersion") {
+    let dispersion = match fields.remove("dispersion") {
         Some(v) => try!(FromConfig::from_config(v), "dispersion"),
         None => 0.0
     };
 
-    let env_dispersion = match fields.pop_equiv(&"env_dispersion") {
+    let env_dispersion = match fields.remove("env_dispersion") {
         Some(v) => try!(FromConfig::from_config(v), "env_dispersion"),
         None => 0.0
     };
 
-    let color = match fields.pop_equiv(&"color") {
+    let color = match fields.remove("color") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
         None => return Err(String::from_str("missing field 'color'"))
     };

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::num::{Float, FloatMath};
 
 use cgmath::Vector;
 
@@ -35,7 +36,7 @@ macro_rules! make_operators(
                 let mut fields = fields;
 
                 $(
-                    let $arg = match fields.pop_equiv(&stringify!($arg)) {
+                    let $arg = match fields.remove(stringify!($arg)) {
                         Some(v) => try!(tracer::decode_parametric_number(context, v), stringify!($arg)),
                         None => return Err(format!("missing field '{}'", stringify!($arg)))
                     };
@@ -55,6 +56,7 @@ macro_rules! make_operators(
 )
 
 pub mod utils {
+    use std::num::Float;
     use cgmath::{Vector, Vector3};
 
     pub struct Interpolated {
@@ -164,12 +166,12 @@ impl<From> tracer::ParametricValue<From, f64> for Curve<From> {
 fn decode_curve<From>(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<From, f64> + 'static + Send + Sync>, String> {
     let mut fields = fields;
 
-    let input = match fields.pop_equiv(&"input") {
+    let input = match fields.remove("input") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "input"),
         None => return Err(String::from_str("missing field 'input'"))
     };
 
-    let points = match fields.pop_equiv(&"points") {
+    let points = match fields.remove("points") {
         Some(v) => try!(FromConfig::from_config(v), "points"),
         None => return Err(String::from_str("missing field 'points'"))
     };
@@ -196,7 +198,7 @@ impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
         if incident.dot(normal) < 0.0 {
             utils::schlick(self.env_ior.get(i), self.ior.get(i), normal, incident)
         } else {
-            utils::schlick(self.ior.get(i), self.env_ior.get(i), &-normal, incident)
+            utils::schlick(self.ior.get(i), self.env_ior.get(i), &-*normal, incident)
         }
     }
 }
@@ -204,12 +206,12 @@ impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
 fn decode_fresnel(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>, String> {
     let mut fields = fields;
 
-    let ior = match fields.pop_equiv(&"ior") {
+    let ior = match fields.remove("ior") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "ior"),
         None => return Err(String::from_str("missing field 'ior'"))
     };
 
-    let env_ior = match fields.pop_equiv(&"env_ior") {
+    let env_ior = match fields.remove("env_ior") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "env_ior"),
         None => box 1.0f64 as Box<tracer::ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
     };

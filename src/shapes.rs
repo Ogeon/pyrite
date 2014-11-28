@@ -1,6 +1,7 @@
 use std;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::num::FloatMath;
 
 use cgmath;
 use cgmath::{Vector, EuclideanVector, Vector3};
@@ -17,19 +18,22 @@ use config::{FromConfig, Type};
 use bkdtree;
 use materials;
 
+pub use self::Shape::{Sphere, Triangle};
+pub use self::ProxyShape::{DecodedShape, Mesh};
+
 pub struct Vertex<S> {
     pub position: Point3<S>,
     pub normal: Vector3<S>
 }
 
 pub enum ProxyShape {
-    DecodedShape { pub shape: Shape, pub emissive: bool },
-    Mesh { pub file: String, pub materials: HashMap<String, config::ConfigItem> }
+    DecodedShape { shape: Shape, emissive: bool },
+    Mesh { file: String, materials: HashMap<String, config::ConfigItem> }
 }
 
 pub enum Shape {
     Sphere { position: Point3<f64>, radius: f64, material: materials::MaterialBox },
-    Triangle { pub v1: Vertex<f64>, pub v2: Vertex<f64>, pub v3: Vertex<f64>, pub material: Arc<materials::MaterialBox> }
+    Triangle { v1: Vertex<f64>, v2: Vertex<f64>, v3: Vertex<f64>, material: Arc<materials::MaterialBox> }
 }
 
 impl Shape {
@@ -178,17 +182,17 @@ pub fn register_types(context: &mut config::ConfigContext) {
 fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<ProxyShape, String> {
     let mut items = items;
 
-    let position = match items.pop_equiv(&"position") {
+    let position = match items.remove("position") {
         Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "position"),
         None => return Err(String::from_str("missing field 'position'"))
     };
 
-    let radius = match items.pop_equiv(&"radius") {
+    let radius = match items.remove("radius") {
         Some(v) => try!(FromConfig::from_config(v), "radius"),
         None => return Err(String::from_str("missing field 'radius'"))
     };
 
-    let (material, emissive): (materials::MaterialBox, bool) = match items.pop_equiv(&"material") {
+    let (material, emissive): (materials::MaterialBox, bool) = match items.remove("material") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "material"),
         None => return Err(String::from_str("missing field 'material'"))
     };
@@ -206,12 +210,12 @@ fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config:
 fn decode_mesh(_context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<ProxyShape, String> {
     let mut items = items;
 
-    let file_name: String = match items.pop_equiv(&"file") {
+    let file_name: String = match items.remove("file") {
         Some(v) => try!(FromConfig::from_config(v), "file"),
         None => return Err(String::from_str("missing field 'file'"))
     };
 
-    let materials = match items.pop_equiv(&"materials") {
+    let materials = match items.remove("materials") {
         Some(config::Structure(_, fields)) => fields,
         Some(v) => return Err(format!("materials: expected a structure, but found '{}'", v)),
         None => return Err(String::from_str("missing field 'materials'"))

@@ -1,9 +1,11 @@
 use std::collections::HashMap;
-use std::collections::hashmap::{Vacant, Occupied};
+use std::collections::hash_map::{Vacant, Occupied};
 use std::any::{Any, AnyRefExt};
 use std::str::StrAllocating;
 use std::fmt;
 use std::str::Str;
+
+pub use self::ConfigItem::{Primitive, List, Structure};
 
 pub mod parser;
 
@@ -16,7 +18,7 @@ pub fn parse<C: Iterator<char>>(source: C, include: &mut IncludeFn) -> Result<Ha
 
     for instruction in try!(instructions).into_iter() {
         try!(match instruction {
-            parser::Assign(path, parser::Struct(template, instructions)) => {
+            parser::Action::Assign(path, parser::Value::Struct(template, instructions)) => {
                 if instructions.len() == 0 {
                     match try!(deep_find(&items, &template).map(|v| v.map(|v| (*v).clone()))) {
                         Some(v) => deep_insert(&mut items, path.as_slice(), v),
@@ -31,13 +33,13 @@ pub fn parse<C: Iterator<char>>(source: C, include: &mut IncludeFn) -> Result<Ha
                     }
                 }
             },
-            parser::Assign(path, parser::List(elements)) => {
+            parser::Action::Assign(path, parser::Value::List(elements)) => {
                 let elements = try!(evaluate_list(elements, &items, include), path.as_slice().connect("."));
 
                 deep_insert(&mut items, path.as_slice(), List(elements))
             },
-            parser::Assign(path, primitive) => deep_insert(&mut items, path.as_slice(), Primitive(primitive)),
-            parser::Include(source, path) => {
+            parser::Action::Assign(path, primitive) => deep_insert(&mut items, path.as_slice(), Primitive(primitive)),
+            parser::Action::Include(source, path) => {
                 let (code, source_path) = try!((*include)(&source));
                 let path = match path {
                     Some(path) => path,
@@ -48,7 +50,7 @@ pub fn parse<C: Iterator<char>>(source: C, include: &mut IncludeFn) -> Result<Ha
                     return Err(format!("{} could not be turned into a path", source));
                 } else {
                     let sub_structure = try!(parse(code.as_slice().chars(), include), source);
-                    deep_insert(&mut items, path.as_slice(), Structure(Untyped, sub_structure))
+                    deep_insert(&mut items, path.as_slice(), Structure(Type::Untyped, sub_structure))
                 }
             }
         })
@@ -60,7 +62,7 @@ pub fn parse<C: Iterator<char>>(source: C, include: &mut IncludeFn) -> Result<Ha
 fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, ConfigItem>, context: &HashMap<String, ConfigItem>, include: &mut IncludeFn) -> Result<(), String> {
     for instruction in instructions.into_iter() {
         try!(match instruction {
-            parser::Assign(path, parser::Struct(template, instructions)) => {
+            parser::Action::Assign(path, parser::Value::Struct(template, instructions)) => {
                 if instructions.len() == 0 {
                     match try!(deep_find(context, &template).map(|v| v.map(|v| (*v).clone()))) {
                         Some(v) => deep_insert(scope, path.as_slice(), v),
@@ -75,13 +77,13 @@ fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, Confi
                     }
                 }
             },
-            parser::Assign(path, parser::List(elements)) => {
+            parser::Action::Assign(path, parser::Value::List(elements)) => {
                 let elements = try!(evaluate_list(elements, context, include), path.as_slice().connect("."));
 
                 deep_insert(scope, path.as_slice(), List(elements))
             },
-            parser::Assign(path, primitive) => deep_insert(scope, path.as_slice(), Primitive(primitive)),
-            parser::Include(source, path) => {
+            parser::Action::Assign(path, primitive) => deep_insert(scope, path.as_slice(), Primitive(primitive)),
+            parser::Action::Include(source, path) => {
                 let (code, source_path) = try!((*include)(&source));
                 let path = match path {
                     Some(path) => path,
@@ -92,7 +94,7 @@ fn evaluate(instructions: Vec<parser::Action>, scope: &mut HashMap<String, Confi
                     return Err(format!("{} could not be turned into a path", source));
                 } else {
                     let sub_structure = try!(parse(code.as_slice().chars(), include), source);
-                    deep_insert(scope, path.as_slice(), Structure(Untyped, sub_structure))
+                    deep_insert(scope, path.as_slice(), Structure(Type::Untyped, sub_structure))
                 }
             }
         })
@@ -105,7 +107,7 @@ fn evaluate_list(elements: Vec<parser::Value>, context: &HashMap<String, ConfigI
     let mut result = Vec::new();
     for (i, v) in elements.into_iter().enumerate() {
         match v {
-            parser::Struct(template, instructions) => {
+            parser::Value::Struct(template, instructions) => {
                 let (ty, mut fields) = try!(get_template(context, &template), format!("[{}]", i));
 
                 match evaluate(instructions, &mut fields, context, include) {
@@ -113,7 +115,7 @@ fn evaluate_list(elements: Vec<parser::Value>, context: &HashMap<String, ConfigI
                     Err(e) => return Err(format!("[{}]: {}", i, e))
                 }
             },
-            parser::List(elements) => result.push(List(try!(evaluate_list(elements, context, include), format!("[{}]", i)))),
+            parser::Value::List(elements) => result.push(List(try!(evaluate_list(elements, context, include), format!("[{}]", i)))),
             primitive => result.push(Primitive(primitive))
         }
     }
@@ -132,9 +134,9 @@ fn get_template(context: &HashMap<String, ConfigItem>, template: &Vec<String>) -
 
 fn get_typename(template: &Vec<String>) -> Result<Type, String> {
     match template.as_slice() {
-        [ref type_name] => Ok(Single(type_name.clone())),
-        [ref group_name, ref type_name] => Ok(Grouped(group_name.clone(), type_name.clone())),
-        [] => Ok(Untyped),
+        [ref type_name] => Ok(Type::Single(type_name.clone())),
+        [ref group_name, ref type_name] => Ok(Type::Grouped(group_name.clone(), type_name.clone())),
+        [] => Ok(Type::Untyped),
         _ => Err(format!("'{}' is not a valid type name", template.as_slice().connect(".")))
     }
 }
@@ -147,7 +149,7 @@ fn deep_insert(items: &mut HashMap<String, ConfigItem>, path: &[String], item: C
         },
         [ref segment, rest..] => {
             let parent = match items.entry(segment.clone()) {
-                Vacant(entry) => entry.set(Structure(Untyped, HashMap::new())),
+                Vacant(entry) => entry.set(Structure(Type::Untyped, HashMap::new())),
                 Occupied(entry) => entry.into_mut()
             };
 
@@ -167,7 +169,7 @@ fn deep_find<'a>(items: &'a HashMap<String, ConfigItem>, path: &Vec<String>) -> 
     let end = path.len() - 1;
 
     for (i, segment) in path.iter().enumerate() {
-        result = items.find(&segment.clone());
+        result = items.get(&segment.clone());
         if i < end {
             items = match result {
                 Some(&Structure(_, ref fields)) => fields,
@@ -199,7 +201,7 @@ impl ConfigContext {
     pub fn insert_type<T: 'static, Ty: StrAllocating>(&mut self, type_name: Ty, decoder: DecoderFn<T>) -> bool {
         let type_name = type_name.into_string();
 
-        self.types.insert(type_name, box Decoder(decoder) as Box<Any>)
+        self.types.insert(type_name, box Decoder(decoder) as Box<Any>).is_some()
     }
 
     pub fn insert_grouped_type<T: 'static, Gr: StrAllocating, Ty: StrAllocating>(&mut self, group_name: Gr, type_name: Ty, decoder: DecoderFn<T>) -> bool {
@@ -210,15 +212,15 @@ impl ConfigContext {
             Occupied(entry) => entry.into_mut()
         };
         
-        group.insert(type_name, box Decoder(decoder) as Box<Any>)
+        group.insert(type_name, box Decoder(decoder) as Box<Any>).is_some()
     }
 
     pub fn decode_structure_from_group<T: 'static, Gr: StrAllocating>(&self, group_name: Gr, item: ConfigItem) -> Result<T, String> {
         let group_name = group_name.into_string();
 
         match item {
-            Structure(Grouped(item_group_name, type_name), fields) => if group_name == item_group_name {
-                self.decode_structure(&Grouped(group_name, type_name), fields)
+            Structure(Type::Grouped(item_group_name, type_name), fields) => if group_name == item_group_name {
+                self.decode_structure(&Type::Grouped(group_name, type_name), fields)
             } else {
                 Err(format!("expected a structure from group '{}', but found structure of type '{}.{}'", group_name, item_group_name, type_name))
             },
@@ -236,8 +238,8 @@ impl ConfigContext {
         };
 
         match item {
-            Structure(Grouped(group_name, type_name), fields) => if group_names.contains(&group_name) {
-                self.decode_structure(&Grouped(group_name, type_name), fields)
+            Structure(Type::Grouped(group_name, type_name), fields) => if group_names.contains(&group_name) {
+                self.decode_structure(&Type::Grouped(group_name, type_name), fields)
             } else {
                 Err(format!("expected a structure from group {}, but found structure of type '{}.{}'", group_names, group_name, type_name))
             },
@@ -258,8 +260,8 @@ impl ConfigContext {
 
     fn decode_structure<T: 'static>(&self, structure_type: &Type, fields: HashMap<String, ConfigItem>) -> Result<T, String> {
         match *structure_type {
-            Single(ref type_name) => {
-                match self.types.find(type_name) {
+            Type::Single(ref type_name) => {
+                match self.types.get(type_name) {
                     Some(decoder) => match decoder.downcast_ref::<Decoder<T>>() {
                         Some(decoder) => decoder.decode(self, fields),
                         None => Err(format!("type cannot be decoded as '{}'", type_name))
@@ -267,8 +269,8 @@ impl ConfigContext {
                     None => Err(format!("unknown type '{}'", type_name))
                 }
             },
-            Grouped(ref group_name, ref type_name) => {
-                match self.groups.find(group_name).and_then(|group| group.find(type_name)) {
+            Type::Grouped(ref group_name, ref type_name) => {
+                match self.groups.get(group_name).and_then(|group| group.get(type_name)) {
                     Some(decoder) => match decoder.downcast_ref::<Decoder<T>>() {
                         Some(decoder) => decoder.decode(self, fields),
                         None => Err(format!("type cannot be decoded as '{}.{}'", group_name, type_name))
@@ -302,16 +304,16 @@ pub enum Type {
 
 impl Type {
     pub fn single<Ty: StrAllocating>(type_name: Ty) -> Type {
-        Single(type_name.into_string())
+        Type::Single(type_name.into_string())
     }
 }
 
 impl fmt::Show for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Single(ref type_name) => write!(f, "structure of type '{}'", type_name),
-            Grouped(ref group_name, ref type_name) => write!(f, "structure of type '{}.{}'", group_name, type_name),
-            Untyped => write!(f, "untyped structure")
+            Type::Single(ref type_name) => write!(f, "structure of type '{}'", type_name),
+            Type::Grouped(ref group_name, ref type_name) => write!(f, "structure of type '{}.{}'", group_name, type_name),
+            Type::Untyped => write!(f, "untyped structure")
         }
     }
 }
@@ -367,7 +369,7 @@ pub trait FromConfig {
 impl FromConfig for f64 {
     fn from_primitive(item: PrimitiveType) -> Result<f64, String> {
         match item {
-            parser::Number(f) => Ok(f),
+            parser::Value::Number(f) => Ok(f),
             _ => Err(String::from_str("expected a number"))
         }
     }
@@ -376,7 +378,7 @@ impl FromConfig for f64 {
 impl FromConfig for f32 {
     fn from_primitive(item: PrimitiveType) -> Result<f32, String> {
         match item {
-            parser::Number(f) => Ok(f as f32),
+            parser::Value::Number(f) => Ok(f as f32),
             _ => Err(String::from_str("expected a number"))
         }
     }
@@ -385,8 +387,8 @@ impl FromConfig for f32 {
 impl FromConfig for uint {
     fn from_primitive(item: PrimitiveType) -> Result<uint, String> {
         match item {
-            parser::Number(f) if f >= 0.0 => Ok(f as uint),
-            parser::Number(_) => Err(String::from_str("expected a positive integer")),
+            parser::Value::Number(f) if f >= 0.0 => Ok(f as uint),
+            parser::Value::Number(_) => Err(String::from_str("expected a positive integer")),
             _ => Err(String::from_str("expected a number"))
         }
     }
@@ -395,7 +397,7 @@ impl FromConfig for uint {
 impl FromConfig for String {
     fn from_primitive(item: PrimitiveType) -> Result<String, String> {
         match item {
-            parser::Str(s) => Ok(s),
+            parser::Value::Str(s) => Ok(s),
             _ => Err(String::from_str("expected a string"))
         }
     }

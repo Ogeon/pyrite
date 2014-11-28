@@ -5,6 +5,7 @@ use std::rand;
 use std::rand::{Rng, XorShiftRng};
 use std::iter::Enumerate;
 use std::slice::Items;
+use std::num::{Float, FloatMath};
 
 use cgmath::{Vector, EuclideanVector, Vector2};
 
@@ -51,7 +52,7 @@ enum RenderAlgorithm {
 impl RenderAlgorithm {
     pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>, spectrum_bins: uint, (spectrum_min, spectrum_max): (f64, f64)) -> Vec<Tile> {
         match *self {
-            Simple {tile_size, ..} => {
+            RenderAlgorithm::Simple {tile_size, ..} => {
                 let tiles_x = (image_size.x as f32 / tile_size as f32).ceil() as uint;
                 let tiles_y = (image_size.y as f32 / tile_size as f32).ceil() as uint;
 
@@ -82,7 +83,7 @@ impl RenderAlgorithm {
 
     pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World, renderer: &Renderer) {
         match *self {
-            Simple {..} => {
+            RenderAlgorithm::Simple {..} => {
                 let mut rng: XorShiftRng = rand::task_rng().gen();
 
                 for _ in range(0, tile.pixel_count() * renderer.pixel_samples) {
@@ -109,27 +110,27 @@ impl RenderAlgorithm {
 fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>, algorithm: RenderAlgorithm) -> Result<Renderer, String> {
     let mut items = items;
 
-    let threads = match items.pop_equiv(&"threads") {
+    let threads = match items.remove("threads") {
         Some(v) => try!(FromConfig::from_config(v), "threads"),
         None => std::rt::default_sched_threads()
     };
 
-    let bounces = match items.pop_equiv(&"bounces") {
+    let bounces = match items.remove("bounces") {
         Some(v) => try!(FromConfig::from_config(v), "bounces"),
         None => 8
     };
 
-    let pixel_samples = match items.pop_equiv(&"pixel_samples") {
+    let pixel_samples = match items.remove("pixel_samples") {
         Some(v) => try!(FromConfig::from_config(v), "pixel_samples"),
         None => 10
     };
 
-    let light_samples = match items.pop_equiv(&"light_samples") {
+    let light_samples = match items.remove("light_samples") {
         Some(v) => try!(FromConfig::from_config(v), "light_samples"),
         None => 4
     };
 
-    let (spectrum_samples, spectrum_bins, spectrum_span) = match items.pop_equiv(&"spectrum") {
+    let (spectrum_samples, spectrum_bins, spectrum_span) = match items.remove("spectrum") {
         Some(config::Structure(_, v)) => try!(decode_spectrum(v), "spectrum"),
         Some(v) => return Err(format!("spectrum: expected a structure, but found {}", v)),
         None => (DEFAULT_SPECTRUM_SAMPLES, DEFAULT_SPECTRUM_BINS, DEFAULT_SPECTRUM_SPAN)
@@ -152,17 +153,17 @@ fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, conf
 fn decode_spectrum(items: HashMap<String, config::ConfigItem>) -> Result<(uint, uint, (f64, f64)), String> {
     let mut items = items;
 
-    let samples = match items.pop_equiv(&"samples") {
+    let samples = match items.remove("samples") {
         Some(v) => try!(FromConfig::from_config(v), "samples"),
         None => DEFAULT_SPECTRUM_SAMPLES
     };
 
-    let bins = match items.pop_equiv(&"bins") {
+    let bins = match items.remove("bins") {
         Some(v) => try!(FromConfig::from_config(v), "bins"),
         None => DEFAULT_SPECTRUM_BINS
     };
 
-    let span = match items.pop_equiv(&"span") {
+    let span = match items.remove("span") {
         Some(v) => try!(FromConfig::from_config(v), "span"),
         None => DEFAULT_SPECTRUM_SPAN
     };
@@ -173,12 +174,12 @@ fn decode_spectrum(items: HashMap<String, config::ConfigItem>) -> Result<(uint, 
 fn decode_simple(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Renderer, String> {
     let mut items = items;
 
-    let tile_size = match items.pop_equiv(&"tile_size") {
+    let tile_size = match items.remove("tile_size") {
         Some(v) => try!(FromConfig::from_config(v), "tile_size"),
         None => 64
     };
 
-    let algorithm = Simple {
+    let algorithm = RenderAlgorithm::Simple {
         tile_size: tile_size,
     };
 
@@ -355,12 +356,12 @@ impl Tile {
         let offset = position.sub_v(&self.camera_area.from);
         let x = (offset.x * self.screen_camera_ratio.x) as uint;
         let y = (offset.y * self.screen_camera_ratio.y) as uint;
-        let &Pixel{spectrum: ref mut spectrum} = self.pixels.get_mut(x + y * self.screen_area.size.x);
+        let &Pixel{ref mut spectrum} = &mut self.pixels[x + y * self.screen_area.size.x];
 
         let index = ((sample.wavelength - self.wavelength_from) / self.wavelength_width * spectrum.len() as f64) as uint;
 
         if index <= spectrum.len() {
-            let (ref mut brightness, ref mut weight) = *spectrum.get_mut(min(index, index - 1));
+            let &(ref mut brightness, ref mut weight) = &mut spectrum[min(index, index - 1)];
             *brightness += sample.brightness * sample.weight;
             *weight += sample.weight;
         }

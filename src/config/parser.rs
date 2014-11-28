@@ -1,7 +1,5 @@
-use std::char;
+use std::char::UnicodeChar;
 use std::iter::{Iterator, Map};
-use std::collections::ringbuf::RingBuf;
-use std::collections::Deque;
 use std::fmt::Show;
 use std::num::from_str_radix;
 
@@ -24,17 +22,17 @@ macro_rules! make_tokens(
         impl Token {
             pub fn from_char(c: char) -> Token {
                 match c {
-                    $(tt_to!(pattern $character) => $name,)+
-                    $($input if $test => $container_name($input),)+
-                    c => $other_name(c)
+                    $(tt_to!(pattern $character) => Token::$name,)+
+                    $($input if $test => Token::$container_name($input),)+
+                    c => Token::$other_name(c)
                 }
             }
 
             pub fn to_char(&self) -> char {
                 match *self {
-                    $($name => tt_to!(expression $character),)+
-                    $($container_name(c) => c,)+
-                    $other_name(c) => c
+                    $(Token::$name => tt_to!(expression $character),)+
+                    $(Token::$container_name(c) => c,)+
+                    Token::$other_name(c) => c
                 }
             }
         }
@@ -42,9 +40,9 @@ macro_rules! make_tokens(
         impl ::std::cmp::PartialEq for Token {
             fn eq(&self, other: &Token) -> bool {
                 match (self, other) {
-                    $((&$name, &$name) => true,)+
-                    $((&$container_name(a), &$container_name(b)) => a == b,)+
-                    (&$other_name(a), &$other_name(b)) => a == b,
+                    $((&Token::$name, &Token::$name) => true,)+
+                    $((&Token::$container_name(a), &Token::$container_name(b)) => a == b,)+
+                    (&Token::$other_name(a), &Token::$other_name(b)) => a == b,
                     _ => false
                 }
             }
@@ -69,9 +67,9 @@ make_tokens! {
 
     with character:
 
-    Alpha => char::is_alphabetic(character),
-    Num => char::is_digit(character),
-    Whitespace => char::is_whitespace(character)
+    Alpha => UnicodeChar::is_alphabetic(character),
+    Num => UnicodeChar::is_numeric(character),
+    Whitespace => UnicodeChar::is_whitespace(character)
 
     else: OtherChar
 }
@@ -92,7 +90,7 @@ pub enum Value {
 
 struct Parser<'a, I> {
     tokens: Map<'a, char, Token, I>,
-    buffer: RingBuf<Token>,
+    buffer: Vec<Token>,
     line: uint,
     column: uint,
     prev_column: uint
@@ -102,7 +100,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
     fn new<'a>(source: I) -> Parser<'a, I> {
         Parser {
             tokens: source.map(|c| Token::from_char(c)),
-            buffer: RingBuf::new(),
+            buffer: Vec::new(),
             line: 0,
             column: 0,
             prev_column: 0
@@ -124,12 +122,12 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
     }
 
     fn next(&mut self) -> Option<Token> {
-        self.buffer.pop_front()
+        self.buffer.pop()
         .or_else(|| self.tokens.next()).map(|t| {
             self.prev_column = self.column;
 
             match t {
-                Whitespace('\n') => {
+                Token::Whitespace('\n') => {
                     self.line += 1;
                     self.column = 0;
                 },
@@ -141,7 +139,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
     }
 
     fn buffer(&mut self, token: Token) {
-        self.buffer.push_front(token);
+        self.buffer.push(token);
     }
 
     fn buffer_all(&mut self, tokens: Vec<Token>) {
@@ -180,7 +178,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
 
     fn skip_whitespace(&mut self) {
         self.skip_while(|t| match t {
-            &Whitespace(_) => true,
+            &Token::Whitespace(_) => true,
             _ => false
         })
     }
@@ -189,9 +187,9 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
         let mut tokens = Vec::new();
         loop {
             match self.take_if(|t| match t {
-                &Alpha(_) => true,
-                &Num(_) => true,
-                &Underscore => true,
+                &Token::Alpha(_) => true,
+                &Token::Num(_) => true,
+                &Token::Underscore => true,
                 _ => false
             }) {
                 Some(t) => tokens.push(t),
@@ -222,7 +220,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
             if ident.len() == 0 {
                 if idents.len() > 0 {
                     for ident in idents.into_iter().rev() {
-                        self.buffer(Period);
+                        self.buffer(Token::Period);
                         self.buffer_all(ident);
                     }
 
@@ -233,7 +231,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
             } else {
                 idents.push(ident);
                 if self.take_if(|t| match t {
-                    &Period => true,
+                    &Token::Period => true,
                     _ => false
                 }).is_none() {
                     break;
@@ -246,7 +244,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
 
     fn parse_string(&mut self) -> Result<Option<String>, String> {
         let pos = self.position();
-        if !self.eat(Quote) {
+        if !self.eat(Token::Quote) {
             return Ok(None);
         }
 
@@ -254,7 +252,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
 
         loop {
             match self.next() {
-                Some(Quote) => break,
+                Some(Token::Quote) => break,
                 Some(t) => string.push(t.to_char()),
                 None => return Err(format_error(pos, "unmatched '\"'"))
             }
@@ -267,20 +265,20 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
         let mut num_str = String::new();
         let mut integer = true;
 
-        if self.eat(Minus) {
+        if self.eat(Token::Minus) {
             num_str.push('-');
         }
 
         loop {
             match self.next() {
-                Some(Num(c)) => num_str.push(c),
-                Some(Period) => if integer {
+                Some(Token::Num(c)) => num_str.push(c),
+                Some(Token::Period) => if integer {
                     integer = false;
                     num_str.push('.');
                 } else {
                     return Err(format_error(self.previous_position(), "unexpected '.'"))
                 },
-                Some(Underscore) => {},
+                Some(Token::Underscore) => {},
                 Some(c) => {
                     self.buffer(c);
                     break;
@@ -307,8 +305,8 @@ fn parse_actions<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: bool)
 
     loop {
         parser.skip_while(|t| match *t {
-            Comma => true,
-            Whitespace(_) => true,
+            Token::Comma => true,
+            Token::Whitespace(_) => true,
             _ => false
         });
 
@@ -322,7 +320,7 @@ fn parse_actions<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: bool)
 
         match try!(parse_assign(parser)) {
             Some(a) => actions.push(a),
-            None => if expect_rbrace && !parser.eat(RBrace) {
+            None => if expect_rbrace && !parser.eat(Token::RBrace) {
                 return Ok(None)
             } else {
                 break
@@ -331,8 +329,8 @@ fn parse_actions<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: bool)
     }
 
     parser.skip_while(|t| match *t {
-        Comma => true,
-        Whitespace(_) => true,
+        Token::Comma => true,
+        Token::Whitespace(_) => true,
         _ => false
     });
 
@@ -350,7 +348,7 @@ fn parse_assign<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Acti
     let pos = parser.position();
 
     let value = try!(match parser.next() {
-        Some(Equals) => {
+        Some(Token::Equals) => {
             parser.skip_whitespace();
             parse_value(parser)
         },
@@ -358,7 +356,7 @@ fn parse_assign<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Acti
         None => Err(format_error(pos, "expected '='"))
     });
 
-    Ok(Some(Assign(path, value)))
+    Ok(Some(Action::Assign(path, value)))
 }
 
 fn parse_include<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Action>, String> {
@@ -378,7 +376,7 @@ fn parse_include<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Act
     parser.skip_whitespace();
 
     if !parser.eat_ident("as") {
-        return Ok(Some(Include(source, None)))
+        return Ok(Some(Action::Include(source, None)))
     }
 
     parser.skip_whitespace();
@@ -390,7 +388,7 @@ fn parse_include<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Act
         None => return Err(format_error(pos, "expected a path"))
     };
 
-    Ok(Some(Include(source, Some(path))))
+    Ok(Some(Action::Include(source, Some(path))))
 }
 
 fn parse_list<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String> {
@@ -398,12 +396,12 @@ fn parse_list<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String
 
     loop {
         parser.skip_while(|t| match *t {
-            Comma => true,
-            Whitespace(_) => true,
+            Token::Comma => true,
+            Token::Whitespace(_) => true,
             _ => false
         });
 
-        if parser.eat(RBracket) {
+        if parser.eat(Token::RBracket) {
             break;
         }
 
@@ -411,26 +409,26 @@ fn parse_list<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String
     }
 
     parser.skip_while(|t| match *t {
-        Comma => true,
-        Whitespace(_) => true,
+        Token::Comma => true,
+        Token::Whitespace(_) => true,
         _ => false
     });
 
-    Ok(List(elements))
+    Ok(Value::List(elements))
 }
 
 fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String> {
     match try!(parser.parse_string()) {
-        Some(s) => return Ok(Str(s)),
+        Some(s) => return Ok(Value::Str(s)),
         None => {}
     }
 
     match try!(parser.parse_number()) {
-        Some(n) => return Ok(Number(n)),
+        Some(n) => return Ok(Value::Number(n)),
         None => {}
     }
 
-    if parser.eat(LBracket) {
+    if parser.eat(Token::LBracket) {
         return parse_list(parser);
     }
 
@@ -439,15 +437,15 @@ fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, Strin
     let pos = parser.position();
 
     match parser.next() {
-        Some(LBrace) => match try!(parse_actions(parser, true)) {
-            Some(actions) => return Ok(Struct(path, actions)),
+        Some(Token::LBrace) => match try!(parse_actions(parser, true)) {
+            Some(actions) => return Ok(Value::Struct(path, actions)),
             None => return Err(format_error(pos, "unmatched '{'"))
         },
         Some(t) => {
             parser.buffer(t);
-            return Ok(Struct(path, Vec::new()))
+            return Ok(Value::Struct(path, Vec::new()))
         },
-        None => return Ok(Struct(path, Vec::new())),
+        None => return Ok(Value::Struct(path, Vec::new())),
     }
 }
 

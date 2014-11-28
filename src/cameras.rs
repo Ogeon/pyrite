@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::simd;
 use std::f64::consts;
 use std::rand::Rng;
+use std::num::{Float, FloatMath};
 
 use cgmath::{Vector, EuclideanVector, Vector2};
 use cgmath::{Point, Point3};
@@ -41,7 +42,7 @@ impl Camera {
 
     pub fn ray_towards<R: Rng>(&self, target: &Vector2<f64>, rng: &mut R) -> Ray3<f64> {
         match *self {
-            Perspective { ref transform, view_plane, focus_distance, aperture } => {
+            Camera::Perspective { ref transform, view_plane, focus_distance, aperture } => {
                 let v_plane = simd::f64x2(view_plane, view_plane);
                 let f_distance = simd::f64x2(focus_distance, focus_distance);
                 let target = simd::f64x2(target.x, target.y);
@@ -70,24 +71,24 @@ impl Camera {
 fn decode_perspective(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Camera, String> {
     let mut items = items;
 
-    let transform = match items.pop_equiv(&"transform") {
+    let transform = match items.remove("transform") {
         Some(v) => AffineMatrix3 {
             mat: try!(context.decode_structure_from_group("Transform", v), "transform")
         },
         None => Transform::identity()
     };
 
-    let fov: f64 = match items.pop_equiv(&"fov") {
+    let fov: f64 = match items.remove("fov") {
         Some(v) => try!(FromConfig::from_config(v), "fov"),
         None => return Err(String::from_str("missing field of view ('fov')"))
     };
 
-    let focus_distance: f64 = match items.pop_equiv(&"focus_distance") {
+    let focus_distance: f64 = match items.remove("focus_distance") {
         Some(v) => try!(FromConfig::from_config(v), "focus_distance"),
         None => 1.0
     };
 
-    let aperture: f64 = match items.pop_equiv(&"aperture") {
+    let aperture: f64 = match items.remove("aperture") {
         Some(v) => try!(FromConfig::from_config(v), "aperture"),
         None => 0.0
     };
@@ -95,7 +96,7 @@ fn decode_perspective(context: &config::ConfigContext, items: HashMap<String, co
     let a = deg(fov / 2.0).to_rad();
     let dist = cos(a) / sin(a);
 
-    Ok(Perspective {
+    Ok(Camera::Perspective {
         transform: transform,
         view_plane: dist,
         focus_distance: focus_distance,

@@ -1,5 +1,8 @@
 use std::cmp::{PartialOrd, Equal};
 use std::simd;
+use std::num::FloatMath;
+
+use self::BkdTree::{Node, Leaf};
 
 pub trait Element<R, T> {
     fn get_bounds_interval(&self, axis: uint) -> (f64, f64);

@@ -1,13 +1,14 @@
-#![feature(macro_rules, struct_variant, advanced_slice_patterns)]
+#![feature(macro_rules, if_let, advanced_slice_patterns)]
 
 extern crate cgmath;
 extern crate image;
-extern crate "obj-rs" as obj;
+extern crate obj;
 extern crate genmesh;
 
 use std::sync::{TaskPool, Arc, RWLock};
 use std::io::File;
 use std::time::duration::Duration;
+use std::num::{Float, FloatMath};
 
 use cgmath::Vector2;
 
@@ -49,9 +50,9 @@ fn main() {
     if args.len() > 1 {
         let project_path = Path::new(args[1].clone());
         match project::from_file(&project_path) {
-            project::Success(p) => render(p, project_path),
-            project::IoError(e) => println!("error while reading project file: {}", e),
-            project::ParseError(e) => println!("error while parsing project file: {}", e)
+            project::ParseResult::Success(p) => render(p, project_path),
+            project::ParseResult::IoError(e) => println!("error while reading project file: {}", e),
+            project::ParseResult::ParseError(e) => println!("error while parsing project file: {}", e)
         }
     } else {
         println!("usage: {} project_file", args[0]);
@@ -72,19 +73,15 @@ fn render(project: project::Project, project_path: Path) {
         renderer: project.renderer
     });
 
-    let mut pool = TaskPool::new(project.renderer.threads, || {
-        let config = config.clone();
-        proc(id: uint) {
-            (id, config)
-        }
-    });
+    let pool = TaskPool::new(project.renderer.threads);
 
     for _ in range(0, tile_count) {
-        pool.execute(proc(&(task_id, ref context): &(uint, Arc<RenderContext>)) {
+        let context = config.clone();
+        pool.execute(proc() {
             let mut tile = {
                 context.pending.write().pop().unwrap()
             };
-            println!("Task {} got tile {}", task_id, tile.screen_area().from);
+            println!("Task rendering tile {}", tile.screen_area().from);
 
             context.renderer.render_tile(&mut tile, &context.camera, &context.world);
 
