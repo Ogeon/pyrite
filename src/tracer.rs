@@ -387,8 +387,13 @@ fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: uint, wavelengths: 
     let weight = light.surface_area() * world.lights.len() as f64 / (samples as f64 * 2.0 * std::f64::consts::PI);
 
     range(0, samples).fold(Vec::from_elem(samples as uint, 0.0f64), |mut sum, _| {
-        let target_normal = light.sample_point(rng);
+        let target_normal = match light.sample_point(rng) {
+            Some(normal) => normal,
+            None => return sum
+        };
+
         let ray_out = target_normal.origin.sub_p(&normal.origin);
+
         let distance = ray_out.length2();
         let ray_out = Ray::new(normal.origin, ray_out.normalize());
 

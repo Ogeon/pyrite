@@ -1,7 +1,7 @@
 use std;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::num::FloatMath;
+use std::num::{FloatMath, Float};
 
 use cgmath;
 use cgmath::{Vector, EuclideanVector, Vector3};
@@ -18,7 +18,7 @@ use config::{FromConfig, Type};
 use bkdtree;
 use materials;
 
-pub use self::Shape::{Sphere, Triangle};
+pub use self::Shape::{Sphere, Plane, Triangle};
 pub use self::ProxyShape::{DecodedShape, Mesh};
 
 pub struct Vertex<S> {
@@ -33,6 +33,7 @@ pub enum ProxyShape {
 
 pub enum Shape {
     Sphere { position: Point3<f64>, radius: f64, material: materials::MaterialBox },
+    Plane { shape: cgmath::Plane<f64>, material: materials::MaterialBox },
     Triangle { v1: Vertex<f64>, v2: Vertex<f64>, v3: Vertex<f64>, material: Arc<materials::MaterialBox> }
 }
 
@@ -47,6 +48,11 @@ impl Shape {
                 (sphere, ray.clone())
                     .intersection()
                     .map(|intersection| (intersection.sub_p(&ray.origin).length(), Ray::new(intersection, intersection.sub_p(position).normalize())) )
+            },
+            Plane {ref shape, ..} => {
+                (shape.clone(), ray.clone())
+                    .intersection()
+                    .map(|intersection| (intersection.sub_p(&ray.origin).length(), Ray::new(intersection, shape.n.clone())) )
             },
             Triangle {ref v1, ref v2, ref v3, ..} => {
                 //Möller–Trumbore intersection algorithm
@@ -93,11 +99,12 @@ impl Shape {
     pub fn get_material(&self) -> &Material {
         match *self {
             Sphere { ref material, .. } => & **material,
+            Plane { ref material, .. } => & **material,
             Triangle { ref material, .. } => & **material.deref()
         }
     }
 
-    pub fn sample_point<R: std::rand::Rng>(&self, rng: &mut R) -> Ray3<f64> {
+    pub fn sample_point<R: std::rand::Rng>(&self, rng: &mut R) -> Option<Ray3<f64>> {
         match *self {
             Sphere { ref position, radius, .. } => {
                 let u = rng.gen();
@@ -110,8 +117,9 @@ impl Shape {
                     phi.cos()
                 );
 
-                Ray::new(position.add_v(&sphere_point.mul_s(radius)), sphere_point)
+                Some(Ray::new(position.add_v(&sphere_point.mul_s(radius)), sphere_point))
             },
+            Plane {..} => None,
             Triangle { ref v1, ref v2, ref v3, .. } => {
                 let u: f64 = rng.gen();
                 let v = rng.gen();
@@ -128,7 +136,7 @@ impl Shape {
                 let position = v1.position.add_v(&a.mul_s(u)).add_v(&b.mul_s(v));
                 let normal = v1.normal.mul_s(1.0 - (u + v)).add_v(&v2.normal.mul_s(u)).add_v(&v3.normal.mul_s(v));
 
-                Ray::new(position, normal.normalize())
+                Some(Ray::new(position, normal.normalize()))
             }
         }
     }
@@ -136,6 +144,7 @@ impl Shape {
     pub fn surface_area(&self) -> f64 {
         match *self {
             Sphere { radius, .. } => radius * radius * 4.0 * std::f64::consts::PI,
+            Plane {..} => Float::infinity(),
             Triangle { ref v1, ref v2, ref v3, .. } => {
                 let a = v2.position.sub_p(&v1.position);
                 let b = v3.position.sub_p(&v1.position);
@@ -152,6 +161,15 @@ impl<'a> bkdtree::Element<tracer::BkdRay<'a>, Ray3<f64>> for Arc<Shape> {
                 0 => (position.x - radius, position.x + radius),
                 1 => (position.y - radius, position.y + radius),
                 _ => (position.z - radius, position.z + radius)
+            },
+            Plane {shape, ..} => {
+                let point = shape.n.mul_s(shape.d);
+                match axis {
+                    0 if shape.n.x.abs() == 1.0 => (point.x, point.x),
+                    1 if shape.n.x.abs() == 1.0 => (point.y, point.y),
+                    2 if shape.n.x.abs() == 1.0 => (point.z, point.z),
+                    _ => (Float::neg_infinity(), Float::infinity())
+                }
             },
             Triangle { ref v1, ref v2, ref v3, .. } => {
                 let min = v1.position.min(&v2.position).min(&v3.position);
@@ -176,6 +194,7 @@ impl<'a> bkdtree::Element<tracer::BkdRay<'a>, Ray3<f64>> for Arc<Shape> {
 
 pub fn register_types(context: &mut config::ConfigContext) {
     context.insert_grouped_type("Shape", "Sphere", decode_sphere);
+    context.insert_grouped_type("Shape", "Plane", decode_plane);
     context.insert_grouped_type("Shape", "Mesh", decode_mesh);
 }
 
@@ -201,6 +220,31 @@ fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config:
         shape: Sphere {
             position: Point::from_vec(&position),
             radius: radius,
+            material: material
+        },
+        emissive: emissive
+    })
+}
+
+fn decode_plane(context: &config::ConfigContext, mut items: HashMap<String, config::ConfigItem>) -> Result<ProxyShape, String> {
+    let origin = match items.remove("origin") {
+        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "origin"),
+        None => return Err(String::from_str("missing field 'origin'"))
+    };
+
+    let normal = match items.remove("normal") {
+        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "normal"),
+        None => return Err(String::from_str("missing field 'normal'"))
+    };
+
+    let (material, emissive): (materials::MaterialBox, bool) = match items.remove("material") {
+        Some(v) => try!(context.decode_structure_from_group("Material", v), "material"),
+        None => return Err(String::from_str("missing field 'material'"))
+    };
+
+    Ok(DecodedShape {
+        shape: Plane {
+            shape: cgmath::Plane::from_point_normal(Point::from_vec(&origin), normal),
             material: material
         },
         emissive: emissive
