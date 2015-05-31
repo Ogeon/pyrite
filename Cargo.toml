@@ -9,14 +9,11 @@ authors = []
 name = "pyrite"
 path = "src/main.rs"
 
-[dependencies.cgmath]
-
-git = "https://github.com/bjz/cgmath-rs"
-
-[dependencies.image]
-
-git = "https://github.com/PistonDevelopers/rust-image"
-
-[dependencies.obj]
-
-git = "https://github.com/csherratt/obj-rs"
+[dependencies]
+cgmath = "0.2"
+image = "0.3"
+obj = "0.2"
+genmesh = "0.2"
+rand = "0.3"
+threadpool = "0.1"
+num_cpus = "0.2"

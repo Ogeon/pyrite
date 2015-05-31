@@ -1,5 +1,7 @@
 use std;
-use std::io::File;
+use std::io::Read;
+use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
 use config;
@@ -14,16 +16,16 @@ use materials;
 use math;
 use values;
 
-macro_rules! try_io(
+macro_rules! try_io {
     ($e:expr) => (
         match $e {
             Ok(v) => v,
             Err(e) => return ParseResult::IoError(e)
         }
     )
-)
+}
 
-macro_rules! try_parse(
+macro_rules! try_parse {
     ($e:expr) => (
         match $e {
             Ok(v) => v,
@@ -37,32 +39,28 @@ macro_rules! try_parse(
             Err(e) => return ParseResult::ParseError(format!("{}: {}", $under, e))
         }
     )
-)
+}
 
 pub enum ParseResult<T> {
     Success(T),
-    IoError(std::io::IoError),
+    IoError(std::io::Error),
     ParseError(String)
 }
 
-pub fn from_file(path: &Path) -> ParseResult<Project> {
-    let config_src = try_io!(File::open(path).read_to_string());
+pub fn from_file<P: AsRef<Path>>(path: P) -> ParseResult<Project> {
+    let mut config_src = String::new();
+    try_io!(File::open(&path).and_then(|mut f| f.read_to_string(&mut config_src)));
     let mut config = try_parse!(
-        config::parse(config_src.as_slice().chars(), &mut |source| {
-            let sub_path = Path::new(source.as_slice());
+        config::parse(config_src.chars(), &mut |source| {
+            let sub_path = PathBuf::from(source);
 
-            let content = match File::open(&path.dir_path().join(&sub_path)).read_to_string() {
-                Ok(s) => s,
-                Err(e) => return Err(format!("error while reading {}: {}", path.display(), e))
-            };
-            
-            let mut object_path = Vec::new();
-            for comp in sub_path.with_extension("").str_components() {
-                match comp {
-                    Some(c) => object_path.push(String::from_str(c)),
-                    None => return Ok((content, Vec::new()))
-                }
+            let mut content = String::new();
+            let file_path = path.as_ref().parent().unwrap_or(path.as_ref()).join(&sub_path);
+            if let Err(e) = File::open(&file_path).and_then(|mut f| f.read_to_string(&mut content)) {
+                return Err(format!("error while reading {}: {}", file_path.display(), e));
             }
+            
+            let object_path = sub_path.with_extension("").components().map(|c| c.as_ref().to_string_lossy().into_owned()).collect();
 
             Ok((content, object_path))
         })
@@ -83,24 +81,24 @@ pub fn from_file(path: &Path) -> ParseResult<Project> {
 
     let image_spec = match config.remove("image") {
         Some(v) => try_parse!(decode_image_spec(&context, v), "image"),
-        None => return ParseResult::ParseError(String::from_str("missing image specifications"))
+        None => return ParseResult::ParseError("missing image specifications".into())
     };
 
     let renderer = match config.remove("renderer") {
         Some(v) => try_parse!(context.decode_structure_from_group("Renderer", v), "renderer"),
-        None => return ParseResult::ParseError(String::from_str("missing renderer specifications"))
+        None => return ParseResult::ParseError("missing renderer specifications".into())
     };
 
     let camera = match config.remove("camera") {
         Some(v) => try_parse!(context.decode_structure_from_group("Camera", v), "camera"),
-        None => return ParseResult::ParseError(String::from_str("missing camera specifications"))
+        None => return ParseResult::ParseError("missing camera specifications".into())
     };
 
     let world = match config.remove("world") {
         Some(v) => try_parse!(tracer::decode_world(&context, v, |source| {
-            path.dir_path().join(Path::new(source.as_slice()))
+            path.as_ref().parent().unwrap_or(path.as_ref()).join(&source)
         }), "world"),
-        None => return ParseResult::ParseError(String::from_str("missing world specifications"))
+        None => return ParseResult::ParseError("missing world specifications".into())
     };
 
     ParseResult::Success(Project {
@@ -119,8 +117,8 @@ pub struct Project {
 }
 
 pub struct ImageSpec {
-    pub width: uint,
-    pub height: uint,
+    pub width: u32,
+    pub height: u32,
     pub format: ImageFormat,
     pub rgb_curves: (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>)
 }
@@ -130,23 +128,23 @@ fn decode_image_spec(context: &config::ConfigContext, item: config::ConfigItem) 
         config::Structure(_, mut fields) => {
             let width = match fields.remove("width") {
                 Some(v) => try!(FromConfig::from_config(v), "width"),
-                None => return Err(String::from_str("missing field 'width'"))
+                None => return Err("missing field 'width'".into())
             };
 
             let height = match fields.remove("height") {
                 Some(v) => try!(FromConfig::from_config(v), "height"),
-                None => return Err(String::from_str("missing field 'height'"))
+                None => return Err("missing field 'height'".into())
             };
 
             let format = match fields.remove("format") {
                 Some(v) => try!(context.decode_structure_from_group("Image", v), "format"),
-                None => return Err(String::from_str("missing field 'format'"))
+                None => return Err("missing field 'format'".into())
             };
 
             let rgb_curves = match fields.remove("rgb_curves") {
                 Some(config::Structure(_, f)) => try!(decode_rgb_curves(f), "rgb_curves"),
                 Some(_) => return Err(format!("expected a structure")),
-                None => return Err(String::from_str("missing field 'rgb_curves'"))
+                None => return Err("missing field 'rgb_curves'".into())
             };
 
             Ok(ImageSpec {
@@ -156,7 +154,7 @@ fn decode_image_spec(context: &config::ConfigContext, item: config::ConfigItem) 
                 rgb_curves: rgb_curves
             })
         },
-        config::Primitive(v) => Err(format!("unexpected {}", v)),
+        config::Primitive(v) => Err(format!("unexpected {:?}", v)),
         config::List(_) => Err(format!("unexpected list"))
     }
 }
@@ -166,17 +164,17 @@ fn decode_rgb_curves(fields: HashMap<String, config::ConfigItem>) -> Result<(Vec
 
     let red = match fields.remove("red") {
         Some(v) => try!(FromConfig::from_config(v), "red"),
-        None => return Err(String::from_str("missing field 'red'"))
+        None => return Err("missing field 'red'".into())
     };
 
     let green = match fields.remove("green") {
         Some(v) => try!(FromConfig::from_config(v), "green"),
-        None => return Err(String::from_str("missing field 'green'"))
+        None => return Err("missing field 'green'".into())
     };
         
     let blue = match fields.remove("blue") {
         Some(v) => try!(FromConfig::from_config(v), "blue"),
-        None => return Err(String::from_str("missing field 'blue'"))
+        None => return Err("missing field 'blue'".into())
     };
 
     Ok((red, green, blue))

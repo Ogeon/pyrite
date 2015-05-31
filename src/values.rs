@@ -4,7 +4,7 @@ use tracer;
 
 use config;
 
-macro_rules! make_values(
+macro_rules! make_values {
     ($insert_fn:ident : $type_name:ident <$context_name:ty, $result_name:ty> { $($fn_name:ident : $variant_name:ident => $value_name:ident),* }) => (
         fn $insert_fn(context: &mut config::ConfigContext) {
             $(
@@ -27,12 +27,12 @@ macro_rules! make_values(
         }
 
         $(
-            fn $fn_name(_context: &config::ConfigContext, _fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<$context_name, $result_name> + 'static + Send + Sync>, String> {
-                Ok(box $type_name::$variant_name as Box<tracer::ParametricValue<$context_name, $result_name> + 'static + Send + Sync>)
+            fn $fn_name(_context: &config::ConfigContext, _fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<$context_name, $result_name>>, String> {
+                Ok(Box::new($type_name::$variant_name) as Box<tracer::ParametricValue<$context_name, $result_name>>)
             }
         )*
     )
-)
+}
 
 pub fn register_types(context: &mut config::ConfigContext) {
     insert_render_numbers(context);

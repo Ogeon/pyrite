@@ -1,14 +1,16 @@
-#![feature(macro_rules, if_let, advanced_slice_patterns)]
-
 extern crate cgmath;
 extern crate image;
 extern crate obj;
 extern crate genmesh;
+extern crate rand;
+extern crate threadpool;
+extern crate num_cpus;
 
-use std::sync::{TaskPool, Arc, RWLock};
-use std::io::File;
-use std::time::duration::Duration;
-use std::num::{Float, FloatMath};
+use std::sync::{Arc, RwLock};
+use std::fs::File;
+use std::path::Path;
+
+use threadpool::ThreadPool;
 
 use cgmath::Vector2;
 
@@ -16,7 +18,7 @@ use image::GenericImage;
 
 use renderer::Tile;
 
-macro_rules! try(
+macro_rules! try {
     ($e:expr) => (
         match $e {
             Ok(v) => v,
@@ -30,7 +32,7 @@ macro_rules! try(
             Err(e) => return Err(format!("{}: {}", $under, e))
         }
     )
-)
+}
 
 mod tracer;
 mod bkdtree;
@@ -45,21 +47,21 @@ mod math;
 mod values;
 
 fn main() {
-    let args = std::os::args();
+    let mut args = std::env::args();
+    let name = args.next().unwrap_or("pyrite".into());
 
-    if args.len() > 1 {
-        let project_path = Path::new(args[1].clone());
+    if let Some(project_path) = args.next() {
         match project::from_file(&project_path) {
             project::ParseResult::Success(p) => render(p, project_path),
             project::ParseResult::IoError(e) => println!("error while reading project file: {}", e),
             project::ParseResult::ParseError(e) => println!("error while parsing project file: {}", e)
         }
     } else {
-        println!("usage: {} project_file", args[0]);
+        println!("usage: {} project_file", name);
     }
 }
 
-fn render(project: project::Project, project_path: Path) {
+fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
     let image_size = Vector2::new(project.image.width, project.image.height);
 
     let tiles = project.renderer.make_tiles(&project.camera, &image_size);
@@ -68,30 +70,30 @@ fn render(project: project::Project, project_path: Path) {
     let config = Arc::new(RenderContext {
         camera: project.camera,
         world: project.world,
-        pending: RWLock::new(tiles),
-        completed: RWLock::new(Vec::new()),
+        pending: RwLock::new(tiles),
+        completed: RwLock::new(Vec::new()),
         renderer: project.renderer
     });
 
-    let pool = TaskPool::new(project.renderer.threads);
+    let pool = ThreadPool::new(config.renderer.threads);
 
-    for _ in range(0, tile_count) {
+    for _ in 0..tile_count {
         let context = config.clone();
-        pool.execute(proc() {
+        pool.execute(move || {
             let mut tile = {
-                context.pending.write().pop().unwrap()
+                context.pending.write().unwrap().pop().unwrap()
             };
-            println!("Task rendering tile {}", tile.screen_area().from);
+            println!("Task rendering tile {:?}", tile.screen_area().from);
 
             context.renderer.render_tile(&mut tile, &context.camera, &context.world);
 
-            context.completed.write().push(tile);
+            context.completed.write().unwrap().push(tile);
         })
     }
 
     let mut tile_counter = 0;
 
-    let mut pixels = image::ImageBuf::new(image_size.x as u32, image_size.y as u32);
+    let mut pixels = image::ImageBuffer::new(image_size.x as u32, image_size.y as u32);
 
     let (red, green, blue) = project.image.rgb_curves;
 
@@ -107,21 +109,23 @@ fn render(project: project::Project, project_path: Path) {
         points: blue
     };
 
-    let render_path = project_path.dir_path().join("render.png");
+    let project_path = project_path.as_ref();
+    let render_path = project_path.parent().unwrap_or(project_path).join("render.png");
     
     while tile_counter < tile_count {
-        std::io::timer::sleep(Duration::seconds(4));
-
+        std::thread::sleep_ms(4000);
 
         loop {
-            match config.completed.write().pop() {
+            match config.completed.write().unwrap().pop() {
                 Some(tile) => {
                     for (spectrum, position) in tile.pixels() {
                         let r = clamp_channel(calculate_channel(&spectrum, &red));
                         let g = clamp_channel(calculate_channel(&spectrum, &green));
                         let b = clamp_channel(calculate_channel(&spectrum, &blue));
                         
-                        pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb(r, g, b))
+                        pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb {
+                            data: [r, g, b]
+                        })
                     }
 
                     tile_counter += 1;
@@ -130,9 +134,11 @@ fn render(project: project::Project, project_path: Path) {
             }
         }
 
-        match File::create(&render_path).and_then(|f| image::ImageRgb8(pixels.clone()).save(f, image::PNG)) {
-            Err(e) => println!("error while writing image: {}", e),
-            _ => {}
+        match File::create(&render_path) {
+            Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
+                println!("error while writing image: {}", e);
+            },
+            Err(e) => println!("failed to open/create file for writing: {}", e)
         }
     }
 
@@ -167,8 +173,8 @@ fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::utils::Inte
 struct RenderContext {
     camera: cameras::Camera,
     world: tracer::World,
-    pending: RWLock<Vec<Tile>>,
-    completed: RWLock<Vec<Tile>>,
+    pending: RwLock<Vec<Tile>>,
+    completed: RwLock<Vec<Tile>>,
     renderer: renderer::Renderer
 }
 

@@ -1,42 +1,44 @@
-use std::cmp::{PartialOrd, Equal};
-use std::simd;
-use std::num::FloatMath;
+use std::cmp::PartialOrd;
+use std::cmp::Ordering::Equal;
+use std::marker::PhantomData;
 
 use self::BkdTree::{Node, Leaf};
 
-pub trait Element<R, T> {
-    fn get_bounds_interval(&self, axis: uint) -> (f64, f64);
-    fn intersect(&self, ray: &R) -> Option<(f64, T)>;
+pub trait Element<R: Ray> {
+    type Item;
+    fn get_bounds_interval(&self, axis: usize) -> (f64, f64);
+    fn intersect(&self, ray: &R) -> Option<(f64, Self::Item)>;
 }
 
 pub trait Ray {
-    fn plane_intersections(&self, min: f64, max: f64, axis: uint) -> Option<(f64, f64)>;
-    fn plane_distance(&self, min: f64, max: f64, axis: uint) -> (f64, f64);
+    fn plane_intersections(&self, min: f64, max: f64, axis: usize) -> Option<(f64, f64)>;
+    fn plane_distance(&self, min: f64, max: f64, axis: usize) -> (f64, f64);
 }
 
-pub enum BkdTree<E> {
+pub enum BkdTree<R: Ray, E: Element<R>> {
     Node {
         beginning: f64,
         end: f64,
-        axis: uint,
-        left: Box<BkdTree<E>>,
-        right: Box<BkdTree<E>>
+        axis: usize,
+        left: Box<BkdTree<R, E>>,
+        right: Box<BkdTree<R, E>>
     },
 
     Leaf {
         beginning: f64,
         end: f64,
-        axis: uint,
-        element: E
+        axis: usize,
+        element: E,
+        _phantom_ray: PhantomData<R>
     }
 }
 
-impl<T, R: Ray, E: Element<R, T>> BkdTree<E> {
-    pub fn new(elements: Vec<E>, dimensions: uint) -> BkdTree<E> {
+impl<R: Ray, E: Element<R>> BkdTree<R, E> {
+    pub fn new(elements: Vec<E>, dimensions: usize) -> BkdTree<R, E> {
         construct_tree(elements, dimensions, 0)
     }
 
-    pub fn find(&self, ray: &R) -> Option<(T, &E)> {
+    pub fn find(&self, ray: &R) -> Option<(E::Item, &E)> {
         let epsilon = 0.000001;
         let mut result = None;
 
@@ -94,7 +96,7 @@ impl<T, R: Ray, E: Element<R, T>> BkdTree<E> {
     }
 }
 
-fn construct_tree<T, R: Ray, E: Element<R, T>>(elements: Vec<E>, dimensions: uint, depth: uint) -> BkdTree<E> {
+fn construct_tree<R: Ray, E: Element<R>>(elements: Vec<E>, dimensions: usize, depth: usize) -> BkdTree<R, E> {
     let mut elements = elements;
     let axis = get_best_axis(&elements, dimensions);
 
@@ -106,7 +108,8 @@ fn construct_tree<T, R: Ray, E: Element<R, T>>(elements: Vec<E>, dimensions: uin
             beginning: beginning,
             end: end,
             axis: axis,
-            element: element
+            element: element,
+            _phantom_ray: PhantomData
         }
     } else {
         elements.sort_by(|a, b| {
@@ -132,29 +135,29 @@ fn construct_tree<T, R: Ray, E: Element<R, T>>(elements: Vec<E>, dimensions: uin
             beginning: beginning,
             end: end,
             axis: axis,
-            left: box construct_tree(left, dimensions, depth + 1),
-            right: box construct_tree(right, dimensions, depth + 1)
+            left: Box::new(construct_tree(left, dimensions, depth + 1)),
+            right: Box::new(construct_tree(right, dimensions, depth + 1))
         }
     }
 }
 
-fn get_total_bounds<T, R: Ray, E: Element<R, T>>(elements: &Vec<E>, axis: uint) -> (f64, f64) {
+fn get_total_bounds<R: Ray, E: Element<R>>(elements: &Vec<E>, axis: usize) -> (f64, f64) {
     elements.iter().fold((1.0f64/0.0, -1.0f64/0.0), |(begin, end), element| {
         let (e_begin, e_end) = element.get_bounds_interval(axis);
         (begin.min(e_begin), end.max(e_end))
     })
 }
 
-fn get_best_axis<T, R: Ray, E: Element<R, T>>(elements: &Vec<E>, dimensions: uint) -> uint {
+fn get_best_axis<R: Ray, E: Element<R>>(elements: &Vec<E>, dimensions: usize) -> usize {
     let mut scores = Vec::new();
 
-    for axis in range(0, dimensions) {
+    for axis in 0..dimensions {
         let mut sum = 0.0;
 
-        for i in range(0, elements.len() - 1) {
+        for i in 0..elements.len() - 1 {
             let (base_min, base_max) = elements[i].get_bounds_interval(axis);
 
-            for j in range(i + 1, elements.len()) {
+            for j in i + 1..elements.len() {
                 let (comp_min, comp_max) = elements[j].get_bounds_interval(axis);
                 sum += base_max.min(comp_max) - base_min.max(comp_min);
             }
@@ -168,13 +171,12 @@ fn get_best_axis<T, R: Ray, E: Element<R, T>>(elements: &Vec<E>, dimensions: uin
 }
 
 #[inline]
-fn order<'a, T, R: Ray, E: Element<R, T>>(a: &'a BkdTree<E>, b: &'a BkdTree<E>, ray: &R) -> (&'a BkdTree<E>, f64, f64, &'a BkdTree<E>, f64, f64) {
+fn order<'a, R: Ray, E: Element<R>>(a: &'a BkdTree<R, E>, b: &'a BkdTree<R, E>, ray: &R) -> (&'a BkdTree<R, E>, f64, f64, &'a BkdTree<R, E>, f64, f64) {
     let (a_near, a_far) = a.distance(ray);
     let (b_near, b_far) = b.distance(ray);
 
-    let near = simd::f64x2(a_near, b_near);
-    let far = simd::f64x2(a_far, b_far);
-    let simd::f64x2(a_dist, b_dist) = near + far;
+    let a_dist = a_near + a_far;
+    let b_dist = b_near + b_far;
 
     if a_dist < b_dist {
         (a, a_near, a_far, b, b_near, b_far)

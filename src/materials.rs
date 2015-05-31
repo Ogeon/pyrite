@@ -1,6 +1,5 @@
 use std;
 use std::collections::HashMap;
-use std::num::{Float, FloatMath};
 
 use cgmath::{EuclideanVector, Vector, Vector3};
 use cgmath::{Ray, Ray3};
@@ -14,10 +13,9 @@ use config::FromConfig;
 use math;
 
 pub type MaterialBox = Box<Material + 'static + Send + Sync>;
-type ColorBox = Box<ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>;
 
 pub struct Diffuse {
-    pub color: ColorBox
+    pub color: Box<ParametricValue<tracer::RenderContext, f64>>
 }
 
 impl Material for Diffuse {
@@ -61,7 +59,7 @@ impl Material for Diffuse {
         Reflect(Ray::new(normal.origin, reflected), & *self.color, 1.0, Some(lambertian))
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
         None
     }
 }
@@ -71,7 +69,7 @@ fn lambertian(_ray_in: &Vector3<f64>, ray_out: &Vector3<f64>, normal: &Vector3<f
 }
 
 pub struct Emission {
-    pub color: ColorBox
+    pub color: Box<ParametricValue<tracer::RenderContext, f64>>
 }
 
 impl Material for Emission {
@@ -79,13 +77,13 @@ impl Material for Emission {
         Emit(& *self.color)
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
         Some(& *self.color)
     }
 }
 
 pub struct Mirror {
-    pub color: ColorBox
+    pub color: Box<ParametricValue<tracer::RenderContext, f64>>
 }
 
 impl Material for Mirror {
@@ -102,7 +100,7 @@ impl Material for Mirror {
         Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), & *self.color, 1.0, None)
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
         None
     }
 }
@@ -122,7 +120,7 @@ impl Material for Mix {
         }
     }
 
-    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
+    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
         if self.factor < rng.next_float() {
             self.a.get_emission(wavelengths, ray_in, normal, rng)
         } else {
@@ -158,7 +156,7 @@ impl Material for FresnelMix {
         }
     }
 
-    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
+    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             /*let reflections = wavelengths.iter().map(|&wl| {
                 let wl = wl * 0.001;
@@ -192,7 +190,7 @@ fn fresnel_mix<'a>(ior: f64, env_ior: f64, reflect: &'a MaterialBox, refract: &'
 }
 
 struct Refractive {
-    color: ColorBox,
+    color: Box<ParametricValue<tracer::RenderContext, f64>>,
     ior: f64,
     dispersion: f64,
     env_ior: f64,
@@ -214,12 +212,12 @@ impl Material for Refractive {
         }
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64> + Send + Sync> {
+    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
         None
     }
 }
 
-fn refract<'a>(ior: f64, env_ior: f64, color: &'a ColorBox, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a> {
+fn refract<'a>(ior: f64, env_ior: f64, color: &'a Box<ParametricValue<tracer::RenderContext, f64>>, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a> {
     let nl = if normal.direction.dot(&ray_in.direction) < 0.0 {
         normal.direction
     } else {
@@ -276,10 +274,10 @@ pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, c
 
     let color = match fields.remove("color") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
-        None => return Err(String::from_str("missing field 'color'"))
+        None => return Err("missing field 'color'".into())
     };
 
-    Ok((box Diffuse { color: color } as MaterialBox, false))
+    Ok((Box::new(Diffuse { color: color }) as MaterialBox, false))
 }
 
 pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
@@ -287,10 +285,10 @@ pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, 
 
     let color = match fields.remove("color") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
-        None => return Err(String::from_str("missing field 'color'"))
+        None => return Err("missing field 'color'".into())
     };
 
-    Ok((box Emission { color: color } as MaterialBox, true))
+    Ok((Box::new(Emission { color: color }) as MaterialBox, true))
 }
 
 pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
@@ -298,10 +296,10 @@ pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, co
 
     let color = match fields.remove("color") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
-        None => return Err(String::from_str("missing field 'color'"))
+        None => return Err("missing field 'color'".into())
     };
 
-    Ok((box Mirror { color: color } as MaterialBox, false))
+    Ok((Box::new(Mirror { color: color }) as MaterialBox, false))
 }
 
 pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
@@ -309,24 +307,24 @@ pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, confi
 
     let factor = match fields.remove("factor") {
         Some(v) => try!(FromConfig::from_config(v), "factor"),
-        None => return Err(String::from_str("missing field 'factor'"))
+        None => return Err("missing field 'factor'".into())
     };
 
     let (a, a_emissive): (MaterialBox, bool) = match fields.remove("a") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "a"),
-        None => return Err(String::from_str("missing field 'a'"))
+        None => return Err("missing field 'a'".into())
     };
 
     let (b, b_emissive): (MaterialBox, bool) = match fields.remove("b") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "b"),
-        None => return Err(String::from_str("missing field 'b'"))
+        None => return Err("missing field 'b'".into())
     };
 
-    Ok((box Mix {
+    Ok((Box::new(Mix {
         factor: factor,
         a: a,
         b: b
-    } as MaterialBox, a_emissive || b_emissive))
+    }) as MaterialBox, a_emissive || b_emissive))
 }
 
 pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
@@ -334,7 +332,7 @@ pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<Strin
 
     let ior = match fields.remove("ior") {
         Some(v) => try!(FromConfig::from_config(v), "ior"),
-        None => return Err(String::from_str("missing field 'ior'"))
+        None => return Err("missing field 'ior'".into())
     };
 
     let env_ior = match fields.remove("env_ior") {
@@ -354,22 +352,22 @@ pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<Strin
 
     let (reflect, reflect_emissive): (MaterialBox, bool) = match fields.remove("reflect") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "reflect"),
-        None => return Err(String::from_str("missing field 'reflect'"))
+        None => return Err("missing field 'reflect'".into())
     };
 
     let (refract, refract_emissive): (MaterialBox, bool) = match fields.remove("refract") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "refract"),
-        None => return Err(String::from_str("missing field 'refract'"))
+        None => return Err("missing field 'refract'".into())
     };
 
-    Ok((box FresnelMix {
+    Ok((Box::new(FresnelMix {
         ior: ior,
         dispersion: dispersion,
         env_ior: env_ior,
         env_dispersion: env_dispersion,
         reflect: reflect,
         refract: refract
-    } as MaterialBox, refract_emissive || reflect_emissive))
+    }) as MaterialBox, refract_emissive || reflect_emissive))
 }
 
 pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
@@ -377,7 +375,7 @@ pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String
 
     let ior = match fields.remove("ior") {
         Some(v) => try!(FromConfig::from_config(v), "ior"),
-        None => return Err(String::from_str("missing field 'ior'"))
+        None => return Err("missing field 'ior'".into())
     };
 
     let env_ior = match fields.remove("env_ior") {
@@ -397,14 +395,14 @@ pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String
 
     let color = match fields.remove("color") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
-        None => return Err(String::from_str("missing field 'color'"))
+        None => return Err("missing field 'color'".into())
     };
 
-    Ok((box Refractive {
+    Ok((Box::new(Refractive {
         ior: ior,
         dispersion: dispersion,
         env_ior: env_ior,
         env_dispersion: env_dispersion,
         color: color
-    } as MaterialBox, false))
+    }) as MaterialBox, false))
 }

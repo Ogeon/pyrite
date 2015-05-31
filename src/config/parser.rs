@@ -1,18 +1,16 @@
-use std::char::UnicodeChar;
 use std::iter::{Iterator, Map};
-use std::fmt::Show;
-use std::num::from_str_radix;
+use std::fmt::Display;
 
-macro_rules! tt_to(
+macro_rules! tt_to {
     (pattern $pattern:pat) => ($pattern);
 
     (expression $character:expr) => ($character);
-)
+}
 
-macro_rules! make_tokens(
+macro_rules! make_tokens {
     ($($name:ident => $character:tt),+ with $input:ident : $($container_name:ident => $test:expr),+ else : $other_name:ident) => (
         
-        #[deriving(Show)]
+        #[derive(Debug, Clone, Copy)]
         pub enum Token {
             $($name,)+
             $($container_name(char),)+
@@ -51,7 +49,7 @@ macro_rules! make_tokens(
         impl ::std::cmp::Eq for Token {}
 
     )
-)
+}
 
 make_tokens! {
     Period => '.',
@@ -67,20 +65,20 @@ make_tokens! {
 
     with character:
 
-    Alpha => UnicodeChar::is_alphabetic(character),
-    Num => UnicodeChar::is_numeric(character),
-    Whitespace => UnicodeChar::is_whitespace(character)
+    Alpha => character.is_alphabetic(),
+    Num => character.is_numeric(),
+    Whitespace => character.is_whitespace()
 
     else: OtherChar
 }
 
-#[deriving(Clone, PartialEq, Show)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Action {
     Assign(Vec<String>, Value),
     Include(String, Option<Vec<String>>)
 }
 
-#[deriving(Clone, PartialEq, Show)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Value {
     Struct(Vec<String>, Vec<Action>),
     List(Vec<Value>),
@@ -88,18 +86,18 @@ pub enum Value {
     Number(f64)
 }
 
-struct Parser<'a, I> {
-    tokens: Map<'a, char, Token, I>,
+struct Parser<I: Iterator<Item=char>> {
+    tokens: Map<I, fn(I::Item) -> Token>,
     buffer: Vec<Token>,
-    line: uint,
-    column: uint,
-    prev_column: uint
+    line: usize,
+    column: usize,
+    prev_column: usize
 }
 
-impl<'a, I: Iterator<char>> Parser<'a, I> {
-    fn new<'a>(source: I) -> Parser<'a, I> {
+impl<I: Iterator<Item=char>> Parser<I> {
+    fn new(source: I) -> Parser<I> {
         Parser {
-            tokens: source.map(|c| Token::from_char(c)),
+            tokens: source.map(Token::from_char),
             buffer: Vec::new(),
             line: 0,
             column: 0,
@@ -107,11 +105,11 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
         }
     }
 
-    fn position(&self) -> (uint, uint) {
+    fn position(&self) -> (usize, usize) {
         (self.line, self.column)
     }
 
-    fn previous_position(&self) -> (uint, uint) {
+    fn previous_position(&self) -> (usize, usize) {
         if self.line == 0 {
             (0, self.prev_column)
         } else if self.column > 0 {
@@ -148,7 +146,7 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
         }
     }
 
-    fn take_if(&mut self, pred: |&Token| -> bool) -> Option<Token> {
+    fn take_if<P: FnOnce(&Token) -> bool>(&mut self, pred: P) -> Option<Token> {
         self.next().and_then(|t|
             if pred(&t) {
                 Some(t)
@@ -163,11 +161,11 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
         self.take_if(|&t| t == token).is_some()
     }
 
-    fn skip_while(&mut self, pred: |&Token| -> bool) {
+    fn skip_while<P: Fn(&Token) -> bool>(&mut self, pred: P) {
         loop {
             match self.next() {
-                Some(t) if !pred(&t) => {
-                    self.buffer(t);
+                Some(ref t) if !pred(t) => {
+                    self.buffer(*t);
                     break;
                 },
                 None => break,
@@ -287,20 +285,20 @@ impl<'a, I: Iterator<char>> Parser<'a, I> {
             }
         }
 
-        Ok(from_str_radix(num_str.as_slice(), 10))
+        Ok(num_str.parse().ok())
     }
 }
 
-fn format_error<S: Show>((line, column): (uint, uint), message: S) -> String {
+fn format_error<S: Display>((line, column): (usize, usize), message: S) -> String {
     format!("l{}, c{}: {}", line, column, message)
 }
 
-pub fn parse<C: Iterator<char>>(source: C) -> Result<Vec<Action>, String> {
+pub fn parse<C: Iterator<Item=char>>(source: C) -> Result<Vec<Action>, String> {
     let mut parser = Parser::new(source);
     parse_actions(&mut parser, false).map(|v| v.unwrap())
 }
 
-fn parse_actions<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: bool) -> Result<Option<Vec<Action>>, String> {
+fn parse_actions<I: Iterator<Item=char>>(parser: &mut Parser<I>, expect_rbrace: bool) -> Result<Option<Vec<Action>>, String> {
     let mut actions = Vec::new();
 
     loop {
@@ -337,7 +335,7 @@ fn parse_actions<I: Iterator<char>>(parser: &mut Parser<I>, expect_rbrace: bool)
     Ok(Some(actions))
 }
 
-fn parse_assign<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Action>, String> {
+fn parse_assign<I: Iterator<Item=char>>(parser: &mut Parser<I>) -> Result<Option<Action>, String> {
     let path = match try!(parser.parse_path()) {
         Some(p) => p,
         None => return Ok(None)
@@ -359,7 +357,7 @@ fn parse_assign<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Acti
     Ok(Some(Action::Assign(path, value)))
 }
 
-fn parse_include<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Action>, String> {
+fn parse_include<I: Iterator<Item=char>>(parser: &mut Parser<I>) -> Result<Option<Action>, String> {
     if !parser.eat_ident("include") {
         return Ok(None);
     }
@@ -391,7 +389,7 @@ fn parse_include<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Option<Act
     Ok(Some(Action::Include(source, Some(path))))
 }
 
-fn parse_list<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String> {
+fn parse_list<I: Iterator<Item=char>>(parser: &mut Parser<I>) -> Result<Value, String> {
     let mut elements = Vec::new();
 
     loop {
@@ -417,7 +415,7 @@ fn parse_list<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String
     Ok(Value::List(elements))
 }
 
-fn parse_value<I: Iterator<char>>(parser: &mut Parser<I>) -> Result<Value, String> {
+fn parse_value<I: Iterator<Item=char>>(parser: &mut Parser<I>) -> Result<Value, String> {
     match try!(parser.parse_string()) {
         Some(s) => return Ok(Value::Str(s)),
         None => {}

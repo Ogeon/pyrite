@@ -1,7 +1,9 @@
 use std;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::num::{FloatMath, Float};
+use std::ops::Deref;
+
+use std::f64::{INFINITY, NEG_INFINITY};
 
 use cgmath;
 use cgmath::{Vector, EuclideanVector, Vector3};
@@ -17,6 +19,8 @@ use config::{FromConfig, Type};
 
 use bkdtree;
 use materials;
+
+use rand;
 
 pub use self::Shape::{Sphere, Plane, Triangle};
 pub use self::ProxyShape::{DecodedShape, Mesh};
@@ -104,13 +108,13 @@ impl Shape {
         }
     }
 
-    pub fn sample_point<R: std::rand::Rng>(&self, rng: &mut R) -> Option<Ray3<f64>> {
+    pub fn sample_point<R: rand::Rng>(&self, rng: &mut R) -> Option<Ray3<f64>> {
         match *self {
             Sphere { ref position, radius, .. } => {
-                let u = rng.gen();
-                let v = rng.gen();
-                let theta = 2.0f64 * std::f64::consts::PI * u;
-                let phi = (2.0f64 * v - 1.0).acos();
+                let u: f64 = rng.gen();
+                let v: f64 = rng.gen();
+                let theta = 2.0 * std::f64::consts::PI * u;
+                let phi = (2.0 * v - 1.0).acos();
                 let sphere_point = Vector3::new(
                     phi.sin() * theta.cos(),
                     phi.sin() * theta.sin(),
@@ -144,7 +148,7 @@ impl Shape {
     pub fn surface_area(&self) -> f64 {
         match *self {
             Sphere { radius, .. } => radius * radius * 4.0 * std::f64::consts::PI,
-            Plane {..} => Float::infinity(),
+            Plane {..} => INFINITY,
             Triangle { ref v1, ref v2, ref v3, .. } => {
                 let a = v2.position.sub_p(&v1.position);
                 let b = v3.position.sub_p(&v1.position);
@@ -154,8 +158,10 @@ impl Shape {
     }
 }
 
-impl<'a> bkdtree::Element<tracer::BkdRay<'a>, Ray3<f64>> for Arc<Shape> {
-    fn get_bounds_interval(&self, axis: uint) -> (f64, f64) {
+impl<'a> bkdtree::Element<tracer::BkdRay<'a>> for Arc<Shape> {
+    type Item = Ray3<f64>;
+
+    fn get_bounds_interval(&self, axis: usize) -> (f64, f64) {
         match *self.deref() {
             Sphere { ref position, radius, .. } => match axis {
                 0 => (position.x - radius, position.x + radius),
@@ -168,7 +174,7 @@ impl<'a> bkdtree::Element<tracer::BkdRay<'a>, Ray3<f64>> for Arc<Shape> {
                     0 if shape.n.x.abs() == 1.0 => (point.x, point.x),
                     1 if shape.n.x.abs() == 1.0 => (point.y, point.y),
                     2 if shape.n.x.abs() == 1.0 => (point.z, point.z),
-                    _ => (Float::neg_infinity(), Float::infinity())
+                    _ => (NEG_INFINITY, INFINITY)
                 }
             },
             Triangle { ref v1, ref v2, ref v3, .. } => {
@@ -203,17 +209,17 @@ fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config:
 
     let position = match items.remove("position") {
         Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "position"),
-        None => return Err(String::from_str("missing field 'position'"))
+        None => return Err("missing field 'position'".into())
     };
 
     let radius = match items.remove("radius") {
         Some(v) => try!(FromConfig::from_config(v), "radius"),
-        None => return Err(String::from_str("missing field 'radius'"))
+        None => return Err("missing field 'radius'".into())
     };
 
     let (material, emissive): (materials::MaterialBox, bool) = match items.remove("material") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "material"),
-        None => return Err(String::from_str("missing field 'material'"))
+        None => return Err("missing field 'material'".into())
     };
 
     Ok(DecodedShape {
@@ -229,17 +235,17 @@ fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config:
 fn decode_plane(context: &config::ConfigContext, mut items: HashMap<String, config::ConfigItem>) -> Result<ProxyShape, String> {
     let origin = match items.remove("origin") {
         Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "origin"),
-        None => return Err(String::from_str("missing field 'origin'"))
+        None => return Err("missing field 'origin'".into())
     };
 
     let normal = match items.remove("normal") {
         Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "normal"),
-        None => return Err(String::from_str("missing field 'normal'"))
+        None => return Err("missing field 'normal'".into())
     };
 
     let (material, emissive): (materials::MaterialBox, bool) = match items.remove("material") {
         Some(v) => try!(context.decode_structure_from_group("Material", v), "material"),
-        None => return Err(String::from_str("missing field 'material'"))
+        None => return Err("missing field 'material'".into())
     };
 
     Ok(DecodedShape {
@@ -256,13 +262,13 @@ fn decode_mesh(_context: &config::ConfigContext, items: HashMap<String, config::
 
     let file_name: String = match items.remove("file") {
         Some(v) => try!(FromConfig::from_config(v), "file"),
-        None => return Err(String::from_str("missing field 'file'"))
+        None => return Err("missing field 'file'".into())
     };
 
     let materials = match items.remove("materials") {
         Some(config::Structure(_, fields)) => fields,
         Some(v) => return Err(format!("materials: expected a structure, but found '{}'", v)),
-        None => return Err(String::from_str("missing field 'materials'"))
+        None => return Err("missing field 'materials'".into())
     };
 
     Ok(Mesh{

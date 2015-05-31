@@ -1,11 +1,15 @@
 use std;
 use std::collections::HashMap;
-use std::cmp::{min, Equal};
-use std::rand;
-use std::rand::{Rng, XorShiftRng};
+use std::cmp::min;
+use std::cmp::Ordering::Equal;
 use std::iter::Enumerate;
-use std::slice::Items;
-use std::num::{Float, FloatMath};
+use std::slice::Iter;
+use std::ops::Mul;
+
+use num_cpus;
+
+use rand;
+use rand::{Rng, XorShiftRng};
 
 use cgmath::{Vector, EuclideanVector, Vector2};
 
@@ -16,8 +20,8 @@ use cameras;
 
 use tracer;
 
-static DEFAULT_SPECTRUM_SAMPLES: uint = 10;
-static DEFAULT_SPECTRUM_BINS: uint = 64;
+static DEFAULT_SPECTRUM_SAMPLES: u32 = 10;
+static DEFAULT_SPECTRUM_BINS: usize = 64;
 static DEFAULT_SPECTRUM_SPAN: (f64, f64) = (400.0, 700.0);
 
 pub fn register_types(context: &mut config::ConfigContext) {
@@ -25,18 +29,18 @@ pub fn register_types(context: &mut config::ConfigContext) {
 }
 
 pub struct Renderer {
-    pub threads: uint,
-    bounces: uint,
-    pixel_samples: uint,
-    light_samples: uint,
-    spectrum_samples: uint,
-    spectrum_bins: uint,
+    pub threads: usize,
+    bounces: u32,
+    pixel_samples: u32,
+    light_samples: usize,
+    spectrum_samples: u32,
+    spectrum_bins: usize,
     spectrum_span: (f64, f64),
     algorithm: RenderAlgorithm
 }
 
 impl Renderer {
-    pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>) -> Vec<Tile> {
+    pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<u32>) -> Vec<Tile> {
         self.algorithm.make_tiles(camera, image_size, self.spectrum_bins, self.spectrum_span)
     }
 
@@ -46,20 +50,20 @@ impl Renderer {
 }
 
 enum RenderAlgorithm {
-    Simple {tile_size: uint}
+    Simple {tile_size: u32}
 }
 
 impl RenderAlgorithm {
-    pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<uint>, spectrum_bins: uint, (spectrum_min, spectrum_max): (f64, f64)) -> Vec<Tile> {
+    pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<u32>, spectrum_bins: usize, (spectrum_min, spectrum_max): (f64, f64)) -> Vec<Tile> {
         match *self {
             RenderAlgorithm::Simple {tile_size, ..} => {
-                let tiles_x = (image_size.x as f32 / tile_size as f32).ceil() as uint;
-                let tiles_y = (image_size.y as f32 / tile_size as f32).ceil() as uint;
+                let tiles_x = (image_size.x as f32 / tile_size as f32).ceil() as u32;
+                let tiles_y = (image_size.y as f32 / tile_size as f32).ceil() as u32;
 
                 let mut tiles = Vec::new();
 
-                for y in range(0, tiles_y) {
-                    for x in range(0, tiles_x) {
+                for y in 0..tiles_y {
+                    for x in 0..tiles_x {
                         let from = Vector2::new(x * tile_size, y * tile_size);
                         let size = Vector2::new(min(image_size.x - from.x, tile_size), min(image_size.y - from.y, tile_size));
 
@@ -84,11 +88,11 @@ impl RenderAlgorithm {
     pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World, renderer: &Renderer) {
         match *self {
             RenderAlgorithm::Simple {..} => {
-                let mut rng: XorShiftRng = rand::task_rng().gen();
+                let mut rng: XorShiftRng = rand::thread_rng().gen();
 
-                for _ in range(0, tile.pixel_count() * renderer.pixel_samples) {
+                for _ in 0..(tile.pixel_count() * renderer.pixel_samples as usize) {
                     let position = tile.sample_position(&mut rng);
-                    let wavelengths = range(0, renderer.spectrum_samples).map(|_| tile.sample_wavelength(&mut rng)).collect();
+                    let wavelengths = (0..renderer.spectrum_samples).map(|_| tile.sample_wavelength(&mut rng)).collect();
 
                     let ray = camera.ray_towards(&position, &mut rng);
                     let samples = tracer::trace(&mut rng, ray, wavelengths, world, renderer.bounces, renderer.light_samples);
@@ -112,7 +116,7 @@ fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, conf
 
     let threads = match items.remove("threads") {
         Some(v) => try!(FromConfig::from_config(v), "threads"),
-        None => std::rt::default_sched_threads()
+        None => num_cpus::get()
     };
 
     let bounces = match items.remove("bounces") {
@@ -150,7 +154,7 @@ fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, conf
     )
 }
 
-fn decode_spectrum(items: HashMap<String, config::ConfigItem>) -> Result<(uint, uint, (f64, f64)), String> {
+fn decode_spectrum(items: HashMap<String, config::ConfigItem>) -> Result<(u32, usize, (f64, f64)), String> {
     let mut items = items;
 
     let samples = match items.remove("samples") {
@@ -215,10 +219,12 @@ impl Spectrum {
 pub struct SpectrumSegments<'a> {
     start: f64,
     segment_width: f64,
-    values: Enumerate<Items<'a, f64>>
+    values: Enumerate<Iter<'a, f64>>
 }
 
-impl<'a> std::iter::Iterator<Segment> for SpectrumSegments<'a> {
+impl<'a> std::iter::Iterator for SpectrumSegments<'a> {
+    type Item = Segment;
+
     fn next(&mut self) -> Option<Segment> {
         match self.values.next() {
             Some((i, &v)) => Some(Segment {
@@ -242,7 +248,7 @@ pub struct Area<S> {
     pub size: Vector2<S>
 }
 
-impl<S: Mul<S, S>> Area<S> {
+impl<S> Area<S> where for<'a> &'a S: Mul<&'a S, Output=S> {
     pub fn new(from: Vector2<S>, size: Vector2<S>) -> Area<S> {
         Area {
             from: from,
@@ -251,7 +257,7 @@ impl<S: Mul<S, S>> Area<S> {
     }
 
     pub fn area(&self) -> S {
-        self.size.x * self.size.y
+        &self.size.x * &self.size.y
     }
 }
 
@@ -267,12 +273,14 @@ impl Pixel {
 
 pub struct Pixels<'a> {
     tile: &'a Tile,
-    x_counter: uint,
-    y_counter: uint
+    x_counter: u32,
+    y_counter: u32
 }
 
-impl<'a> Iterator<(Spectrum, Vector2<uint>)> for Pixels<'a> {
-    fn next(&mut self) -> Option<(Spectrum, Vector2<uint>)> {
+impl<'a> Iterator for Pixels<'a> {
+    type Item = (Spectrum, Vector2<u32>);
+
+    fn next(&mut self) -> Option<(Spectrum, Vector2<u32>)> {
         if self.y_counter >= self.tile.screen_area().size.y {
             None
         } else {
@@ -297,7 +305,7 @@ pub struct Sample {
 }
 
 pub struct Tile {
-    screen_area: Area<uint>,
+    screen_area: Area<u32>,
     camera_area: Area<f64>,
     wavelength_from: f64,
     wavelength_to: f64,
@@ -307,25 +315,30 @@ pub struct Tile {
 }
 
 impl Tile {
-    pub fn new(screen_area: Area<uint>, camera_area: Area<f64>, wavelength_from: f64, wavelength_to: f64, spectrum_steps: uint) -> Tile {
+    pub fn new(screen_area: Area<u32>, camera_area: Area<f64>, wavelength_from: f64, wavelength_to: f64, spectrum_steps: usize) -> Tile {
+        let area = screen_area.area();
+        let screen_w = screen_area.size.x;
+        let screen_h = screen_area.size.y;
+        let camera_w = camera_area.size.x;
+        let camera_h = camera_area.size.y;
         Tile {
             screen_area: screen_area,
             camera_area: camera_area,
             wavelength_from: wavelength_from,
             wavelength_to: wavelength_to,
             wavelength_width: wavelength_to - wavelength_from,
-            screen_camera_ratio: Vector2::new(screen_area.size.x as f64 / camera_area.size.x, screen_area.size.y as f64 / camera_area.size.y),
-            pixels: Vec::from_fn(screen_area.area(), |_| Pixel {
-                spectrum: Vec::from_elem(spectrum_steps, (0.0, 0.0))
-            })
+            screen_camera_ratio: Vector2::new(screen_w as f64 / camera_w, screen_h as f64 / camera_h),
+            pixels: (0..area).map(|_| Pixel {
+                spectrum: vec![(0.0, 0.0); spectrum_steps]
+            }).collect()
         }
     }
 
-    pub fn screen_area(&self) -> &Area<uint> {
+    pub fn screen_area(&self) -> &Area<u32> {
         &self.screen_area
     }
 
-    pub fn pixel_count(&self) -> uint {
+    pub fn pixel_count(&self) -> usize {
         self.pixels.len()
     }
 
@@ -337,8 +350,8 @@ impl Tile {
         }
     }
 
-    pub fn pixel(&self, x: uint, y: uint) -> Spectrum {
-        let values = self.pixels[x + y * self.screen_area.size.x].final_values();
+    pub fn pixel(&self, x: u32, y: u32) -> Spectrum {
+        let values = self.pixels[x as usize + y as usize * self.screen_area.size.x as usize].final_values();
         Spectrum::new(self.wavelength_from, self.wavelength_to, values)
     }
 
@@ -354,14 +367,14 @@ impl Tile {
 
     pub fn expose(&mut self, sample: Sample, position: Vector2<f64>) {
         let offset = position.sub_v(&self.camera_area.from);
-        let x = (offset.x * self.screen_camera_ratio.x) as uint;
-        let y = (offset.y * self.screen_camera_ratio.y) as uint;
-        let &Pixel{ref mut spectrum} = &mut self.pixels[x + y * self.screen_area.size.x];
+        let x = (offset.x * self.screen_camera_ratio.x) as usize;
+        let y = (offset.y * self.screen_camera_ratio.y) as usize;
+        let &mut Pixel{ref mut spectrum} = &mut self.pixels[x + y * self.screen_area.size.x as usize];
 
-        let index = ((sample.wavelength - self.wavelength_from) / self.wavelength_width * spectrum.len() as f64) as uint;
+        let index = ((sample.wavelength - self.wavelength_from) / self.wavelength_width * spectrum.len() as f64) as usize;
 
         if index <= spectrum.len() {
-            let &(ref mut brightness, ref mut weight) = &mut spectrum[min(index, index - 1)];
+            let &mut (ref mut brightness, ref mut weight) = &mut spectrum[min(index, index - 1)];
             *brightness += sample.brightness * sample.weight;
             *weight += sample.weight;
         }

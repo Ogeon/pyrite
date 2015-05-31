@@ -1,13 +1,12 @@
 use std::collections::HashMap;
-use std::simd;
 use std::f64::consts;
-use std::rand::Rng;
-use std::num::{Float, FloatMath};
+
+use rand::Rng;
 
 use cgmath::{Vector, EuclideanVector, Vector2};
 use cgmath::{Point, Point3};
 use cgmath::{AffineMatrix3, Transform};
-use cgmath::{Angle, ToRad, cos, sin, deg};
+use cgmath::{Angle, Rad, cos, sin, deg};
 use cgmath::{Ray, Ray3};
 
 use renderer::Area;
@@ -29,7 +28,7 @@ pub enum Camera {
 }
 
 impl Camera {
-    pub fn to_view_area(&self, area: &Area<uint>, image_size: &Vector2<uint>) -> Area<f64> {
+    pub fn to_view_area(&self, area: &Area<u32>, image_size: &Vector2<u32>) -> Area<f64> {
         let float_image_size = Vector2::new(image_size.x as f64, image_size.y as f64);
         let float_coord = Vector2::new(area.from.x as f64, area.from.y as f64);
         let float_size = Vector2::new(area.size.x as f64, area.size.y as f64);
@@ -43,16 +42,14 @@ impl Camera {
     pub fn ray_towards<R: Rng>(&self, target: &Vector2<f64>, rng: &mut R) -> Ray3<f64> {
         match *self {
             Camera::Perspective { ref transform, view_plane, focus_distance, aperture } => {
-                let v_plane = simd::f64x2(view_plane, view_plane);
-                let f_distance = simd::f64x2(focus_distance, focus_distance);
-                let target = simd::f64x2(target.x, target.y);
-                let simd::f64x2(focus_x, focus_y) = target / v_plane * f_distance;
+                let focus_x = target.x / view_plane * focus_distance;
+                let focus_y = target.y / view_plane * focus_distance;
 
                 let target = Point3::new(focus_x, -focus_y, -focus_distance);
 
                 let (origin, mut direction) = if aperture > 0.0 {
-                    let sqrt_r = (aperture * rng.gen()).sqrt();
-                    let psi = consts::PI * 2.0 * rng.gen();
+                    let sqrt_r = (aperture * rng.gen::<f64>()).sqrt();
+                    let psi = consts::PI * 2.0 * rng.gen::<f64>();
                     let lens_x = sqrt_r * psi.cos();
                     let lens_y = sqrt_r * psi.sin();
                     let origin = Point3::new(lens_x, lens_y, 0.0);
@@ -80,7 +77,7 @@ fn decode_perspective(context: &config::ConfigContext, items: HashMap<String, co
 
     let fov: f64 = match items.remove("fov") {
         Some(v) => try!(FromConfig::from_config(v), "fov"),
-        None => return Err(String::from_str("missing field of view ('fov')"))
+        None => return Err("missing field of view ('fov')".into())
     };
 
     let focus_distance: f64 = match items.remove("focus_distance") {
@@ -93,7 +90,7 @@ fn decode_perspective(context: &config::ConfigContext, items: HashMap<String, co
         None => 0.0
     };
 
-    let a = deg(fov / 2.0).to_rad();
+    let a: Rad<_> = deg(fov / 2.0).into();
     let dist = cos(a) / sin(a);
 
     Ok(Camera::Perspective {

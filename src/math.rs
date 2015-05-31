@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::num::{Float, FloatMath};
 
 use cgmath::Vector;
 
@@ -8,9 +7,9 @@ use tracer;
 use config;
 use config::FromConfig;
 
-macro_rules! make_operators(
+macro_rules! make_operators {
     ($($fn_name:ident : $struct_name:ident { $($arg:ident),+ } => $operation:expr),*) => (
-        fn insert_operators<From>(context: &mut config::ConfigContext) {
+        fn insert_operators<From: 'static>(context: &mut config::ConfigContext) {
             $(
                 context.insert_grouped_type("Math", stringify!($struct_name), $fn_name::<From>);
             )*
@@ -19,7 +18,7 @@ macro_rules! make_operators(
 
             struct $struct_name<From> {
                 $(
-                    $arg: Box<tracer::ParametricValue<From, f64> + 'static + Send + Sync>
+                    $arg: Box<tracer::ParametricValue<From, f64>>
                 ),+
             }
 
@@ -32,7 +31,7 @@ macro_rules! make_operators(
                 }
             }
 
-            fn $fn_name<From>(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<From, f64> + 'static + Send + Sync>, String> {
+            fn $fn_name<From: 'static>(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<From, f64>>, String> {
                 let mut fields = fields;
 
                 $(
@@ -43,20 +42,19 @@ macro_rules! make_operators(
                 )+
 
                 Ok(
-                    box $struct_name::<From> {
+                    Box::new($struct_name::<From> {
                         $(
                             $arg: $arg
                         ),+
-                    } as Box<tracer::ParametricValue<From, f64> + 'static + Send + Sync>
+                    }) as Box<tracer::ParametricValue<From, f64>>
                 )
             }
 
         )*
     )
-)
+}
 
 pub mod utils {
-    use std::num::Float;
     use cgmath::{Vector, Vector3};
 
     pub struct Interpolated {
@@ -132,7 +130,7 @@ pub mod utils {
     }
 }
 
-pub fn register_types<From>(context: &mut config::ConfigContext) {
+pub fn register_types<From: 'static>(context: &mut config::ConfigContext) {
     insert_operators::<From>(context);
     context.insert_grouped_type("Math", "Curve", decode_curve::<From>);
 }
@@ -153,7 +151,7 @@ make_operators!{
 }
 
 struct Curve<From> {
-    input: Box<tracer::ParametricValue<From, f64> + 'static + Send + Sync>,
+    input: Box<tracer::ParametricValue<From, f64>>,
     points: utils::Interpolated
 }
 
@@ -163,31 +161,31 @@ impl<From> tracer::ParametricValue<From, f64> for Curve<From> {
     }
 }
 
-fn decode_curve<From>(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<From, f64> + 'static + Send + Sync>, String> {
+fn decode_curve<From: 'static>(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<From, f64>>, String> {
     let mut fields = fields;
 
     let input = match fields.remove("input") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "input"),
-        None => return Err(String::from_str("missing field 'input'"))
+        None => return Err("missing field 'input'".into())
     };
 
     let points = match fields.remove("points") {
         Some(v) => try!(FromConfig::from_config(v), "points"),
-        None => return Err(String::from_str("missing field 'points'"))
+        None => return Err("missing field 'points'".into())
     };
 
     Ok(
-        box Curve::<From> {
+        Box::new(Curve::<From> {
             input: input,
             points: utils::Interpolated { points: points }
-        } as Box<tracer::ParametricValue<From, f64> + 'static + Send + Sync>
+        }) as Box<tracer::ParametricValue<From, f64>>
     )
 }
 
 
 struct Fresnel {
-    ior: Box<tracer::ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>,
-    env_ior: Box<tracer::ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
+    ior: Box<tracer::ParametricValue<tracer::RenderContext, f64>>,
+    env_ior: Box<tracer::ParametricValue<tracer::RenderContext, f64>>
 }
 
 impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
@@ -203,23 +201,23 @@ impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
     }
 }
 
-fn decode_fresnel(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>, String> {
+fn decode_fresnel(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<tracer::RenderContext, f64>>, String> {
     let mut fields = fields;
 
     let ior = match fields.remove("ior") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "ior"),
-        None => return Err(String::from_str("missing field 'ior'"))
+        None => return Err("missing field 'ior'".into())
     };
 
     let env_ior = match fields.remove("env_ior") {
         Some(v) => try!(tracer::decode_parametric_number(context, v), "env_ior"),
-        None => box 1.0f64 as Box<tracer::ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
+        None => Box::new(1.0f64) as Box<tracer::ParametricValue<tracer::RenderContext, f64>>
     };
 
     Ok(
-        box Fresnel {
+        Box::new(Fresnel {
             ior: ior,
             env_ior: env_ior
-        } as Box<tracer::ParametricValue<tracer::RenderContext, f64> + 'static + Send + Sync>
+        })
     )
 }

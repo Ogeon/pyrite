@@ -1,10 +1,11 @@
 use std;
-use std::rand::Rng;
 use std::sync::Arc;
 use std::collections::HashMap;
-use std::io::{File, BufferedReader};
-use std::simd;
-use std::num::{Float, FloatMath};
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
+
+use rand::Rng;
 
 use cgmath::{Vector, EuclideanVector, Vector3};
 use cgmath::{Ray, Ray3};
@@ -23,10 +24,10 @@ pub type Brdf = fn(ray_in: &Vector3<f64>, ray_out: &Vector3<f64>, normal: &Vecto
 
 pub trait Material {
     fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection;
-    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<RenderContext, f64> + Send + Sync>;
+    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<RenderContext, f64>>;
 }
 
-pub trait ParametricValue<From, To> {
+pub trait ParametricValue<From, To>: Send + Sync {
     fn get(&self, i: &From) -> To; 
 }
 
@@ -50,7 +51,7 @@ pub trait ObjectContainer {
     fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)>;
 }
 
-impl ObjectContainer for bkdtree::BkdTree<Arc<shapes::Shape>> {
+impl<'a> ObjectContainer for bkdtree::BkdTree<BkdRay<'a>, Arc<shapes::Shape>> {
     fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
         let ray = BkdRay(ray);
         self.find(&ray).map(|(normal, object)| (normal, object.get_material()))
@@ -60,17 +61,17 @@ impl ObjectContainer for bkdtree::BkdTree<Arc<shapes::Shape>> {
 pub struct BkdRay<'a>(pub &'a Ray3<f64>);
 
 impl<'a> bkdtree::Ray for BkdRay<'a> {
-    fn plane_intersections(&self, min: f64, max: f64, axis: uint) -> Option<(f64, f64)> {
+    fn plane_intersections(&self, min: f64, max: f64, axis: usize) -> Option<(f64, f64)> {
         let &BkdRay(ray) = self;
 
         let (origin, direction) = match axis {
-            0 => (simd::f64x2(ray.origin.x, ray.origin.x), simd::f64x2(ray.direction.x, ray.direction.x)),
-            1 => (simd::f64x2(ray.origin.y, ray.origin.y), simd::f64x2(ray.direction.y, ray.direction.y)),
-            _ => (simd::f64x2(ray.origin.z, ray.origin.z), simd::f64x2(ray.direction.z, ray.direction.z))
+            0 => (ray.origin.x, ray.direction.x),
+            1 => (ray.origin.y, ray.direction.y),
+            _ => (ray.origin.z, ray.direction.z)
         };
 
-        let plane = simd::f64x2(min, max);
-        let simd::f64x2(min, max) = (plane - origin) / direction;
+        let min = (min - origin) / direction;
+        let max = (max - origin) / direction;
         let far = min.max(max);
 
         if far > 0.0 {
@@ -82,17 +83,16 @@ impl<'a> bkdtree::Ray for BkdRay<'a> {
     }
 
     #[inline]
-    fn plane_distance(&self, min: f64, max: f64, axis: uint) -> (f64, f64) {
+    fn plane_distance(&self, min: f64, max: f64, axis: usize) -> (f64, f64) {
         let &BkdRay(ray) = self;
 
         let (origin, direction) = match axis {
-            0 => (simd::f64x2(ray.origin.x, ray.origin.x), simd::f64x2(ray.direction.x, ray.direction.x)),
-            1 => (simd::f64x2(ray.origin.y, ray.origin.y), simd::f64x2(ray.direction.y, ray.direction.y)),
-            _ => (simd::f64x2(ray.origin.z, ray.origin.z), simd::f64x2(ray.direction.z, ray.direction.z))
+            0 => (ray.origin.x, ray.direction.x),
+            1 => (ray.origin.y, ray.direction.y),
+            _ => (ray.origin.z, ray.direction.z)
         };
-
-        let plane = simd::f64x2(min, max);
-        let simd::f64x2(min, max) = (plane - origin) / direction;
+        let min = (min - origin) / direction;
+        let max = (max - origin) / direction;
         
         if min < max {
             (min, max)
@@ -103,7 +103,7 @@ impl<'a> bkdtree::Ray for BkdRay<'a> {
 }
 
 pub enum Sky {
-    Color(Box<ParametricValue<RenderContext, f64> + 'static + Send + Sync>)
+    Color(Box<ParametricValue<RenderContext, f64>>)
 }
 
 impl Sky {
@@ -127,8 +127,8 @@ impl World {
 }
 
 pub enum Reflection<'a> {
-    Emit(&'a ParametricValue<RenderContext, f64> + Send + Sync),
-    Reflect(Ray3<f64>, &'a ParametricValue<RenderContext, f64> + Send + Sync, f64, Option<Brdf>),
+    Emit(&'a ParametricValue<RenderContext, f64>),
+    Reflect(Ray3<f64>, &'a ParametricValue<RenderContext, f64>, f64, Option<Brdf>),
     Disperse(Vec<Reflection<'a>>)
 }
 
@@ -146,7 +146,7 @@ pub struct WavelengthSample {
     sample_light: bool
 }
 
-pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f64>, world: &World, bounces: uint, light_samples: uint) -> Vec<WavelengthSample> {
+pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f64>, world: &World, bounces: u32, light_samples: usize) -> Vec<WavelengthSample> {
     let mut ray = ray;
 
     let mut wavelengths = wavelengths;
@@ -159,9 +159,9 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
     }).collect();
     let mut completed = Vec::new();
 
-    for bounce in range(0, bounces) {
+    for bounce in 0..bounces {
         match world.intersect(&ray) {
-            Some((normal, material)) => match material.reflect(wavelengths.as_slice(), &ray, &normal, &mut *rng as &mut FloatRng) {
+            Some((normal, material)) => match material.reflect(&wavelengths, &ray, &normal, &mut *rng as &mut FloatRng) {
                 Reflect(out_ray, color, scale, brdf) => {
                     for sample in traced.iter_mut() {
                         let context = RenderContext {
@@ -174,7 +174,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                     }
 
                     brdf.map(|brdf| {
-                        let direct_light = trace_direct(rng, light_samples, wavelengths.as_slice(), &ray.direction, &normal, world, brdf);
+                        let direct_light = trace_direct(rng, light_samples, &wavelengths, &ray.direction, &normal, world, brdf);
 
                         for (sample, light_sum) in traced.iter_mut().zip(direct_light.into_iter()) {
                             if light_sum > 0.0 {
@@ -197,9 +197,9 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                         if new_reflectance == 0.0 {
                             let sample = traced.swap_remove(i);
                             wavelengths.swap_remove(i);
-                            sample.map(|sample| completed.push(sample));
+                            completed.push(sample);
                         } else {
-                            let &WavelengthSample {ref mut reflectance, ref mut sample_light, ..} = &mut traced[i];
+                            let &mut WavelengthSample {ref mut reflectance, ref mut sample_light, ..} = &mut traced[i];
                             *reflectance = new_reflectance;
                             *sample_light = brdf.is_none() || *sample_light;
                             i += 1;
@@ -240,7 +240,7 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
                                     sample.reflectance *= color.get(&context) * scale;
                                     
                                     brdf.map(|brdf| {
-                                        let direct_light = trace_direct(rng, light_samples, [sample.wavelength].as_slice(), &ray.direction, &normal, world, brdf);
+                                        let direct_light = trace_direct(rng, light_samples, &[sample.wavelength], &ray.direction, &normal, world, brdf);
                                         let light_sum = direct_light[0];
 
                                         if light_sum > 0.0 {
@@ -295,15 +295,15 @@ pub fn trace<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, wavelengths: Vec<f6
     completed
 }
 
-fn trace_branch<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, sample: WavelengthSample, world: &World, bounces: uint, light_samples: uint) -> WavelengthSample {
+fn trace_branch<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, sample: WavelengthSample, world: &World, bounces: u32, light_samples: usize) -> WavelengthSample {
     let mut ray = ray;
     let mut sample = sample;
     let wl = [sample.wavelength];
 
-    for _ in range(0, bounces) {
+    for _ in 0..bounces {
         match world.intersect(&ray) {
             Some((normal, material)) => {
-                let mut reflection = material.reflect(wl.as_slice(), &ray, &normal, &mut *rng as &mut FloatRng);
+                let mut reflection = material.reflect(&wl, &ray, &normal, &mut *rng as &mut FloatRng);
                 loop {
                     match reflection {
                         Disperse(mut reflections) => reflection = reflections.pop().expect("internal error: no reflections in branch"),
@@ -317,7 +317,7 @@ fn trace_branch<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, sample: Waveleng
                             sample.reflectance *= color.get(&context) * scale;
 
                             brdf.map(|brdf| {
-                                let direct_light = trace_direct(rng, light_samples, wl.as_slice(), &ray.direction, &normal, world, brdf);
+                                let direct_light = trace_direct(rng, light_samples, &wl, &ray.direction, &normal, world, brdf);
                                 let light_sum = direct_light[0];
                                 
                                 if light_sum > 0.0 {
@@ -370,9 +370,9 @@ fn trace_branch<R: Rng + FloatRng>(rng: &mut R, ray: Ray3<f64>, sample: Waveleng
     sample
 }
 
-fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: uint, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, world: &'a World, brdf: Brdf) -> Vec<f64> {
+fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: usize, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, world: &'a World, brdf: Brdf) -> Vec<f64> {
     if world.lights.len() == 0 {
-        return Vec::from_elem(samples as uint, 0.0f64);
+        return vec![0.0f64; samples];
     }
 
     let n = if ray_in.dot(&normal.direction) < 0.0 {
@@ -386,7 +386,7 @@ fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: uint, wavelengths: 
     let ref light = world.lights[rng.gen_range(0, world.lights.len())];
     let weight = light.surface_area() * world.lights.len() as f64 / (samples as f64 * 2.0 * std::f64::consts::PI);
 
-    range(0, samples).fold(Vec::from_elem(samples as uint, 0.0f64), |mut sum, _| {
+    (0..samples).fold(vec![0.0f64; samples], |mut sum, _| {
         let target_normal = match light.sample_point(rng) {
             Some(normal) => normal,
             None => return sum
@@ -405,7 +405,7 @@ fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: uint, wavelengths: 
             let scale = weight * cos_in * brdf(ray_in, &normal.direction, &ray_out.direction) / distance;
 
             color.map(|color| match world.intersect(&ray_out) {
-                None => for (&wavelength, mut sum) in wavelengths.iter().zip(sum.iter_mut()) {
+                None => for (&wavelength, sum) in wavelengths.iter().zip(sum.iter_mut()) {
                     let context = RenderContext {
                         wavelength: wavelength,
                         normal: target_normal.direction,
@@ -415,7 +415,7 @@ fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: uint, wavelengths: 
                     *sum += color.get(&context) * scale;
                 },
                 Some((hit_normal, _)) if hit_normal.origin.sub_p(&normal.origin).length2() >= distance - 0.0000001
-                  => for (&wavelength, mut sum) in wavelengths.iter().zip(sum.iter_mut()) {
+                  => for (&wavelength, sum) in wavelengths.iter().zip(sum.iter_mut()) {
                     let context = RenderContext {
                         wavelength: wavelength,
                         normal: target_normal.direction,
@@ -443,23 +443,23 @@ fn decode_sky_color(context: &config::ConfigContext, fields: HashMap<String, con
 
     let color = match fields.remove("color") {
         Some(v) => try!(decode_parametric_number(context, v), "color"),
-        None => return Err(String::from_str("missing field 'color'"))
+        None => return Err("missing field 'color'".into())
     };
 
     Ok(Sky::Color(color))
 }
 
-pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, make_path: |String| -> Path) -> Result<World, String> {
+pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(context: &config::ConfigContext, item: config::ConfigItem, make_path: F) -> Result<World, String> {
     match item {
         config::Structure(_, mut fields) => {
             let sky = match fields.remove("sky") {
                 Some(v) => try!(context.decode_structure_from_group("Sky", v), "sky"),
-                None => return Err(String::from_str("missing field 'sky'"))
+                None => return Err("missing field 'sky'".into())
             };
 
             let object_protos = match fields.remove("objects") {
                 Some(v) => try!(v.into_list(), "objects"),
-                None => return Err(String::from_str("missing field 'objects'"))
+                None => return Err("missing field 'objects'".into())
             };
 
             let mut objects: Vec<Arc<shapes::Shape>> = Vec::new();
@@ -477,7 +477,11 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
                     },
                     shapes::Mesh { file, mut materials } => {
                         let path = make_path(file);
-                        let mut file = BufferedReader::new(File::open(&path));
+                        let file = match File::open(&path) {
+                            Ok(f) => f,
+                            Err(e) => return Err(format!("failed to open {}: {}", path.as_ref().display(), e))
+                        };
+                        let mut file = BufReader::new(file);
                         let obj = obj::Obj::load(&mut file);
                         for object in obj.object_iter() {
                             println!("adding object '{}'", object.name);
@@ -513,34 +517,34 @@ pub fn decode_world(context: &config::ConfigContext, item: config::ConfigItem, m
                 }
             }
 
-            println!("the scene contains {} objects", objects.len())
-            println!("building BKD-Tree... ")
+            println!("the scene contains {} objects", objects.len());
+            println!("building BKD-Tree... ");
             let tree = bkdtree::BkdTree::new(objects, 3);
-            println!("done building BKD-Tree")
+            println!("done building BKD-Tree");
             Ok(World {
                 sky: sky,
                 lights: lights,
-                objects: box tree as Box<ObjectContainer + 'static + Send + Sync>
+                objects: Box::new(tree) as Box<ObjectContainer + 'static + Send + Sync>
             })
         },
-        config::Primitive(v) => Err(format!("unexpected {}", v)),
+        config::Primitive(v) => Err(format!("unexpected {:?}", v)),
         config::List(_) => Err(format!("unexpected list"))
     }
 }
 
-fn vertex_to_point(&[x, y, z]: &[f32, ..3]) -> Point3<f64> {
-    Point3::new(x as f64, y as f64, z as f64)
+fn vertex_to_point(v: &[f32; 3]) -> Point3<f64> {
+    Point3::new(v[0] as f64, v[1] as f64, v[2] as f64)
 }
 
-fn vertex_to_vector(&[x, y, z]: &[f32, ..3]) -> Vector3<f64> {
-    Vector3::new(x as f64, y as f64, z as f64)
+fn vertex_to_vector(v: &[f32; 3]) -> Vector3<f64> {
+    Vector3::new(v[0] as f64, v[1] as f64, v[2] as f64)
 }
 
 fn make_triangle<M>(
     obj: &obj::Obj<M>,
-    (v1, _t1, n1): (uint, Option<uint>, Option<uint>),
-    (v2, _t2, n2): (uint, Option<uint>, Option<uint>),
-    (v3, _t3, n3): (uint, Option<uint>, Option<uint>),
+    (v1, _t1, n1): (usize, Option<usize>, Option<usize>),
+    (v2, _t2, n2): (usize, Option<usize>, Option<usize>),
+    (v3, _t3, n3): (usize, Option<usize>, Option<usize>),
     material: Arc<Box<Material + 'static + Send + Sync>>
 ) -> shapes::Shape {
     let v1 = vertex_to_point(&obj.position()[v1]);
@@ -570,18 +574,21 @@ fn make_triangle<M>(
     }
 }
 
-pub fn decode_parametric_number<From>(context: &config::ConfigContext, item: config::ConfigItem) -> Result<Box<ParametricValue<From, f64> + 'static + Send + Sync>, String> {
+pub fn decode_parametric_number<From: 'static>(context: &config::ConfigContext, item: config::ConfigItem) -> Result<Box<ParametricValue<From, f64>>, String> {
     let group_names = vec!["Math", "Value"];
 
-    let name_collection = match group_names.as_slice() {
-        [name] => format!("'{}'", name),
-        [names.., last] => format!("'{}' or '{}'", names.connect("', '"), last),
-        [] => return Err(String::from_str("internal error: trying to decode structure from one of 0 groups"))
+    let name_collection = if group_names.len() == 1 {
+        format!("'{}'", group_names.first().unwrap())
+    } else if group_names.len() > 1 {
+        let names = &group_names[..group_names.len() - 1];
+        format!("'{}' or '{}'", names.connect("', '"), group_names.last().unwrap())
+    } else {
+        return Err("internal error: trying to decode structure from one of 0 groups".into())
     };
 
     match item {
         config::Structure(..) => context.decode_structure_from_groups(group_names, item),
-        config::Primitive(config::parser::Value::Number(n)) => Ok(box n as Box<ParametricValue<From, f64> + 'static + Send + Sync>),
+        config::Primitive(config::parser::Value::Number(n)) => Ok(Box::new(n) as Box<ParametricValue<From, f64>>),
         v => return Err(format!("expected a number or a structure from group {}, but found {}", name_collection, v))
     }
 }
