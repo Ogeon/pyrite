@@ -519,7 +519,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(context: &config::Config
 
             println!("the scene contains {} objects", objects.len());
             println!("building BKD-Tree... ");
-            let tree = bkdtree::BkdTree::new(objects, 3);
+            let tree = bkdtree::BkdTree::new(objects, 3, 10); //TODO: make arrity configurable
             println!("done building BKD-Tree");
             Ok(World {
                 sky: sky,

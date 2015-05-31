@@ -10,6 +10,17 @@ pub trait Element<R: Ray> {
     fn intersect(&self, ray: &R) -> Option<(f64, Self::Item)>;
 }
 
+impl<R: Ray, E: Element<R>> Element<R> for Option<E> {
+    type Item = E::Item;
+    fn get_bounds_interval(&self, axis: usize) -> (f64, f64) {
+        self.as_ref().map(|e| e.get_bounds_interval(axis)).unwrap()
+    }
+
+    fn intersect(&self, ray: &R) -> Option<(f64, Self::Item)> {
+        self.as_ref().and_then(|e| e.intersect(ray))
+    }
+}
+
 pub trait Ray {
     fn plane_intersections(&self, min: f64, max: f64, axis: usize) -> Option<(f64, f64)>;
     fn plane_distance(&self, min: f64, max: f64, axis: usize) -> (f64, f64);
@@ -28,14 +39,15 @@ pub enum BkdTree<R: Ray, E: Element<R>> {
         beginning: f64,
         end: f64,
         axis: usize,
-        element: E,
+        elements: Vec<E>,
         _phantom_ray: PhantomData<R>
     }
 }
 
 impl<R: Ray, E: Element<R>> BkdTree<R, E> {
-    pub fn new(elements: Vec<E>, dimensions: usize) -> BkdTree<R, E> {
-        construct_tree(elements, dimensions, 0)
+    pub fn new(elements: Vec<E>, dimensions: usize, arrity: usize) -> BkdTree<R, E> {
+        let mut elements: Vec<_> = elements.into_iter().map(|e| Some(e)).collect();
+        construct_tree(&mut elements, dimensions, arrity, 0)
     }
 
     pub fn find(&self, ray: &R) -> Option<(E::Item, &E)> {
@@ -73,13 +85,12 @@ impl<R: Ray, E: Element<R>> BkdTree<R, E> {
                         stack.push((first, first_near.max(near), first_far));
                     }
                 },
-                &Leaf { ref element, .. } => {
-                    match element.intersect(ray) {
-                        Some((new_hit, r)) => if new_hit > epsilon && new_hit < t_hit {
+                &Leaf { ref elements, .. } => {
+                    for (element, (new_hit, r)) in elements.iter().filter_map(|e| e.intersect(ray).map(|r| (e, r))) {
+                        if new_hit > epsilon && new_hit < t_hit {
                             t_hit = new_hit;
                             result = Some((r, element));
-                        },
-                        None => {}
+                        }
                     }
                 }
             }
@@ -96,78 +107,57 @@ impl<R: Ray, E: Element<R>> BkdTree<R, E> {
     }
 }
 
-fn construct_tree<R: Ray, E: Element<R>>(elements: Vec<E>, dimensions: usize, depth: usize) -> BkdTree<R, E> {
-    let mut elements = elements;
-    let axis = get_best_axis(&elements, dimensions);
+fn construct_tree<R: Ray, E: Element<R>>(elements: &mut [Option<E>], dimensions: usize, arrity: usize, depth: usize) -> BkdTree<R, E> {
+    let axis = depth % dimensions;
 
-    if elements.len() == 1 {
-        let element = elements.pop().unwrap();
-        let (beginning, end) = element.get_bounds_interval(axis);
+    if elements.len() <= arrity {
+        let elements: Vec<_> = elements.iter_mut().filter_map(|mut e| e.take()).collect();
+        let (beginning, end) = get_total_bounds(&elements, axis);
 
         Leaf {
             beginning: beginning,
             end: end,
             axis: axis,
-            element: element,
+            elements: elements,
             _phantom_ray: PhantomData
         }
     } else {
         elements.sort_by(|a, b| {
-            let (a_min, a_max) = a.get_bounds_interval(axis);
-            let a_mean = (a_min + a_max) / 2.0;
+            if let (Some(a), Some(b)) = (a.as_ref(), b.as_ref()) {
+                let (a_min, a_max) = a.get_bounds_interval(axis);
+                let a_mean = (a_min + a_max) / 2.0;
 
-            let (b_min, b_max) = b.get_bounds_interval(axis);
-            let b_mean = (b_min + b_max) / 2.0;
+                let (b_min, b_max) = b.get_bounds_interval(axis);
+                let b_mean = (b_min + b_max) / 2.0;
 
-            a_mean.partial_cmp(&b_mean).unwrap_or(Equal)
+                a_mean.partial_cmp(&b_mean).unwrap_or(Equal)
+            } else {
+                unreachable!()
+            }
         });
 
-        let (beginning, end) = get_total_bounds(&elements, axis);
+        let (beginning, end) = get_total_bounds(elements, axis);
 
         let len = elements.len();
         let median = len / 2;
-        let mut element_iter = elements.into_iter();
 
-        let left = element_iter.by_ref().take(median).collect();
-        let right = element_iter.take(len - median).collect();
+        let (left, right) = elements.split_at_mut(median);
 
         Node {
             beginning: beginning,
             end: end,
             axis: axis,
-            left: Box::new(construct_tree(left, dimensions, depth + 1)),
-            right: Box::new(construct_tree(right, dimensions, depth + 1))
+            left: Box::new(construct_tree(left, dimensions, arrity, depth + 1)),
+            right: Box::new(construct_tree(right, dimensions, arrity, depth + 1))
         }
     }
 }
 
-fn get_total_bounds<R: Ray, E: Element<R>>(elements: &Vec<E>, axis: usize) -> (f64, f64) {
+fn get_total_bounds<R: Ray, E: Element<R>>(elements: &[E], axis: usize) -> (f64, f64) {
     elements.iter().fold((1.0f64/0.0, -1.0f64/0.0), |(begin, end), element| {
         let (e_begin, e_end) = element.get_bounds_interval(axis);
         (begin.min(e_begin), end.max(e_end))
     })
-}
-
-fn get_best_axis<R: Ray, E: Element<R>>(elements: &Vec<E>, dimensions: usize) -> usize {
-    let mut scores = Vec::new();
-
-    for axis in 0..dimensions {
-        let mut sum = 0.0;
-
-        for i in 0..elements.len() - 1 {
-            let (base_min, base_max) = elements[i].get_bounds_interval(axis);
-
-            for j in i + 1..elements.len() {
-                let (comp_min, comp_max) = elements[j].get_bounds_interval(axis);
-                sum += base_max.min(comp_max) - base_min.max(comp_min);
-            }
-        }
-
-        scores.push(sum);
-    }
-
-    let (index, _) = scores.iter().enumerate().fold((0, 1.0/0.0), |(best, max), (i, &v)| if v < max {(i, v)} else {(best, max)});
-    index
 }
 
 #[inline]
