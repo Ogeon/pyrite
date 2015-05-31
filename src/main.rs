@@ -3,18 +3,20 @@ extern crate image;
 extern crate obj;
 extern crate genmesh;
 extern crate rand;
-extern crate threadpool;
+extern crate simple_parallel;
 extern crate num_cpus;
+extern crate time;
 
-use std::sync::{Arc, RwLock};
 use std::fs::File;
 use std::path::Path;
 
-use threadpool::ThreadPool;
+use simple_parallel::Pool;
 
 use cgmath::Vector2;
 
 use image::GenericImage;
+
+use time::PreciseTime;
 
 use renderer::Tile;
 
@@ -65,33 +67,14 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
     let image_size = Vector2::new(project.image.width, project.image.height);
 
     let tiles = project.renderer.make_tiles(&project.camera, &image_size);
-    let tile_count = tiles.len();
 
-    let config = Arc::new(RenderContext {
+    let config = RenderContext {
         camera: project.camera,
         world: project.world,
-        pending: RwLock::new(tiles),
-        completed: RwLock::new(Vec::new()),
         renderer: project.renderer
-    });
+    };
 
-    let pool = ThreadPool::new(config.renderer.threads);
-
-    for _ in 0..tile_count {
-        let context = config.clone();
-        pool.execute(move || {
-            let mut tile = {
-                context.pending.write().unwrap().pop().unwrap()
-            };
-            println!("Task rendering tile {:?}", tile.screen_area().from);
-
-            context.renderer.render_tile(&mut tile, &context.camera, &context.world);
-
-            context.completed.write().unwrap().push(tile);
-        })
-    }
-
-    let mut tile_counter = 0;
+    let mut pool = Pool::new(config.renderer.threads);
 
     let mut pixels = image::ImageBuffer::new(image_size.x as u32, image_size.y as u32);
 
@@ -111,35 +94,43 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
 
     let project_path = project_path.as_ref();
     let render_path = project_path.parent().unwrap_or(project_path).join("render.png");
+
+    let f = |mut tile: Tile| {
+        config.renderer.render_tile(&mut tile, &config.camera, &config.world);
+        tile
+    };
+
+    let mut last_print = PreciseTime::now();
     
-    while tile_counter < tile_count {
-        std::thread::sleep_ms(4000);
+    let num_tiles = tiles.len();
+    for (i, (_, tile)) in unsafe { pool.unordered_map(tiles, &f) }.enumerate() {
+        for (spectrum, position) in tile.pixels() {
+            let r = clamp_channel(calculate_channel(&spectrum, &red));
+            let g = clamp_channel(calculate_channel(&spectrum, &green));
+            let b = clamp_channel(calculate_channel(&spectrum, &blue));
+            
+            pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb {
+                data: [r, g, b]
+            })
+        }
 
-        loop {
-            match config.completed.write().unwrap().pop() {
-                Some(tile) => {
-                    for (spectrum, position) in tile.pixels() {
-                        let r = clamp_channel(calculate_channel(&spectrum, &red));
-                        let g = clamp_channel(calculate_channel(&spectrum, &green));
-                        let b = clamp_channel(calculate_channel(&spectrum, &blue));
-                        
-                        pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb {
-                            data: [r, g, b]
-                        })
-                    }
-
-                    tile_counter += 1;
+        if last_print.to(PreciseTime::now()).num_seconds() >= 4 {
+            println!("{:2}%", (i * 100) / num_tiles);
+            match File::create(&render_path) {
+                Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
+                    println!("error while writing image: {}", e);
                 },
-                None => break
+                Err(e) => println!("failed to open/create file for writing: {}", e)
             }
+            last_print = PreciseTime::now();
         }
+    }
 
-        match File::create(&render_path) {
-            Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
-                println!("error while writing image: {}", e);
-            },
-            Err(e) => println!("failed to open/create file for writing: {}", e)
-        }
+    match File::create(&render_path) {
+        Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
+            println!("error while writing image: {}", e);
+        },
+        Err(e) => println!("failed to open/create file for writing: {}", e)
     }
 
     println!("Done!")
@@ -173,8 +164,6 @@ fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::utils::Inte
 struct RenderContext {
     camera: cameras::Camera,
     world: tracer::World,
-    pending: RwLock<Vec<Tile>>,
-    completed: RwLock<Vec<Tile>>,
     renderer: renderer::Renderer
 }
 

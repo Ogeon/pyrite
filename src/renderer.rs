@@ -78,7 +78,7 @@ impl RenderAlgorithm {
                     let a = Vector2::new(a.screen_area.from.x as f32, a.screen_area.from.y as f32);
                     let b = Vector2::new(b.screen_area.from.x as f32, b.screen_area.from.y as f32);
                     let half_size = Vector2::new(image_size.x as f32 / 2.0, image_size.y as f32 / 2.0);
-                    b.sub_v(&half_size).length2().partial_cmp(&a.sub_v(&half_size).length2()).unwrap_or(Equal)
+                    a.sub_v(&half_size).length2().partial_cmp(&b.sub_v(&half_size).length2()).unwrap_or(Equal)
                 });
                 tiles
             }
