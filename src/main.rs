@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(dead_code))]
+
 extern crate cgmath;
 extern crate image;
 extern crate obj;
