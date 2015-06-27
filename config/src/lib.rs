@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 pub use parser::Number;
 
+#[derive(Debug)]
 pub enum Error {
     Parse(parser::Error),
     Io(std::io::Error),
@@ -87,6 +88,14 @@ impl ConfigParser {
         let mut source = String::new();
         let mut file = try!(File::open(&path));
         try!(file.read_to_string(&mut source));
+        self.parse(path, &source)
+    }
+
+    pub fn parse_string(&mut self, source: &str) -> Result<(), Error> {
+        self.parse(".", source)
+    }
+
+    fn parse<P: AsRef<Path>>(&mut self, path: P, source: &str) -> Result<(), Error> {
         let statements = try!(parser::parse(source.chars()));
 
         for statement in statements {
@@ -476,19 +485,11 @@ mod tests {
     use ConfigParser;
     use Node;
     use NodeChild;
-    use parser;
 
     #[test]
     fn assign_object() {
         let mut cfg = ConfigParser::new();
-        let path = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["a".into()]
-        };
-
-        let value = parser::Value::Object(parser::Object::New(vec![]));
-
-        assert!(cfg.assign(path, value).is_ok());
+        cfg.parse_string("a = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::Object {
                 base: None,
@@ -508,15 +509,7 @@ mod tests {
     #[test]
     fn assign_deep_object() {
         let mut cfg = ConfigParser::new();
-
-        let path = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["a".into(), "b".into()]
-        };
-
-        let value = parser::Value::Object(parser::Object::New(vec![]));
-
-        assert!(cfg.assign(path, value).is_ok());
+        cfg.parse_string("a.b = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::Object {
                 base: None,
@@ -544,21 +537,7 @@ mod tests {
     #[test]
     fn assign_in_object() {
         let mut cfg = ConfigParser::new();
-
-        let path_a = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["a".into()]
-        };
-
-        let path_b = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["b".into()]
-        };
-
-        let child = parser::Value::Object(parser::Object::New(vec![]));
-        let value = parser::Value::Object(parser::Object::New(vec![(path_b, child)]));
-
-        assert!(cfg.assign(path_a, value).is_ok());
+        cfg.parse_string("a = { b = {} }").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::Object {
                 base: None,
@@ -586,21 +565,7 @@ mod tests {
     #[test]
     fn assign_to_object() {
         let mut cfg = ConfigParser::new();
-
-        let path_a = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["a".into()]
-        };
-
-        let path_ab = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["a".into(), "b".into()]
-        };
-
-        let child = parser::Value::Object(parser::Object::New(vec![]));
-        let value = parser::Value::Object(parser::Object::New(vec![]));
-
-        assert!(cfg.assign(path_a, value).is_ok());
+        cfg.parse_string("a = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::Object {
                 base: None,
@@ -616,7 +581,7 @@ mod tests {
             }
         ]);
 
-        assert!(cfg.assign(path_ab, child).is_ok());
+        cfg.parse_string("a.b = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::Object {
                 base: None,
@@ -644,33 +609,7 @@ mod tests {
     #[test]
     fn extend_block_style() {
         let mut cfg = ConfigParser::new();
-
-        let path_a = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["a".into()]
-        };
-
-        let path_base = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["a".into()]
-        };
-
-        let path_b = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["b".into()]
-        };
-
-        let path_c = parser::Path {
-            path_type: parser::PathType::Local,
-            path: vec!["c".into()]
-        };
-
-        let child = parser::Value::Object(parser::Object::New(vec![]));
-        let extending = parser::Value::Object(parser::Object::Extension(path_base, Some(parser::ExtensionChanges::BlockStyle(vec![(path_c, child)]))));
-        let value = parser::Value::Object(parser::Object::New(vec![]));
-
-        assert!(cfg.assign(path_a, value).is_ok());
-        assert!(cfg.assign(path_b, extending).is_ok());
+        cfg.parse_string("a = {} b = a { c = {} }").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::Object {
                 base: None,
