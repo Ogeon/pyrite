@@ -38,9 +38,9 @@ pub enum Error {
 
 #[derive(PartialEq, Debug)]
 pub struct Span<T> {
-    item: T,
-    from: Position,
-    to: Position
+    pub item: T,
+    pub from: Position,
+    pub to: Position
 }
 
 #[derive(PartialEq, Debug)]
@@ -57,8 +57,8 @@ pub enum PathType {
 
 #[derive(PartialEq, Debug)]
 pub struct Path {
-    path_type: PathType,
-    path: Vec<String>
+    pub path_type: PathType,
+    pub path: Vec<String>
 }
 
 #[derive(PartialEq, Debug)]
