@@ -18,6 +18,7 @@ pub fn parse<I: IntoIterator<Item=char>>(source: I) -> Result<Vec<Span<Statement
     let mut statements = vec![];
 
     loop {
+        parser.lexer.skip_whitespace();
         match parser.parse_statement() {
             Ok(statement) => statements.push(statement),
             Err(Some(e)) => return Err(e),
