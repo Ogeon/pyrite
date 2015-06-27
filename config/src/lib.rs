@@ -27,14 +27,54 @@ impl From<std::io::Error> for Error {
     }
 }
 
-pub struct Config {
+pub struct ConfigPrelude(ConfigParser);
+
+impl ConfigPrelude {
+    pub fn new() -> ConfigPrelude {
+        ConfigPrelude(ConfigParser::new())
+    }
+
+    pub fn add_prelude_object<'a>(&'a mut self, ident: String) -> PreludeObject<'a> {
+        let id = self.0.add_node(Node::Object {
+            base: None,
+            children: vec![]
+        });
+        self.0.prelude.insert(ident, id);
+
+        PreludeObject {
+            cfg: &mut self.0,
+            id: id
+        }
+    }
+
+    pub fn add_prelude_list<'a>(&'a mut self, ident: String) -> PreludeList<'a> {
+        let id = self.0.add_node(Node::List(vec![]));
+        self.0.prelude.insert(ident, id);
+
+        PreludeList {
+            cfg: &mut self.0,
+            id: id
+        }
+    }
+
+    pub fn add_prelude_value<'a, V: Into<Value>>(&'a mut self, ident: String, value: V) {
+        let id = self.0.add_node(Node::Value(value.into()));
+        self.0.prelude.insert(ident, id);
+    }
+
+    pub fn into_parser(self) -> ConfigParser {
+        self.0
+    }
+}
+
+pub struct ConfigParser {
     nodes: Vec<Node>,
     prelude: HashMap<String, usize>
 }
 
-impl Config {
-    pub fn new() -> Config {
-        Config {
+impl ConfigParser {
+    pub fn new() -> ConfigParser {
+        ConfigParser {
             nodes: vec![Node::Object {
                 base: None,
                 children: vec![]
@@ -227,13 +267,114 @@ impl Config {
     }
 }
 
+
+pub struct PreludeObject<'a> {
+    cfg: &'a mut ConfigParser,
+    id: usize
+}
+
+impl<'a> PreludeObject<'a> {
+    pub fn insert_object<'b>(&'b mut self, ident: String) -> PreludeObject<'b> {
+        let new_id = self.cfg.add_node(Node::Object {
+            base: None,
+            children: vec![]
+        });
+
+        if let &mut Node::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id] {
+            children.push(NodeChild {
+                id: new_id,
+                ident: ident,
+                real: true
+            });
+        }
+
+        PreludeObject {
+            cfg: self.cfg,
+            id: new_id
+        }
+    }
+
+    pub fn insert_list<'b>(&'b mut self, ident: String) -> PreludeList<'b> {
+        let new_id = self.cfg.add_node(Node::List(vec![]));
+
+        if let &mut Node::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id] {
+            children.push(NodeChild {
+                id: new_id,
+                ident: ident,
+                real: true
+            });
+        }
+
+        PreludeList {
+            cfg: self.cfg,
+            id: new_id
+        }
+    }
+
+    pub fn insert_value<V: Into<Value>>(&mut self, ident: String, value: V) {
+        let new_id = self.cfg.add_node(Node::Value(value.into()));
+        if let &mut Node::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id] {
+            children.push(NodeChild {
+                id: new_id,
+                ident: ident,
+                real: true
+            });
+        }
+    }
+}
+
+
+pub struct PreludeList<'a> {
+    cfg: &'a mut ConfigParser,
+    id: usize
+}
+
+impl<'a> PreludeList<'a> {
+    pub fn push_object<'b>(&'b mut self) -> PreludeObject<'b> {
+        let new_id = self.cfg.add_node(Node::Object {
+            base: None,
+            children: vec![]
+        });
+
+        if let &mut Node::List(ref mut items) = &mut self.cfg.nodes[self.id] {
+            items.push(new_id);
+        }
+
+        PreludeObject {
+            cfg: self.cfg,
+            id: new_id
+        }
+    }
+
+    pub fn push_list<'b>(&'b mut self) -> PreludeList<'b> {
+        let new_id = self.cfg.add_node(Node::List(vec![]));
+
+        if let &mut Node::List(ref mut items) = &mut self.cfg.nodes[self.id] {
+            items.push(new_id);
+        }
+
+        PreludeList {
+            cfg: self.cfg,
+            id: new_id
+        }
+    }
+
+    pub fn push_value<V: Into<Value>>(&mut self, value: V) {
+        let new_id = self.cfg.add_node(Node::Value(value.into()));
+        if let &mut Node::List(ref mut items) = &mut self.cfg.nodes[self.id] {
+            items.push(new_id);
+        }
+    }
+}
+
 #[derive(PartialEq, Debug)]
 enum Node {
     Object {
         base: Option<usize>,
         children: Vec<NodeChild>
     },
-    Value(Value)
+    Value(Value),
+    List(Vec<usize>)
 }
 
 #[derive(PartialEq, Debug)]
@@ -243,11 +384,39 @@ struct NodeChild {
     real: bool
 }
 
+macro_rules! impl_value_from_float {
+    ($($ty: ty),+) => (
+        $(impl From<$ty> for Value {
+            fn from(v: $ty) -> Value {
+                Value::Number(Number::Float(v as f64))
+            }
+        })+
+    )
+}
+
+macro_rules! impl_value_from_int {
+    ($($ty: ty),+) => (
+        $(impl From<$ty> for Value {
+            fn from(v: $ty) -> Value {
+                Value::Number(Number::Integer(v as i64))
+            }
+        })+
+    )
+}
+
 #[derive(PartialEq, Debug)]
-enum Value {
-    List(Vec<Node>),
+pub enum Value {
     Number(Number),
     String(String)
+}
+
+impl_value_from_float!(f32, f64);
+impl_value_from_int!(i8, i16, i32, i64, u8, u16, u32);
+
+impl From<String> for Value {
+    fn from(v: String) -> Value {
+        Value::String(v)
+    }
 }
 
 struct StackEntry {
@@ -304,14 +473,14 @@ impl<'a, T> DerefMut for MaybeOwnedMut<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use Config;
+    use ConfigParser;
     use Node;
     use NodeChild;
     use parser;
 
     #[test]
     fn assign_object() {
-        let mut cfg = Config::new();
+        let mut cfg = ConfigParser::new();
         let path = parser::Path {
             path_type: parser::PathType::Local,
             path: vec!["a".into()]
@@ -338,7 +507,7 @@ mod tests {
 
     #[test]
     fn assign_deep_object() {
-        let mut cfg = Config::new();
+        let mut cfg = ConfigParser::new();
 
         let path = parser::Path {
             path_type: parser::PathType::Local,
@@ -374,7 +543,7 @@ mod tests {
 
     #[test]
     fn assign_in_object() {
-        let mut cfg = Config::new();
+        let mut cfg = ConfigParser::new();
 
         let path_a = parser::Path {
             path_type: parser::PathType::Local,
@@ -416,7 +585,7 @@ mod tests {
 
     #[test]
     fn assign_to_object() {
-        let mut cfg = Config::new();
+        let mut cfg = ConfigParser::new();
 
         let path_a = parser::Path {
             path_type: parser::PathType::Local,
@@ -474,7 +643,7 @@ mod tests {
 
     #[test]
     fn extend_block_style() {
-        let mut cfg = Config::new();
+        let mut cfg = ConfigParser::new();
 
         let path_a = parser::Path {
             path_type: parser::PathType::Local,
