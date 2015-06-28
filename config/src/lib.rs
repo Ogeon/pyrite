@@ -13,7 +13,8 @@ pub use parser::Number;
 pub enum Error {
     Parse(parser::Error),
     Io(std::io::Error),
-    NotAnObject(usize)
+    NonObjectTemplate(Vec<Selection>),
+    NotAnObject(Vec<Selection>)
 }
 
 impl From<parser::Error> for Error {
@@ -113,29 +114,70 @@ impl ConfigParser {
             }
         }
 
+        let mut stack = vec![];
+        self.check_templates(&mut stack, &self.nodes[0])
+    }
+
+    fn check_templates(&self, stack: &mut Vec<Selection>, node: &Node) -> Result<(), Error> {
+        match *node {
+            Node::Object { ref base, ref children } => {
+                if let &Some(template_id) = base {
+                    match self.nodes[template_id] {
+                        Node::Object { .. } => {},
+                        _ => {
+                            return Err(Error::NonObjectTemplate(stack.clone()))
+                        }
+                    }
+                }
+
+                for child in children {
+                    stack.push(Selection::Ident(child.ident.clone()));
+                    try!(self.check_templates(stack, &self.nodes[child.id]));
+                    stack.pop();
+                }
+            },
+            Node::List(ref items) => for (i, item) in items.iter().enumerate() {
+                stack.push(Selection::Index(i));
+                try!(self.check_templates(stack, &self.nodes[*item]));
+                stack.pop();
+            },
+            Node::Value(_) => {}
+        }
+
         Ok(())
     }
 
     fn assign(&mut self, path: parser::Path, value: parser::Value) -> Result<(), Error> {
         let mut stack = Stack::new();
-        self.assign_with_stack(&mut stack, path, value)
+        self.assign_with_stack(&mut stack, Some(path), value)
     }
 
-    fn assign_with_stack(&mut self, stack: &mut Stack, path: parser::Path, value: parser::Value) -> Result<(), Error> {
-        let parser::Path {
-            path_type,
-            path
-        } = path;
+    fn assign_with_stack(&mut self, stack: &mut Stack, path: Option<parser::Path>, value: parser::Value) -> Result<(), Error> {
+        let (path, mut stack) = if let Some(path) = path {
+            let parser::Path {
+                path_type,
+                path
+            } = path;
 
-        let mut stack = if let parser::PathType::Global = path_type {
-            MaybeOwnedMut::Owned(Stack::new())
+            let stack = if let parser::PathType::Global = path_type {
+                MaybeOwnedMut::Owned(Stack::new())
+            } else {
+                MaybeOwnedMut::Borrowed(stack)
+            };
+
+            (Some(path), stack)
         } else {
-            MaybeOwnedMut::Borrowed(stack)
+            (None, MaybeOwnedMut::Borrowed(stack))
         };
 
         let current_root = stack.top().map_or(0, |e| e.id);
         
-        try!(self.push_stack_section(&mut stack, path));
+        let should_pop = if let Some(path) = path {
+            try!(self.push_stack_section(&mut stack, path));
+            true
+        } else {
+            false
+        };
 
         let target_id = stack.top().unwrap().id;
 
@@ -147,7 +189,7 @@ impl ConfigParser {
                 };
 
                 for (path, value) in children {
-                    try!(self.assign_with_stack(&mut stack, path, value));
+                    try!(self.assign_with_stack(&mut stack, Some(path), value));
                 }
             },
             parser::Value::Object(parser::Object::Extension(base, extension)) => {
@@ -161,7 +203,7 @@ impl ConfigParser {
                 match extension {
                     Some(parser::ExtensionChanges::BlockStyle(changes)) => {
                         for (path, value) in changes {
-                            try!(self.assign_with_stack(&mut stack, path, value));
+                            try!(self.assign_with_stack(&mut stack, Some(path), value));
                         }
                     },
                     Some(parser::ExtensionChanges::FunctionStyle(changes)) => {
@@ -173,13 +215,31 @@ impl ConfigParser {
                 }
             },
             parser::Value::List(l) => {
-                unimplemented!();
+                let mut items = vec![];
+
+                for (i, item) in l.into_iter().enumerate() {
+                    let id = self.add_node(Node::Object {
+                        base: None,
+                        children: vec![]
+                    });
+                    stack.entries.push(vec![StackEntry {
+                        id: id,
+                        selection: Selection::Index(i)
+                    }]);
+                    try!(self.assign_with_stack(&mut stack, None, item));
+                    stack.pop_section();
+                    items.push(id);
+                };
+
+                self.nodes[target_id] = Node::List(items);
             },
             parser::Value::String(s) => self.nodes[target_id] = Node::Value(Value::String(s)),
             parser::Value::Number(n) => self.nodes[target_id] = Node::Value(Value::Number(n))
         }
 
-        stack.pop_section();
+        if should_pop {
+            stack.pop_section();
+        }
 
         Ok(())
     }
@@ -195,7 +255,7 @@ impl ConfigParser {
                     c.id
                 })
             } else {
-                return Err(Error::NotAnObject(current_root));
+                return Err(Error::NotAnObject(stack.to_path()));
             };
 
             let id = maybe_id.unwrap_or_else(|| {
@@ -217,7 +277,7 @@ impl ConfigParser {
 
             section.push(StackEntry {
                 id: id,
-                name: ident
+                selection: Selection::Ident(ident)
             });
 
             current_root = id;
@@ -234,7 +294,11 @@ impl ConfigParser {
             root_id
         };
 
+        let mut selection_path = vec![];
+
         for (i, ident) in path.path.into_iter().enumerate() {
+            selection_path.push(Selection::Ident(ident.clone()));
+
             let maybe_id = if let Node::Object { ref children, .. } = self.nodes[current_root] {
                 children.iter().find(|c| c.ident == ident).map(|c| c.id).or_else(|| if i == 0 {
                     self.prelude.get(&ident).cloned()
@@ -242,7 +306,7 @@ impl ConfigParser {
                     None
                 })
             } else {
-                return Err(Error::NotAnObject(current_root));
+                return Err(Error::NotAnObject(selection_path));
             };
 
             let id = if let Some(id) = maybe_id {
@@ -428,9 +492,15 @@ impl From<String> for Value {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum Selection {
+    Ident(String),
+    Index(usize)
+}
+
 struct StackEntry {
     pub id: usize,
-    pub name: String
+    pub selection: Selection
 }
 
 struct Stack {
@@ -450,6 +520,10 @@ impl Stack {
 
     fn pop_section(&mut self) {
         self.entries.pop();
+    }
+
+    fn to_path(&self) -> Vec<Selection> {
+        self.entries.iter().flat_map(|v| v.iter()).map(|e| e.selection.clone()).collect()
     }
 }
 
@@ -641,5 +715,28 @@ mod tests {
                 children: vec![]
             }
         ]);
+    }
+
+    #[test]
+    fn insert_list() {
+        let mut cfg = ConfigParser::new();
+        cfg.parse_string("a = []").unwrap();
+        assert_eq!(cfg.nodes, vec![
+            Node::Object {
+                base: None,
+                children: vec![NodeChild {
+                    id: 1,
+                    ident: "a".into(),
+                    real: true
+                }]
+            },
+            Node::List(vec![])
+        ])
+    }
+
+    #[test]
+    fn extend_list() {
+        let mut cfg = ConfigParser::new();
+        assert!(cfg.parse_string("a = [] b = a { c = {} }").is_err());
     }
 }
