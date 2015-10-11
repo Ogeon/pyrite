@@ -1,0 +1,69 @@
+use std::str::FromStr;
+
+use ast;
+
+grammar;
+
+pub Statements: Vec<ast::Statement> = {
+    <s:(<Statement>)*> => s
+};
+
+Statement: ast::Statement = {
+    <i:Include> => ast::Statement::Include(i),
+    <a:Assignment> => {
+        let (path, val) = a;
+        ast::Statement::Assign(path, val)
+    },
+};
+
+Include: String = "include" <s:Str> => s.into();
+
+Assignment: (ast::Path, ast::Value) = <p:Path> "=" <v:Value> => (p, v);
+
+Path: ast::Path = <g:("global" ".")?> <p:(<Ident>".")*> <last:Ident> => {
+    let mut p = p;
+    p.push(last);
+    ast::Path {
+        path_type: if g.is_some() { ast::PathType::Global } else { ast::PathType::Local },
+        path: p
+    }
+};
+
+Ident: String = <i:r"[A-Za-z_]([A-Za-z_0-9]*)"> => i.into();
+
+Value: ast::Value = {
+    <n:Number> => ast::Value::Number(n),
+    <s:Str> => ast::Value::String(s),
+    <l:List> => ast::Value::List(l),
+    <o:Object> => ast::Value::Object(o),
+};
+
+Object: ast::Object = {
+    <p:Path> <t:Tuple> => ast::Object::Extension(p, Some(ast::ExtensionChanges::FunctionStyle(t))),
+    <p:Path> <b:Block> => ast::Object::Extension(p, Some(ast::ExtensionChanges::BlockStyle(b))),
+    <p:Path> => ast::Object::Extension(p, None),
+    <b:Block> => ast::Object::New(b),
+};
+
+Tuple: Vec<ast::Value> = Comma<"(", ")">;
+
+List: Vec<ast::Value> = Comma<"[", "]">;
+
+Comma<O, C>: Vec<ast::Value> = O <l:(<Value> ",")*> <last:Value?> C => {
+    let mut l = l;
+    if let Some(last) = last {
+        l.push(last);
+    }
+    l
+};
+
+Block: Vec<(ast::Path, ast::Value)> = "{" <l:(<Assignment>)*> "}" => l;
+
+Number: ast::Number = {
+    <n:Float> => ast::Number::Float(n),
+    <n:Int> => ast::Number::Integer(n),
+};
+
+Int: i64 = <s:r"-?[0-9]+"> => s.parse().unwrap();
+Float: f64 = <s:r"-?([0-9]+)\.([0-9]+)"> => s.parse().unwrap();
+Str: String = <s:r#""[^"]*""#> => s[1..s.len()-1].into();

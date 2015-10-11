@@ -1,5 +1,7 @@
+extern crate lalrpop_util;
+
+mod ast;
 mod parser;
-mod lexer;
 
 use std::path::Path;
 use std::fs::File;
@@ -7,7 +9,8 @@ use std::io::Read;
 use std::ops::{Deref, DerefMut};
 use std::collections::HashMap;
 
-pub use parser::Number;
+
+pub use ast::Number;
 
 #[derive(Debug)]
 pub enum Error {
@@ -92,12 +95,16 @@ impl ConfigParser {
         self.parse(path, &source)
     }
 
-    pub fn parse_string(&mut self, source: &str) -> Result<(), Error> {
+    pub fn parse_string(&mut self, source: &'a str) -> Result<(), Error> {
         self.parse(".", source)
     }
 
+    pub fn root(&self) -> Entry {
+        Entry::root_of(self)
+    }
+
     fn parse<P: AsRef<Path>>(&mut self, path: P, source: &str) -> Result<(), Error> {
-        let statements = try!(parser::parse(source.chars()));
+        let statements = try!(parser::parse(source));
 
         for statement in statements {
             let parser::Span {
