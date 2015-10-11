@@ -3,19 +3,19 @@ use std::collections::HashMap;
 use Value;
 use NodeType;
 use NodeChild;
-use ConfigParser;
+use Parser;
 use Number;
 use Decoder;
 use Decode;
 
 #[derive(Clone)]
 pub struct Entry<'a> {
-    cfg: &'a ConfigParser,
+    cfg: &'a Parser,
     id: usize
 }
 
 impl<'a> Entry<'a> {
-    pub fn root_of(cfg: &ConfigParser) -> Entry {
+    pub fn root_of(cfg: &Parser) -> Entry {
         Entry {
             cfg: cfg,
             id: 0
@@ -146,7 +146,7 @@ float_from_entry!(f32, f64);
 
 #[derive(Clone)]
 pub struct List<'a> {
-    cfg: &'a ConfigParser,
+    cfg: &'a Parser,
     list: &'a [usize]
 }
 
@@ -191,7 +191,7 @@ impl<'a> IntoIterator for &'a List<'a> {
 }
 
 pub struct IntoIter<'a> {
-    cfg: &'a ConfigParser,
+    cfg: &'a Parser,
     iter: ::std::slice::Iter<'a, usize>
 }
 
@@ -208,7 +208,7 @@ impl<'a> Iterator for IntoIter<'a> {
 
 #[derive(Clone)]
 pub struct Object<'a> {
-    cfg: &'a ConfigParser,
+    cfg: &'a Parser,
     template: Option<usize>,
     children: &'a HashMap<String, NodeChild>
 }

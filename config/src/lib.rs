@@ -4,6 +4,7 @@ extern crate lalrpop_util;
 mod ast;
 mod parser;
 pub mod entry;
+pub mod prelude;
 
 use std::path::Path;
 use std::fs::File;
@@ -17,6 +18,7 @@ use anymap::any::Any;
 use entry::Entry;
 
 pub use ast::Number;
+pub use prelude::Prelude;
 
 #[derive(Debug)]
 pub enum Error {
@@ -51,63 +53,14 @@ impl From<std::io::Error> for Error {
     }
 }
 
-pub struct ConfigPrelude(ConfigParser);
-
-impl ConfigPrelude {
-    pub fn new() -> ConfigPrelude {
-        ConfigPrelude(ConfigParser::new())
-    }
-
-    pub fn add_prelude_object<'a>(&'a mut self, ident: String) -> PreludeObject<'a> {
-        let id = self.0.add_node(Node::new(
-            NodeType::Object {
-                base: None,
-                children: HashMap::new()
-            },
-            0
-        ));
-        self.0.prelude.insert(ident, id);
-
-        PreludeObject {
-            cfg: &mut self.0,
-            id: id
-        }
-    }
-
-    pub fn add_prelude_list<'a>(&'a mut self, ident: String) -> PreludeList<'a> {
-        let id = self.0.add_node(Node::new(
-            NodeType::List(vec![]),
-            0
-        ));
-        self.0.prelude.insert(ident, id);
-
-        PreludeList {
-            cfg: &mut self.0,
-            id: id
-        }
-    }
-
-    pub fn add_prelude_value<'a, V: Into<Value>>(&'a mut self, ident: String, value: V) {
-        let id = self.0.add_node(Node::new(
-            NodeType::Value(value.into()),
-            0
-        ));
-        self.0.prelude.insert(ident, id);
-    }
-
-    pub fn into_parser(self) -> ConfigParser {
-        self.0
-    }
-}
-
-pub struct ConfigParser {
+pub struct Parser {
     nodes: Vec<Node>,
     prelude: HashMap<String, usize>
 }
 
-impl ConfigParser {
-    pub fn new() -> ConfigParser {
-        ConfigParser {
+impl Parser {
+    pub fn new() -> Parser {
+        Parser {
             nodes: vec![Node::new(
                 NodeType::Object {
                     base: None,
@@ -482,137 +435,6 @@ impl ConfigParser {
     }
 }
 
-
-pub struct PreludeObject<'a> {
-    cfg: &'a mut ConfigParser,
-    id: usize
-}
-
-impl<'a> PreludeObject<'a> {
-    pub fn insert_object<'b>(&'b mut self, ident: String) -> PreludeObject<'b> {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::Object {
-                base: None,
-                children: HashMap::new()
-            },
-            self.id
-        ));
-
-        if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
-            children.insert(ident, NodeChild {
-                id: new_id,
-                real: true
-            });
-        }
-
-        PreludeObject {
-            cfg: self.cfg,
-            id: new_id
-        }
-    }
-
-    pub fn insert_list<'b>(&'b mut self, ident: String) -> PreludeList<'b> {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::List(vec![]),
-            self.id
-        ));
-
-        if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
-            children.insert(ident, NodeChild {
-                id: new_id,
-                real: true
-            });
-        }
-
-        PreludeList {
-            cfg: self.cfg,
-            id: new_id
-        }
-    }
-
-    pub fn insert_value<V: Into<Value>>(&mut self, ident: String, value: V) {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::Value(value.into()),
-            self.id
-        ));
-        if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
-            children.insert(ident, NodeChild {
-                id: new_id,
-                real: true
-            });
-        }
-    }
-
-    pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
-        T: Decode,
-        F: Fn(Entry) -> Option<T>,
-        F: 'static
-    {
-        self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
-    }
-}
-
-
-pub struct PreludeList<'a> {
-    cfg: &'a mut ConfigParser,
-    id: usize
-}
-
-impl<'a> PreludeList<'a> {
-    pub fn push_object<'b>(&'b mut self) -> PreludeObject<'b> {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::Object {
-                base: None,
-                children: HashMap::new()
-            },
-            self.id
-        ));
-
-        if let &mut NodeType::List(ref mut items) = &mut self.cfg.nodes[self.id].ty {
-            items.push(new_id);
-        }
-
-        PreludeObject {
-            cfg: self.cfg,
-            id: new_id
-        }
-    }
-
-    pub fn push_list<'b>(&'b mut self) -> PreludeList<'b> {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::List(vec![]),
-            self.id
-        ));
-
-        if let &mut NodeType::List(ref mut items) = &mut self.cfg.nodes[self.id].ty {
-            items.push(new_id);
-        }
-
-        PreludeList {
-            cfg: self.cfg,
-            id: new_id
-        }
-    }
-
-    pub fn push_value<V: Into<Value>>(&mut self, value: V) {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::Value(value.into()),
-            self.id
-        ));
-        if let &mut NodeType::List(ref mut items) = &mut self.cfg.nodes[self.id].ty {
-            items.push(new_id);
-        }
-    }
-
-    pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
-        T: Decode,
-        F: Fn(Entry) -> Option<T>,
-        F: 'static
-    {
-        self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
-    }
-}
-
 pub trait Decode: Any {}
 
 impl<T: Any> Decode for T {}
@@ -776,8 +598,8 @@ impl<'a, T> DerefMut for MaybeOwnedMut<'a, T> {
 mod tests {
     use std::collections::HashMap;
     use anymap::any::Any;
-    use ConfigParser;
-    use ConfigPrelude;
+    use Parser;
+    use Prelude;
     use Node;
     use NodeChild;
     use NodeType;
@@ -814,10 +636,10 @@ mod tests {
         }
     }
 
-    fn with_prelude<T: for<'a> FromEntry<'a> + Any>() -> ConfigParser {
-        let mut prelude = ConfigPrelude::new();
+    fn with_prelude<T: for<'a> FromEntry<'a> + Any>() -> Parser {
+        let mut prelude = Prelude::new();
         {
-            let mut object = prelude.add_prelude_object("o".into());
+            let mut object = prelude.object("o".into());
             object.add_decoder(|entry| SingleItem::<T>::from_entry(entry));
             object.add_decoder(|entry| SingleItem2::<T>::from_entry(entry));
         }
@@ -826,7 +648,7 @@ mod tests {
 
     #[test]
     fn assign_object() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         cfg.parse_string("a = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::new(
@@ -851,7 +673,7 @@ mod tests {
 
     #[test]
     fn assign_deep_object() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         cfg.parse_string("a.b = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::new(
@@ -886,7 +708,7 @@ mod tests {
 
     #[test]
     fn assign_in_object() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         cfg.parse_string("a = { b = {} }").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::new(
@@ -921,7 +743,7 @@ mod tests {
 
     #[test]
     fn assign_to_object() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         cfg.parse_string("a = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::new(
@@ -977,7 +799,7 @@ mod tests {
 
     #[test]
     fn extend_block_style() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         cfg.parse_string("a = {} b = a { c = {} }").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::new(
@@ -1023,7 +845,7 @@ mod tests {
 
     #[test]
     fn insert_list() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         cfg.parse_string("a = []").unwrap();
         assert_eq!(cfg.nodes, vec![
             Node::new(
@@ -1045,33 +867,33 @@ mod tests {
 
     #[test]
     fn extend_list() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         assert!(cfg.parse_string("a = [] b = a { c = {} }").is_err());
     }
 
     #[test]
     fn link_to_list() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a = [] b = a"));
     }
 
     #[test]
     fn decode_integer_list() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a = [1, 2, 3]"));
         assert_eq!(Some(SingleItem(vec![1, 2, 3])), cfg.root().decode());
     }
 
     #[test]
     fn decode_float_list() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a = [1.0, -2.4, 3.8]"));
         assert_eq!(Some(SingleItem(vec![1.0, -2.4, 3.8])), cfg.root().decode());
     }
 
     #[test]
     fn decode_string_list() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a = [\"foo\", \"bar\"]"));
         assert_eq!(Some(SingleItem(vec!["foo", "bar"])), cfg.root().decode());
     }
@@ -1087,7 +909,7 @@ mod tests {
 
     #[test]
     fn parse_relative_in_inner_root() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a.b.c = {}"));
         let root = cfg.nodes.len() - 1;
         assert_ok!(cfg.parse(".", "d = 1", root));
@@ -1096,7 +918,7 @@ mod tests {
 
     #[test]
     fn parse_absolute_in_inner_root() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a.b.c = {}"));
         let root = cfg.nodes.len() - 1;
         assert_ok!(cfg.parse(".", "global.d = 1", root));
@@ -1105,7 +927,7 @@ mod tests {
 
     #[test]
     fn link_in_inner_root() {
-        let mut cfg = ConfigParser::new();
+        let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a.b.c = {} f = []"));
         let root = cfg.nodes.len() - 2;
         assert_ok!(cfg.parse(".", "d = f{}", root));
