@@ -45,7 +45,13 @@ mod tests {
     #[test]
     fn statement() {
         let stmt = parse("include \"hello\"");
-        assert_eq!(stmt.unwrap(), vec![Statement::Include("hello".into())]);
+        assert_eq!(stmt.unwrap(), vec![Statement::Include("hello".into(), None)]);
+
+        let stmt = parse("include \"hello\" as a.b.c");
+        assert_eq!(stmt.unwrap(), vec![Statement::Include("hello".into(), Some(Path {
+            path_type: PathType::Local,
+            path: vec!["a".into(), "b".into(), "c".into()]
+        }))]);
 
         let stmt = parse("hello = \"hello\"");
         assert_eq!(stmt.unwrap(), vec![Statement::Assign(Path {

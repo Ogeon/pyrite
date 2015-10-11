@@ -9,14 +9,20 @@ pub Statements: Vec<ast::Statement> = {
 };
 
 Statement: ast::Statement = {
-    <i:Include> => ast::Statement::Include(i),
+    <i:Include> => {
+        let (file, path) = i;
+        ast::Statement::Include(file, path)
+    },
     <a:Assignment> => {
         let (path, val) = a;
         ast::Statement::Assign(path, val)
     },
 };
 
-Include: String = "include" <s:Str> => s.into();
+Include: (String, Option<ast::Path>) = {
+    "include" <s:Str> => (s.into(), None),
+    "include" <s:Str> "as" <p:Path> => (s.into(), Some(p)),
+};
 
 Assignment: (ast::Path, ast::Value) = <p:Path> "=" <v:Value> => (p, v);
 

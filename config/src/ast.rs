@@ -1,6 +1,6 @@
 #[derive(PartialEq, Debug)]
 pub enum Statement {
-    Include(String),
+    Include(String, Option<Path>),
     Assign(Path, Value)
 }
 

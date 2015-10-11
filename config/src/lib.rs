@@ -120,21 +120,30 @@ impl ConfigParser {
     }
 
     pub fn parse_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
+        self.parse_file_in(path, 0, None)
+    }
+
+    fn parse_file_in<P: AsRef<Path>>(&mut self, path: P, root: usize, new_root: Option<ast::Path>) -> Result<(), Error> {
         let mut source = String::new();
         let mut file = try!(File::open(&path));
         try!(file.read_to_string(&mut source));
-        self.parse(path, &source)
+        let new_root = if let Some(new_root) = new_root {
+            try!(self.expect(root, root, new_root))
+        } else {
+            0
+        };
+        self.parse(path, &source, new_root)
     }
 
     pub fn parse_string(&mut self, source: &str) -> Result<(), Error> {
-        self.parse(".", source)
+        self.parse(".", source, 0)
     }
 
     pub fn root(&self) -> Entry {
         Entry::root_of(self)
     }
 
-    fn parse<P: AsRef<Path>>(&mut self, path: P, source: &str) -> Result<(), Error> {
+    fn parse<P: AsRef<Path>>(&mut self, path: P, source: &str, root: usize) -> Result<(), Error> {
         let statements = try!(parser::parse(source));
 
         for statement in statements {
@@ -144,51 +153,19 @@ impl ConfigParser {
             } = statement;*/
 
             match statement {
-                ast::Statement::Include(p) => {
-                    let path = path.as_ref().join(p);
-                    try!(self.parse_file(path))
+                ast::Statement::Include(file, new_root) => {
+                    let path = path.as_ref().join(file);
+                    try!(self.parse_file_in(path, root, new_root))
                 },
-                ast::Statement::Assign(path, value) => try!(self.assign(path, value))
+                ast::Statement::Assign(path, value) => try!(self.assign(root, path, value))
             }
-        }
-
-        let mut stack = vec![];
-        self.check_templates(&mut stack, &self.nodes[0])
-    }
-
-    fn check_templates(&self, stack: &mut Vec<Selection>, node: &Node) -> Result<(), Error> {
-        match node.ty {
-            NodeType::Object { ref base, ref children } => {
-                if let &Some(template_id) = base {
-                    match self.nodes[template_id].ty {
-                        NodeType::Object { .. } => {},
-                        _ => {
-                            return Err(Error::NonObjectTemplate(stack.clone()))
-                        }
-                    }
-                }
-
-                for (ident, child) in children {
-                    stack.push(Selection::Ident(ident.clone()));
-                    try!(self.check_templates(stack, &self.nodes[child.id]));
-                    stack.pop();
-                }
-            },
-            NodeType::List(ref items) => for (i, item) in items.iter().enumerate() {
-                stack.push(Selection::Index(i));
-                try!(self.check_templates(stack, &self.nodes[*item]));
-                stack.pop();
-            },
-            NodeType::Value(_) => {},
-            NodeType::Link(_) => {},
-            NodeType::Unknown => {}
         }
 
         Ok(())
     }
 
-    fn assign(&mut self, path: ast::Path, value: ast::Value) -> Result<(), Error> {
-        let mut stack = Stack::new();
+    fn assign(&mut self, root: usize, path: ast::Path, value: ast::Value) -> Result<(), Error> {
+        let mut stack = Stack::new(root);
         self.assign_with_stack(&mut stack, Some(path), value)
     }
 
@@ -200,7 +177,7 @@ impl ConfigParser {
             } = path;
 
             let stack = if let ast::PathType::Global = path_type {
-                MaybeOwnedMut::Owned(Stack::new())
+                MaybeOwnedMut::Owned(Stack::new(stack.root))
             } else {
                 MaybeOwnedMut::Borrowed(stack)
             };
@@ -210,7 +187,7 @@ impl ConfigParser {
             (None, MaybeOwnedMut::Borrowed(stack))
         };
 
-        let current_root = stack.top().map_or(0, |e| e.id);
+        let current_root = stack.current_id();
         
         let should_pop = if let Some(path) = path {
             try!(self.push_stack_section(&mut stack, path));
@@ -233,7 +210,7 @@ impl ConfigParser {
                 }
             },
             ast::Value::Object(ast::Object::Extension(base, extension)) => {
-                let base_id = try!(self.expect(current_root, base));
+                let base_id = try!(self.expect(stack.root, current_root, base));
 
                 self.nodes[target_id].ty = NodeType::Object {
                     base: Some(base_id),
@@ -242,11 +219,19 @@ impl ConfigParser {
 
                 match extension {
                     Some(ast::ExtensionChanges::BlockStyle(changes)) => {
+                        if !self.infer_object(base_id) {
+                            return Err(Error::NotAnObject(stack.to_path()));
+                        }
+
                         for (path, value) in changes {
                             try!(self.assign_with_stack(&mut stack, Some(path), value));
                         }
                     },
                     Some(ast::ExtensionChanges::FunctionStyle(changes)) => {
+                        if !self.infer_object(base_id) {
+                            return Err(Error::NotAnObject(stack.to_path()));
+                        }
+
                         for value in changes {
                             unimplemented!();
                         }
@@ -285,7 +270,7 @@ impl ConfigParser {
     }
 
     fn push_stack_section(&mut self, stack: &mut Stack, path: Vec<String>) -> Result<(), Error> {
-        let mut current_root = stack.top().map_or(0, |e| e.id);
+        let mut current_root = stack.current_id();
         let mut section: Vec<StackEntry> = vec![];
 
         for ident in path {
@@ -338,11 +323,11 @@ impl ConfigParser {
         Ok(())
     }
 
-    fn expect(&mut self, root_id: usize, path: ast::Path) -> Result<usize, Error> {
+    fn expect(&mut self, root_id: usize, current_id: usize, path: ast::Path) -> Result<usize, Error> {
         let mut current_root = if let ast::PathType::Global = path.path_type {
-            0
-        } else {
             root_id
+        } else {
+            current_id
         };
 
         let mut selection_path = vec![];
@@ -453,6 +438,18 @@ impl ConfigParser {
         }
     }
 
+    fn get_concrete_node_mut(&mut self, template: usize) -> &mut Node {
+        let mut current_template = template;
+        loop {
+            match self.nodes[current_template].ty {
+                NodeType::Link(t) => current_template = t,
+                _ => break
+            }
+        }
+
+        &mut self.nodes[current_template]
+    }
+
     fn get_decoder<T: Any>(&self, id: usize) -> Option<&T> {
         let mut current_id = id;
         loop {
@@ -467,6 +464,20 @@ impl ConfigParser {
                 NodeType::Object { base: Some(b), .. } => b,
                 _ => return None
             };
+        }
+    }
+
+    fn infer_object(&mut self, id: usize) -> bool {
+        match &mut self.get_concrete_node_mut(id).ty {
+            s @ &mut NodeType::Unknown => {
+                *s = NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                };
+                true
+            },
+            &mut NodeType::Object { .. } => true,
+            _ => false
         }
     }
 }
@@ -705,14 +716,20 @@ struct StackEntry {
 }
 
 struct Stack {
+    root: usize,
     entries: Vec<Vec<StackEntry>>
 }
 
 impl Stack {
-    fn new() -> Stack {
+    fn new(root: usize) -> Stack {
         Stack {
+            root: root,
             entries: vec![]
         }
+    }
+
+    fn current_id(&self) -> usize {
+        self.top().map_or(self.root, |e| e.id)
     }
 
     fn top(&self) -> Option<&StackEntry> {
@@ -765,6 +782,13 @@ mod tests {
     use NodeChild;
     use NodeType;
     use entry::{Entry, FromEntry};
+
+    macro_rules! assert_ok {
+        ($e: expr) => (if let Err(e) = $e {
+            const EXPR: &'static str = stringify!($e);
+            panic!("{} failed with error: {:?}", EXPR, e);
+        })
+    }
 
     #[derive(PartialEq, Debug)]
     struct SingleItem<T>(T);
@@ -1028,36 +1052,64 @@ mod tests {
     #[test]
     fn link_to_list() {
         let mut cfg = ConfigParser::new();
-        assert!(cfg.parse_string("a = [] b = a").is_ok());
+        assert_ok!(cfg.parse_string("a = [] b = a"));
     }
 
     #[test]
     fn decode_integer_list() {
         let mut cfg = ConfigParser::new();
-        assert!(cfg.parse_string("a = [1, 2, 3]").is_ok());
+        assert_ok!(cfg.parse_string("a = [1, 2, 3]"));
         assert_eq!(Some(SingleItem(vec![1, 2, 3])), cfg.root().decode());
     }
 
     #[test]
     fn decode_float_list() {
         let mut cfg = ConfigParser::new();
-        assert!(cfg.parse_string("a = [1.0, -2.4, 3.8]").is_ok());
+        assert_ok!(cfg.parse_string("a = [1.0, -2.4, 3.8]"));
         assert_eq!(Some(SingleItem(vec![1.0, -2.4, 3.8])), cfg.root().decode());
     }
 
     #[test]
     fn decode_string_list() {
         let mut cfg = ConfigParser::new();
-        assert!(cfg.parse_string("a = [\"foo\", \"bar\"]").is_ok());
+        assert_ok!(cfg.parse_string("a = [\"foo\", \"bar\"]"));
         assert_eq!(Some(SingleItem(vec!["foo", "bar"])), cfg.root().decode());
     }
 
     #[test]
     fn dynamic_decode_integer_list() {
         let mut cfg = with_prelude::<Vec<i32>>();
-        assert!(cfg.parse_string("b = o { a = [1, 2, 3] }").is_ok());
+        assert_ok!(cfg.parse_string("b = o { a = [1, 2, 3] }"));
         let b = cfg.root().get("b");
         assert_eq!(Some(SingleItem(vec![1, 2, 3])), b.dynamic_decode());
         assert_eq!(Some(SingleItem2(vec![1, 2, 3])), b.dynamic_decode());
+    }
+
+    #[test]
+    fn parse_relative_in_inner_root() {
+        let mut cfg = ConfigParser::new();
+        assert_ok!(cfg.parse_string("a.b.c = {}"));
+        let root = cfg.nodes.len() - 1;
+        assert_ok!(cfg.parse(".", "d = 1", root));
+        assert_eq!(Some(1), cfg.root().get("a").get("b").get("c").get("d").decode());
+    }
+
+    #[test]
+    fn parse_absolute_in_inner_root() {
+        let mut cfg = ConfigParser::new();
+        assert_ok!(cfg.parse_string("a.b.c = {}"));
+        let root = cfg.nodes.len() - 1;
+        assert_ok!(cfg.parse(".", "global.d = 1", root));
+        assert_eq!(Some(1), cfg.root().get("a").get("b").get("c").get("d").decode());
+    }
+
+    #[test]
+    fn link_in_inner_root() {
+        let mut cfg = ConfigParser::new();
+        assert_ok!(cfg.parse_string("a.b.c = {} f = []"));
+        let root = cfg.nodes.len() - 2;
+        assert_ok!(cfg.parse(".", "d = f{}", root));
+        assert_ok!(cfg.parse(".", "global.d = f{}", root));
+        assert!(cfg.parse_string("d = f{}").is_err());
     }
 }
