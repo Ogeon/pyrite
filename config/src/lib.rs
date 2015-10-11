@@ -1,7 +1,9 @@
+extern crate anymap;
 extern crate lalrpop_util;
 
 mod ast;
 mod parser;
+pub mod entry;
 
 use std::path::Path;
 use std::fs::File;
@@ -9,6 +11,10 @@ use std::io::Read;
 use std::ops::{Deref, DerefMut};
 use std::collections::HashMap;
 
+use anymap::AnyMap;
+use anymap::any::Any;
+
+use entry::Entry;
 
 pub use ast::Number;
 
@@ -17,7 +23,20 @@ pub enum Error {
     Parse(parser::Error),
     Io(std::io::Error),
     NonObjectTemplate(Vec<Selection>),
-    NotAnObject(Vec<Selection>)
+    NotAnObject(Vec<Selection>),
+    CircularReference(Vec<Selection>)
+}
+
+impl Error {
+    fn set_path(&mut self, path: Vec<Selection>) {
+        match *self {
+            Error::NonObjectTemplate(ref mut p) |
+            Error::NotAnObject(ref mut p) |
+            Error::CircularReference(ref mut p)
+                => *p = path,
+            Error::Parse(_) | Error::Io(_) => {}
+        }
+    }
 }
 
 impl From<parser::Error> for Error {
@@ -40,10 +59,13 @@ impl ConfigPrelude {
     }
 
     pub fn add_prelude_object<'a>(&'a mut self, ident: String) -> PreludeObject<'a> {
-        let id = self.0.add_node(Node::Object {
-            base: None,
-            children: vec![]
-        });
+        let id = self.0.add_node(Node::new(
+            NodeType::Object {
+                base: None,
+                children: HashMap::new()
+            },
+            0
+        ));
         self.0.prelude.insert(ident, id);
 
         PreludeObject {
@@ -53,7 +75,10 @@ impl ConfigPrelude {
     }
 
     pub fn add_prelude_list<'a>(&'a mut self, ident: String) -> PreludeList<'a> {
-        let id = self.0.add_node(Node::List(vec![]));
+        let id = self.0.add_node(Node::new(
+            NodeType::List(vec![]),
+            0
+        ));
         self.0.prelude.insert(ident, id);
 
         PreludeList {
@@ -63,7 +88,10 @@ impl ConfigPrelude {
     }
 
     pub fn add_prelude_value<'a, V: Into<Value>>(&'a mut self, ident: String, value: V) {
-        let id = self.0.add_node(Node::Value(value.into()));
+        let id = self.0.add_node(Node::new(
+            NodeType::Value(value.into()),
+            0
+        ));
         self.0.prelude.insert(ident, id);
     }
 
@@ -80,10 +108,13 @@ pub struct ConfigParser {
 impl ConfigParser {
     pub fn new() -> ConfigParser {
         ConfigParser {
-            nodes: vec![Node::Object {
-                base: None,
-                children: vec![]
-            }],
+            nodes: vec![Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                0
+            )],
             prelude: HashMap::new()
         }
     }
@@ -95,7 +126,7 @@ impl ConfigParser {
         self.parse(path, &source)
     }
 
-    pub fn parse_string(&mut self, source: &'a str) -> Result<(), Error> {
+    pub fn parse_string(&mut self, source: &str) -> Result<(), Error> {
         self.parse(".", source)
     }
 
@@ -107,17 +138,17 @@ impl ConfigParser {
         let statements = try!(parser::parse(source));
 
         for statement in statements {
-            let parser::Span {
+            /*let parser::Span {
                 item: statement,
                 ..
-            } = statement;
+            } = statement;*/
 
             match statement {
-                parser::Statement::Include(p) => {
+                ast::Statement::Include(p) => {
                     let path = path.as_ref().join(p);
                     try!(self.parse_file(path))
                 },
-                parser::Statement::Assign(path, value) => try!(self.assign(path, value))
+                ast::Statement::Assign(path, value) => try!(self.assign(path, value))
             }
         }
 
@@ -126,47 +157,49 @@ impl ConfigParser {
     }
 
     fn check_templates(&self, stack: &mut Vec<Selection>, node: &Node) -> Result<(), Error> {
-        match *node {
-            Node::Object { ref base, ref children } => {
+        match node.ty {
+            NodeType::Object { ref base, ref children } => {
                 if let &Some(template_id) = base {
-                    match self.nodes[template_id] {
-                        Node::Object { .. } => {},
+                    match self.nodes[template_id].ty {
+                        NodeType::Object { .. } => {},
                         _ => {
                             return Err(Error::NonObjectTemplate(stack.clone()))
                         }
                     }
                 }
 
-                for child in children {
-                    stack.push(Selection::Ident(child.ident.clone()));
+                for (ident, child) in children {
+                    stack.push(Selection::Ident(ident.clone()));
                     try!(self.check_templates(stack, &self.nodes[child.id]));
                     stack.pop();
                 }
             },
-            Node::List(ref items) => for (i, item) in items.iter().enumerate() {
+            NodeType::List(ref items) => for (i, item) in items.iter().enumerate() {
                 stack.push(Selection::Index(i));
                 try!(self.check_templates(stack, &self.nodes[*item]));
                 stack.pop();
             },
-            Node::Value(_) => {}
+            NodeType::Value(_) => {},
+            NodeType::Link(_) => {},
+            NodeType::Unknown => {}
         }
 
         Ok(())
     }
 
-    fn assign(&mut self, path: parser::Path, value: parser::Value) -> Result<(), Error> {
+    fn assign(&mut self, path: ast::Path, value: ast::Value) -> Result<(), Error> {
         let mut stack = Stack::new();
         self.assign_with_stack(&mut stack, Some(path), value)
     }
 
-    fn assign_with_stack(&mut self, stack: &mut Stack, path: Option<parser::Path>, value: parser::Value) -> Result<(), Error> {
+    fn assign_with_stack(&mut self, stack: &mut Stack, path: Option<ast::Path>, value: ast::Value) -> Result<(), Error> {
         let (path, mut stack) = if let Some(path) = path {
-            let parser::Path {
+            let ast::Path {
                 path_type,
                 path
             } = path;
 
-            let stack = if let parser::PathType::Global = path_type {
+            let stack = if let ast::PathType::Global = path_type {
                 MaybeOwnedMut::Owned(Stack::new())
             } else {
                 MaybeOwnedMut::Borrowed(stack)
@@ -189,46 +222,46 @@ impl ConfigParser {
         let target_id = stack.top().unwrap().id;
 
         match value {
-            parser::Value::Object(parser::Object::New(children)) => {
-                self.nodes[target_id] = Node::Object {
+            ast::Value::Object(ast::Object::New(children)) => {
+                self.nodes[target_id].ty = NodeType::Object {
                     base: None,
-                    children: vec![]
+                    children: HashMap::new()
                 };
 
                 for (path, value) in children {
                     try!(self.assign_with_stack(&mut stack, Some(path), value));
                 }
             },
-            parser::Value::Object(parser::Object::Extension(base, extension)) => {
+            ast::Value::Object(ast::Object::Extension(base, extension)) => {
                 let base_id = try!(self.expect(current_root, base));
 
-                self.nodes[target_id] = Node::Object {
+                self.nodes[target_id].ty = NodeType::Object {
                     base: Some(base_id),
-                    children: vec![]
+                    children: HashMap::new()
                 };
 
                 match extension {
-                    Some(parser::ExtensionChanges::BlockStyle(changes)) => {
+                    Some(ast::ExtensionChanges::BlockStyle(changes)) => {
                         for (path, value) in changes {
                             try!(self.assign_with_stack(&mut stack, Some(path), value));
                         }
                     },
-                    Some(parser::ExtensionChanges::FunctionStyle(changes)) => {
+                    Some(ast::ExtensionChanges::FunctionStyle(changes)) => {
                         for value in changes {
                             unimplemented!();
                         }
                     },
-                    None => {}
+                    None => self.nodes[target_id].ty = NodeType::Link(base_id)
                 }
             },
-            parser::Value::List(l) => {
+            ast::Value::List(l) => {
                 let mut items = vec![];
 
                 for (i, item) in l.into_iter().enumerate() {
-                    let id = self.add_node(Node::Object {
-                        base: None,
-                        children: vec![]
-                    });
+                    let id = self.add_node(Node::new(
+                        NodeType::Unknown,
+                        target_id
+                    ));
                     stack.entries.push(vec![StackEntry {
                         id: id,
                         selection: Selection::Index(i)
@@ -238,10 +271,10 @@ impl ConfigParser {
                     items.push(id);
                 };
 
-                self.nodes[target_id] = Node::List(items);
+                self.nodes[target_id].ty = NodeType::List(items);
             },
-            parser::Value::String(s) => self.nodes[target_id] = Node::Value(Value::String(s)),
-            parser::Value::Number(n) => self.nodes[target_id] = Node::Value(Value::Number(n))
+            ast::Value::String(s) => self.nodes[target_id].ty = NodeType::Value(Value::String(s)),
+            ast::Value::Number(n) => self.nodes[target_id].ty = NodeType::Value(Value::Number(n))
         }
 
         if should_pop {
@@ -253,11 +286,11 @@ impl ConfigParser {
 
     fn push_stack_section(&mut self, stack: &mut Stack, path: Vec<String>) -> Result<(), Error> {
         let mut current_root = stack.top().map_or(0, |e| e.id);
-        let mut section = vec![];
+        let mut section: Vec<StackEntry> = vec![];
 
         for ident in path {
-            let maybe_id = if let &mut Node::Object { ref mut children, .. } = &mut self.nodes[current_root] {
-                children.iter_mut().find(|c| c.ident == ident).map(|c| {
+            let maybe_id = if let &mut NodeType::Object { ref mut children, .. } = &mut self.nodes[current_root].ty {
+                children.get_mut(&ident).map(|c| {
                     c.real = true;
                     c.id
                 })
@@ -265,22 +298,33 @@ impl ConfigParser {
                 return Err(Error::NotAnObject(stack.to_path()));
             };
 
-            let id = maybe_id.unwrap_or_else(|| {
-                let new_id = self.add_node(Node::Object {
-                    base: None,
-                    children: vec![]
+            let id = if let Some(id) = maybe_id {
+                id
+            } else {
+                let new_id = self.add_node(Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: HashMap::new()
+                    },
+                    current_root
+                ));
+
+                let res = self.push_child_to(current_root, ident.clone(), NodeChild {
+                    id: new_id,
+                    real: true
                 });
 
-                if let &mut Node::Object { ref mut children, .. } = &mut self.nodes[current_root] {
-                    children.push(NodeChild {
-                        id: new_id,
-                        ident: ident.clone(),
-                        real: true
-                    });
+                if let Err(mut e) = res {
+                    let mut path = stack.to_path();
+                    for entry in section {
+                        path.push(entry.selection);
+                    }
+                    e.set_path(path);
+                    return Err(e)
                 }
 
                 new_id
-            });
+            };
 
             section.push(StackEntry {
                 id: id,
@@ -294,8 +338,8 @@ impl ConfigParser {
         Ok(())
     }
 
-    fn expect(&mut self, root_id: usize, path: parser::Path) -> Result<usize, Error> {
-        let mut current_root = if let parser::PathType::Global = path.path_type {
+    fn expect(&mut self, root_id: usize, path: ast::Path) -> Result<usize, Error> {
+        let mut current_root = if let ast::PathType::Global = path.path_type {
             0
         } else {
             root_id
@@ -306,8 +350,8 @@ impl ConfigParser {
         for (i, ident) in path.path.into_iter().enumerate() {
             selection_path.push(Selection::Ident(ident.clone()));
 
-            let maybe_id = if let Node::Object { ref children, .. } = self.nodes[current_root] {
-                children.iter().find(|c| c.ident == ident).map(|c| c.id).or_else(|| if i == 0 {
+            let maybe_id = if let NodeType::Object { ref children, .. } = self.nodes[current_root].ty {
+                children.get(&ident).map(|c| c.id).or_else(|| if i == 0 {
                     self.prelude.get(&ident).cloned()
                 } else {
                     None
@@ -319,17 +363,19 @@ impl ConfigParser {
             let id = if let Some(id) = maybe_id {
                 id
             } else {
-                let new_id = self.add_node(Node::Object {
-                    base: None,
-                    children: vec![]
+                let new_id = self.add_node(Node::new(
+                    NodeType::Unknown,
+                    current_root
+                ));
+
+                let res = self.push_child_to(current_root, ident, NodeChild {
+                    id: new_id,
+                    real: false
                 });
 
-                if let &mut Node::Object { ref mut children, .. } = &mut self.nodes[current_root] {
-                    children.push(NodeChild {
-                        id: new_id,
-                        ident: ident,
-                        real: false
-                    });
+                if let Err(mut e) = res {
+                    e.set_path(selection_path);
+                    return Err(e);
                 }
 
                 new_id
@@ -345,6 +391,84 @@ impl ConfigParser {
         self.nodes.push(node);
         self.nodes.len() - 1
     }
+
+    fn push_child_to(&mut self, id: usize, ident: String, child: NodeChild) -> Result<(), Error> {
+        let template = match &mut self.nodes[id].ty {
+            ty @ &mut NodeType::Unknown => {
+                let mut children = HashMap::new();
+                children.insert(ident, child);
+
+                *ty = NodeType::Object {
+                    base: None,
+                    children: children
+                };
+
+                return Ok(());
+            },
+            &mut NodeType::Link(template) => template,
+            &mut NodeType::Object { ref mut children, .. } => {
+                children.insert(ident, child);
+                return Ok(());
+            },
+            _ => return Err(Error::NotAnObject(vec![]))
+        };
+
+        try!(self.verify_object_link(template));
+
+        let mut children = HashMap::new();
+        children.insert(ident, child);
+
+        self.nodes[id].ty = NodeType::Object {
+            base: Some(template),
+            children: children
+        };
+
+        Ok(())
+    }
+
+    fn verify_object_link(&self, template: usize) -> Result<(), Error> {
+        let mut current_template = template;
+        loop {
+            current_template = match self.nodes[current_template].ty {
+                NodeType::Object { base: Some(t), .. } => t,
+                NodeType::Object { base: None, .. } => return Ok(()),
+                NodeType::Link(t) => t,
+                _ => return Err(Error::NotAnObject(vec![]))
+            };
+
+            if template == current_template {
+                return Err(Error::CircularReference(vec![]));
+            }
+        }
+    }
+
+    fn get_concrete_node(&self, template: usize) -> &Node {
+        let mut current_template = template;
+        loop {
+            let node = &self.nodes[current_template];
+            current_template = match node.ty {
+                NodeType::Link(t) => t,
+                _ => return node
+            };
+        }
+    }
+
+    fn get_decoder<T: Any>(&self, id: usize) -> Option<&T> {
+        let mut current_id = id;
+        loop {
+            let node = &self.nodes[current_id];
+
+            if let Some(decoder) = node.decoder.get() {
+                return Some(decoder);
+            }
+
+            current_id = match node.ty {
+                NodeType::Link(t) => t,
+                NodeType::Object { base: Some(b), .. } => b,
+                _ => return None
+            };
+        }
+    }
 }
 
 
@@ -355,15 +479,17 @@ pub struct PreludeObject<'a> {
 
 impl<'a> PreludeObject<'a> {
     pub fn insert_object<'b>(&'b mut self, ident: String) -> PreludeObject<'b> {
-        let new_id = self.cfg.add_node(Node::Object {
-            base: None,
-            children: vec![]
-        });
+        let new_id = self.cfg.add_node(Node::new(
+            NodeType::Object {
+                base: None,
+                children: HashMap::new()
+            },
+            self.id
+        ));
 
-        if let &mut Node::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id] {
-            children.push(NodeChild {
+        if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
+            children.insert(ident, NodeChild {
                 id: new_id,
-                ident: ident,
                 real: true
             });
         }
@@ -375,12 +501,14 @@ impl<'a> PreludeObject<'a> {
     }
 
     pub fn insert_list<'b>(&'b mut self, ident: String) -> PreludeList<'b> {
-        let new_id = self.cfg.add_node(Node::List(vec![]));
+        let new_id = self.cfg.add_node(Node::new(
+            NodeType::List(vec![]),
+            self.id
+        ));
 
-        if let &mut Node::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id] {
-            children.push(NodeChild {
+        if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
+            children.insert(ident, NodeChild {
                 id: new_id,
-                ident: ident,
                 real: true
             });
         }
@@ -392,14 +520,24 @@ impl<'a> PreludeObject<'a> {
     }
 
     pub fn insert_value<V: Into<Value>>(&mut self, ident: String, value: V) {
-        let new_id = self.cfg.add_node(Node::Value(value.into()));
-        if let &mut Node::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id] {
-            children.push(NodeChild {
+        let new_id = self.cfg.add_node(Node::new(
+            NodeType::Value(value.into()),
+            self.id
+        ));
+        if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
+            children.insert(ident, NodeChild {
                 id: new_id,
-                ident: ident,
                 real: true
             });
         }
+    }
+
+    pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
+        T: Decode,
+        F: Fn(Entry) -> Option<T>,
+        F: 'static
+    {
+        self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
     }
 }
 
@@ -411,12 +549,15 @@ pub struct PreludeList<'a> {
 
 impl<'a> PreludeList<'a> {
     pub fn push_object<'b>(&'b mut self) -> PreludeObject<'b> {
-        let new_id = self.cfg.add_node(Node::Object {
-            base: None,
-            children: vec![]
-        });
+        let new_id = self.cfg.add_node(Node::new(
+            NodeType::Object {
+                base: None,
+                children: HashMap::new()
+            },
+            self.id
+        ));
 
-        if let &mut Node::List(ref mut items) = &mut self.cfg.nodes[self.id] {
+        if let &mut NodeType::List(ref mut items) = &mut self.cfg.nodes[self.id].ty {
             items.push(new_id);
         }
 
@@ -427,9 +568,12 @@ impl<'a> PreludeList<'a> {
     }
 
     pub fn push_list<'b>(&'b mut self) -> PreludeList<'b> {
-        let new_id = self.cfg.add_node(Node::List(vec![]));
+        let new_id = self.cfg.add_node(Node::new(
+            NodeType::List(vec![]),
+            self.id
+        ));
 
-        if let &mut Node::List(ref mut items) = &mut self.cfg.nodes[self.id] {
+        if let &mut NodeType::List(ref mut items) = &mut self.cfg.nodes[self.id].ty {
             items.push(new_id);
         }
 
@@ -440,18 +584,69 @@ impl<'a> PreludeList<'a> {
     }
 
     pub fn push_value<V: Into<Value>>(&mut self, value: V) {
-        let new_id = self.cfg.add_node(Node::Value(value.into()));
-        if let &mut Node::List(ref mut items) = &mut self.cfg.nodes[self.id] {
+        let new_id = self.cfg.add_node(Node::new(
+            NodeType::Value(value.into()),
+            self.id
+        ));
+        if let &mut NodeType::List(ref mut items) = &mut self.cfg.nodes[self.id].ty {
             items.push(new_id);
+        }
+    }
+
+    pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
+        T: Decode,
+        F: Fn(Entry) -> Option<T>,
+        F: 'static
+    {
+        self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
+    }
+}
+
+pub trait Decode: Any {}
+
+impl<T: Any> Decode for T {}
+
+struct Decoder<T: Decode>(Box<Fn(Entry) -> Option<T>>);
+
+impl<T: Decode> Decoder<T> {
+    fn new<F>(decode_fn: F) -> Decoder<T> where
+        F: Fn(Entry) -> Option<T>,
+        F: 'static
+    {
+        Decoder(Box::new(decode_fn))
+    }
+}
+
+#[derive(Debug)]
+struct Node {
+    ty: NodeType,
+    parent: usize,
+    decoder: AnyMap
+}
+
+impl Node {
+    fn new(ty: NodeType, parent: usize) -> Node {
+        Node {
+            ty: ty,
+            parent: parent,
+            decoder: AnyMap::new()
         }
     }
 }
 
+impl PartialEq for Node {
+    fn eq(&self, other: &Node) -> bool {
+        self.ty == other.ty && self.parent == other.parent
+    }
+}
+
 #[derive(PartialEq, Debug)]
-enum Node {
+enum NodeType {
+    Unknown,
+    Link(usize),
     Object {
         base: Option<usize>,
-        children: Vec<NodeChild>
+        children: HashMap<String, NodeChild>
     },
     Value(Value),
     List(Vec<usize>)
@@ -460,7 +655,6 @@ enum Node {
 #[derive(PartialEq, Debug)]
 struct NodeChild {
     id: usize,
-    ident: String,
     real: bool
 }
 
@@ -563,27 +757,71 @@ impl<'a, T> DerefMut for MaybeOwnedMut<'a, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use anymap::any::Any;
     use ConfigParser;
+    use ConfigPrelude;
     use Node;
     use NodeChild;
+    use NodeType;
+    use entry::{Entry, FromEntry};
+
+    #[derive(PartialEq, Debug)]
+    struct SingleItem<T>(T);
+
+    #[derive(PartialEq, Debug)]
+    struct SingleItem2<T>(T);
+
+    impl<'a, T: FromEntry<'a>> FromEntry<'a> for SingleItem<T> {
+        fn from_entry(entry: Entry<'a>) -> Option<SingleItem<T>> {
+            entry.as_object()
+                .and_then(|o| o.get("a"))
+                .and_then(|e| T::from_entry(e))
+                .map(|item| SingleItem(item))
+        }
+    }
+
+    impl<'a, T: FromEntry<'a>> FromEntry<'a> for SingleItem2<T> {
+        fn from_entry(entry: Entry<'a>) -> Option<SingleItem2<T>> {
+            entry.as_object()
+                .and_then(|o| o.get("a"))
+                .and_then(|e| T::from_entry(e))
+                .map(|item| SingleItem2(item))
+        }
+    }
+
+    fn with_prelude<T: for<'a> FromEntry<'a> + Any>() -> ConfigParser {
+        let mut prelude = ConfigPrelude::new();
+        {
+            let mut object = prelude.add_prelude_object("o".into());
+            object.add_decoder(|entry| SingleItem::<T>::from_entry(entry));
+            object.add_decoder(|entry| SingleItem2::<T>::from_entry(entry));
+        }
+        prelude.into_parser()
+    }
 
     #[test]
     fn assign_object() {
         let mut cfg = ConfigParser::new();
         cfg.parse_string("a = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 1,
-                    ident: "a".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![]
-            }
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("a".into(), NodeChild {
+                        id: 1,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                0
+            )
         ]);
     }
 
@@ -592,26 +830,33 @@ mod tests {
         let mut cfg = ConfigParser::new();
         cfg.parse_string("a.b = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 1,
-                    ident: "a".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 2,
-                    ident: "b".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![]
-            }
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("a".into(), NodeChild {
+                        id: 1,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("b".into(), NodeChild {
+                        id: 2,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                1
+            )
         ]);
     }
 
@@ -620,26 +865,33 @@ mod tests {
         let mut cfg = ConfigParser::new();
         cfg.parse_string("a = { b = {} }").unwrap();
         assert_eq!(cfg.nodes, vec![
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 1,
-                    ident: "a".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 2,
-                    ident: "b".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![]
-            }
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("a".into(), NodeChild {
+                        id: 1,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("b".into(), NodeChild {
+                        id: 2,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                1
+            )
         ]);
     }
 
@@ -648,42 +900,54 @@ mod tests {
         let mut cfg = ConfigParser::new();
         cfg.parse_string("a = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 1,
-                    ident: "a".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![]
-            }
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("a".into(), NodeChild {
+                        id: 1,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                0
+            )
         ]);
 
         cfg.parse_string("a.b = {}").unwrap();
         assert_eq!(cfg.nodes, vec![
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 1,
-                    ident: "a".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 2,
-                    ident: "b".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![]
-            }
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("a".into(), NodeChild {
+                        id: 1,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("b".into(), NodeChild {
+                        id: 2,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                1
+            )
         ]);
     }
 
@@ -692,35 +956,44 @@ mod tests {
         let mut cfg = ConfigParser::new();
         cfg.parse_string("a = {} b = a { c = {} }").unwrap();
         assert_eq!(cfg.nodes, vec![
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 1,
-                    ident: "a".into(),
-                    real: true
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("a".into(), NodeChild {
+                        id: 1,
+                        real: true
+                    }),
+                    ("b".into(), NodeChild {
+                        id: 2,
+                        real: true
+                    })].into_iter().collect()
                 },
-                NodeChild {
-                    id: 2,
-                    ident: "b".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![]
-            },
-            Node::Object {
-                base: Some(1),
-                children: vec![NodeChild {
-                    id: 3,
-                    ident: "c".into(),
-                    real: true
-                }]
-            },
-            Node::Object {
-                base: None,
-                children: vec![]
-            }
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: Some(1),
+                    children: vec![("c".into(), NodeChild {
+                        id: 3,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                2
+            ),
         ]);
     }
 
@@ -729,15 +1002,20 @@ mod tests {
         let mut cfg = ConfigParser::new();
         cfg.parse_string("a = []").unwrap();
         assert_eq!(cfg.nodes, vec![
-            Node::Object {
-                base: None,
-                children: vec![NodeChild {
-                    id: 1,
-                    ident: "a".into(),
-                    real: true
-                }]
-            },
-            Node::List(vec![])
+            Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: vec![("a".into(), NodeChild {
+                        id: 1,
+                        real: true
+                    })].into_iter().collect()
+                },
+                0
+            ),
+            Node::new(
+                NodeType::List(vec![]),
+                0
+            )
         ])
     }
 
@@ -745,5 +1023,41 @@ mod tests {
     fn extend_list() {
         let mut cfg = ConfigParser::new();
         assert!(cfg.parse_string("a = [] b = a { c = {} }").is_err());
+    }
+
+    #[test]
+    fn link_to_list() {
+        let mut cfg = ConfigParser::new();
+        assert!(cfg.parse_string("a = [] b = a").is_ok());
+    }
+
+    #[test]
+    fn decode_integer_list() {
+        let mut cfg = ConfigParser::new();
+        assert!(cfg.parse_string("a = [1, 2, 3]").is_ok());
+        assert_eq!(Some(SingleItem(vec![1, 2, 3])), cfg.root().decode());
+    }
+
+    #[test]
+    fn decode_float_list() {
+        let mut cfg = ConfigParser::new();
+        assert!(cfg.parse_string("a = [1.0, -2.4, 3.8]").is_ok());
+        assert_eq!(Some(SingleItem(vec![1.0, -2.4, 3.8])), cfg.root().decode());
+    }
+
+    #[test]
+    fn decode_string_list() {
+        let mut cfg = ConfigParser::new();
+        assert!(cfg.parse_string("a = [\"foo\", \"bar\"]").is_ok());
+        assert_eq!(Some(SingleItem(vec!["foo", "bar"])), cfg.root().decode());
+    }
+
+    #[test]
+    fn dynamic_decode_integer_list() {
+        let mut cfg = with_prelude::<Vec<i32>>();
+        assert!(cfg.parse_string("b = o { a = [1, 2, 3] }").is_ok());
+        let b = cfg.root().get("b");
+        assert_eq!(Some(SingleItem(vec![1, 2, 3])), b.dynamic_decode());
+        assert_eq!(Some(SingleItem2(vec![1, 2, 3])), b.dynamic_decode());
     }
 }
