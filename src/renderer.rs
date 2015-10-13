@@ -1,5 +1,4 @@
 use std;
-use std::collections::HashMap;
 use std::cmp::min;
 use std::cmp::Ordering::Equal;
 use std::iter::Enumerate;
@@ -13,8 +12,8 @@ use rand::{Rng, XorShiftRng};
 
 use cgmath::{Vector, EuclideanVector, Vector2};
 
-use config;
-use config::FromConfig;
+use config::Prelude;
+use config::entry::{Entry, Object};
 
 use cameras;
 
@@ -24,8 +23,8 @@ static DEFAULT_SPECTRUM_SAMPLES: u32 = 10;
 static DEFAULT_SPECTRUM_BINS: usize = 64;
 static DEFAULT_SPECTRUM_SPAN: (f64, f64) = (400.0, 700.0);
 
-pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_grouped_type("Renderer", "Simple", decode_simple);
+pub fn register_types(context: &mut Prelude) {
+    context.object("Renderer".into()).object("Simple".into()).add_decoder(decode_simple);
 }
 
 pub struct Renderer {
@@ -111,32 +110,30 @@ impl RenderAlgorithm {
     }
 }
 
-fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>, algorithm: RenderAlgorithm) -> Result<Renderer, String> {
-    let mut items = items;
-
-    let threads = match items.remove("threads") {
-        Some(v) => try!(FromConfig::from_config(v), "threads"),
+fn decode_renderer(items: Object, algorithm: RenderAlgorithm) -> Result<Renderer, String> {
+    let threads = match items.get("threads") {
+        Some(v) => try!(v.decode(), "threads"),
         None => num_cpus::get()
     };
 
-    let bounces = match items.remove("bounces") {
-        Some(v) => try!(FromConfig::from_config(v), "bounces"),
+    let bounces = match items.get("bounces") {
+        Some(v) => try!(v.decode(), "bounces"),
         None => 8
     };
 
-    let pixel_samples = match items.remove("pixel_samples") {
-        Some(v) => try!(FromConfig::from_config(v), "pixel_samples"),
+    let pixel_samples = match items.get("pixel_samples") {
+        Some(v) => try!(v.decode(), "pixel_samples"),
         None => 10
     };
 
-    let light_samples = match items.remove("light_samples") {
-        Some(v) => try!(FromConfig::from_config(v), "light_samples"),
+    let light_samples = match items.get("light_samples") {
+        Some(v) => try!(v.decode(), "light_samples"),
         None => 4
     };
 
-    let (spectrum_samples, spectrum_bins, spectrum_span) = match items.remove("spectrum") {
-        Some(config::Structure(_, v)) => try!(decode_spectrum(v), "spectrum"),
-        Some(v) => return Err(format!("spectrum: expected a structure, but found {}", v)),
+    let (spectrum_samples, spectrum_bins, spectrum_span) = match items.get("spectrum").map(|e| e.as_object()) {
+        Some(Some(v)) => try!(decode_spectrum(v), "spectrum"),
+        Some(None) => return Err(format!("spectrum: expected a structure, but found something else")), //TODO: Print what we found
         None => (DEFAULT_SPECTRUM_SAMPLES, DEFAULT_SPECTRUM_BINS, DEFAULT_SPECTRUM_SPAN)
     };
 
@@ -154,32 +151,30 @@ fn decode_renderer(_context: &config::ConfigContext, items: HashMap<String, conf
     )
 }
 
-fn decode_spectrum(items: HashMap<String, config::ConfigItem>) -> Result<(u32, usize, (f64, f64)), String> {
-    let mut items = items;
-
-    let samples = match items.remove("samples") {
-        Some(v) => try!(FromConfig::from_config(v), "samples"),
+fn decode_spectrum(items: Object) -> Result<(u32, usize, (f64, f64)), String> {
+    let samples = match items.get("samples") {
+        Some(v) => try!(v.decode(), "samples"),
         None => DEFAULT_SPECTRUM_SAMPLES
     };
 
-    let bins = match items.remove("bins") {
-        Some(v) => try!(FromConfig::from_config(v), "bins"),
+    let bins = match items.get("bins") {
+        Some(v) => try!(v.decode(), "bins"),
         None => DEFAULT_SPECTRUM_BINS
     };
 
-    let span = match items.remove("span") {
-        Some(v) => try!(FromConfig::from_config(v), "span"),
+    let span = match items.get("span") {
+        Some(v) => try!(v.decode(), "span"),
         None => DEFAULT_SPECTRUM_SPAN
     };
 
     Ok((samples, bins, span))
 }
 
-fn decode_simple(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Renderer, String> {
-    let mut items = items;
+fn decode_simple(entry: Entry) -> Result<Renderer, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
 
-    let tile_size = match items.remove("tile_size") {
-        Some(v) => try!(FromConfig::from_config(v), "tile_size"),
+    let tile_size = match items.get("tile_size") {
+        Some(v) => try!(v.decode(), "tile_size"),
         None => 64
     };
 
@@ -187,7 +182,7 @@ fn decode_simple(context: &config::ConfigContext, items: HashMap<String, config:
         tile_size: tile_size,
     };
 
-    decode_renderer(context, items, algorithm)
+    decode_renderer(items, algorithm)
 }
 
 

@@ -1,17 +1,16 @@
-use std::collections::HashMap;
-
 use cgmath::Vector;
 
 use tracer;
 
-use config;
-use config::FromConfig;
+use config::{Prelude, Decode};
+use config::entry::Entry;
 
 macro_rules! make_operators {
     ($($fn_name:ident : $struct_name:ident { $($arg:ident),+ } => $operation:expr),*) => (
-        fn insert_operators<From: 'static>(context: &mut config::ConfigContext) {
+        fn insert_operators<From: Decode + 'static>(context: &mut Prelude) {
+            let mut group = context.object("Math".into());
             $(
-                context.insert_grouped_type("Math", stringify!($struct_name), $fn_name::<From>);
+                group.object(stringify!($struct_name).into()).add_decoder($fn_name::<From>);
             )*
         }
         $(
@@ -31,12 +30,12 @@ macro_rules! make_operators {
                 }
             }
 
-            fn $fn_name<From: 'static>(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<From, f64>>, String> {
-                let mut fields = fields;
+            fn $fn_name<From: Decode + 'static>(entry: Entry) -> Result<Box<tracer::ParametricValue<From, f64>>, String> {
+                let fields = try!(entry.as_object().ok_or("not an object".into()));
 
                 $(
-                    let $arg = match fields.remove(stringify!($arg)) {
-                        Some(v) => try!(tracer::decode_parametric_number(context, v), stringify!($arg)),
+                    let $arg = match fields.get(stringify!($arg)) {
+                        Some(v) => try!(tracer::decode_parametric_number(v), stringify!($arg)),
                         None => return Err(format!("missing field '{}'", stringify!($arg)))
                     };
                 )+
@@ -130,13 +129,13 @@ pub mod utils {
     }
 }
 
-pub fn register_types<From: 'static>(context: &mut config::ConfigContext) {
+pub fn register_types<From: Decode + 'static>(context: &mut Prelude) {
     insert_operators::<From>(context);
-    context.insert_grouped_type("Math", "Curve", decode_curve::<From>);
+    context.object("Math".into()).object("Curve".into()).add_decoder(decode_curve::<From>);
 }
 
-pub fn register_specific_types(context: &mut config::ConfigContext) {
-    context.insert_grouped_type("Math", "Fresnel", decode_fresnel);
+pub fn register_specific_types(context: &mut Prelude) {
+    context.object("Math".into()).object("Fresnel".into()).add_decoder(decode_fresnel);
 }
 
 make_operators!{
@@ -161,16 +160,16 @@ impl<From> tracer::ParametricValue<From, f64> for Curve<From> {
     }
 }
 
-fn decode_curve<From: 'static>(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<From, f64>>, String> {
-    let mut fields = fields;
+fn decode_curve<From: Decode + 'static>(entry: Entry) -> Result<Box<tracer::ParametricValue<From, f64>>, String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let input = match fields.remove("input") {
-        Some(v) => try!(tracer::decode_parametric_number(context, v), "input"),
+    let input = match fields.get("input") {
+        Some(v) => try!(tracer::decode_parametric_number(v), "input"),
         None => return Err("missing field 'input'".into())
     };
 
-    let points = match fields.remove("points") {
-        Some(v) => try!(FromConfig::from_config(v), "points"),
+    let points = match fields.get("points") {
+        Some(v) => try!(v.decode(), "points"),
         None => return Err("missing field 'points'".into())
     };
 
@@ -201,16 +200,16 @@ impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
     }
 }
 
-fn decode_fresnel(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<tracer::RenderContext, f64>>, String> {
-    let mut fields = fields;
+fn decode_fresnel(entry: Entry) -> Result<Box<tracer::ParametricValue<tracer::RenderContext, f64>>, String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let ior = match fields.remove("ior") {
-        Some(v) => try!(tracer::decode_parametric_number(context, v), "ior"),
+    let ior = match fields.get("ior") {
+        Some(v) => try!(tracer::decode_parametric_number(v), "ior"),
         None => return Err("missing field 'ior'".into())
     };
 
-    let env_ior = match fields.remove("env_ior") {
-        Some(v) => try!(tracer::decode_parametric_number(context, v), "env_ior"),
+    let env_ior = match fields.get("env_ior") {
+        Some(v) => try!(tracer::decode_parametric_number(v), "env_ior"),
         None => Box::new(1.0f64) as Box<tracer::ParametricValue<tracer::RenderContext, f64>>
     };
 

@@ -1,32 +1,30 @@
-use std::collections::HashMap;
-
 use cgmath::{Matrix, Matrix4};
 use cgmath::Vector3;
 use cgmath::Point;
 
-use config;
-use config::{FromConfig, Type};
+use config::Prelude;
+use config::entry::Entry;
 
-pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_type("Vector", decode_vector_3d);
-    context.insert_grouped_type("Transform", "LookAt", decode_transform_look_at);
+pub fn register_types(context: &mut Prelude) {
+    context.object("Vector".into()).add_decoder(decode_vector_3d);
+    context.object("Transform".into()).object("LookAt".into()).add_decoder(decode_transform_look_at);
 }
 
-fn decode_vector_3d(_context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Vector3<f64>, String> {
-    let mut items = items;
+fn decode_vector_3d(entry: Entry) -> Result<Vector3<f64>, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
 
-    let x = match items.remove("x") {
-        Some(v) => try!(FromConfig::from_config(v), "x"),
+    let x = match items.get("x") {
+        Some(v) => try!(v.decode(), "x"),
         None => 0.0
     };
 
-    let y = match items.remove("y") {
-        Some(v) => try!(FromConfig::from_config(v), "y"),
+    let y = match items.get("y") {
+        Some(v) => try!(v.decode(), "y"),
         None => 0.0
     };
 
-    let z = match items.remove("z") {
-        Some(v) => try!(FromConfig::from_config(v), "z"),
+    let z = match items.get("z") {
+        Some(v) => try!(v.decode(), "z"),
         None => 0.0
     };
 
@@ -34,21 +32,21 @@ fn decode_vector_3d(_context: &config::ConfigContext, items: HashMap<String, con
 
 }
 
-fn decode_transform_look_at(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Matrix4<f64>, String> {
-    let mut items = items;
+fn decode_transform_look_at(entry: Entry) -> Result<Matrix4<f64>, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
 
-    let from = match items.remove("from") {
-        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "from"),
+    let from = match items.get("from") {
+        Some(v) => try!(v.dynamic_decode(), "from"),
         None => Vector3::new(0.0, 0.0, 0.0)
     };
 
-    let to = match items.remove("to") {
-        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "to"),
+    let to = match items.get("to") {
+        Some(v) => try!(v.dynamic_decode(), "to"),
         None => Vector3::new(0.0, 0.0, 0.0)
     };
 
-    let up = match items.remove("up") {
-        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "up"),
+    let up = match items.get("up") {
+        Some(v) => try!(v.dynamic_decode(), "up"),
         None => Vector3::new(0.0, 1.0, 0.0)
     };
 

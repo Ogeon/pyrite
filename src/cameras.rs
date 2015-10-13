@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::f64::consts;
 
 use rand::Rng;
@@ -11,11 +10,11 @@ use cgmath::{Ray, Ray3};
 
 use renderer::Area;
 
-use config;
-use config::FromConfig;
+use config::Prelude;
+use config::entry::Entry;
 
-pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_grouped_type("Camera", "Perspective", decode_perspective);
+pub fn register_types(context: &mut Prelude) {
+    context.object("Camera".into()).object("Perspective".into()).add_decoder(decode_perspective);
 }
 
 pub enum Camera {
@@ -65,28 +64,28 @@ impl Camera {
     }
 }
 
-fn decode_perspective(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<Camera, String> {
-    let mut items = items;
+fn decode_perspective(entry: Entry) -> Result<Camera, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
 
-    let transform = match items.remove("transform") {
+    let transform = match items.get("transform") {
         Some(v) => AffineMatrix3 {
-            mat: try!(context.decode_structure_from_group("Transform", v), "transform")
+            mat: try!(v.dynamic_decode(), "transform")
         },
         None => Transform::identity()
     };
 
-    let fov: f64 = match items.remove("fov") {
-        Some(v) => try!(FromConfig::from_config(v), "fov"),
+    let fov: f64 = match items.get("fov") {
+        Some(v) => try!(v.decode(), "fov"),
         None => return Err("missing field of view ('fov')".into())
     };
 
-    let focus_distance: f64 = match items.remove("focus_distance") {
-        Some(v) => try!(FromConfig::from_config(v), "focus_distance"),
+    let focus_distance: f64 = match items.get("focus_distance") {
+        Some(v) => try!(v.decode(), "focus_distance"),
         None => 1.0
     };
 
-    let aperture: f64 = match items.remove("aperture") {
-        Some(v) => try!(FromConfig::from_config(v), "aperture"),
+    let aperture: f64 = match items.get("aperture") {
+        Some(v) => try!(v.decode(), "aperture"),
         None => 0.0
     };
 

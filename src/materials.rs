@@ -1,5 +1,4 @@
 use std;
-use std::collections::HashMap;
 
 use cgmath::{EuclideanVector, Vector, Vector3};
 use cgmath::{Ray, Ray3};
@@ -7,8 +6,8 @@ use cgmath::{Ray, Ray3};
 use tracer;
 use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect, Disperse};
 
-use config;
-use config::FromConfig;
+use config::Prelude;
+use config::entry::Entry;
 
 use math;
 
@@ -260,63 +259,64 @@ fn refract<'a>(ior: f64, env_ior: f64, color: &'a Box<ParametricValue<tracer::Re
 
 
 
-pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_grouped_type("Material", "Diffuse", decode_diffuse);
-    context.insert_grouped_type("Material", "Emission", decode_emission);
-    context.insert_grouped_type("Material", "Refractive", decode_refractive);
-    context.insert_grouped_type("Material", "Mirror", decode_mirror);
-    context.insert_grouped_type("Material", "Mix", decode_mix);
-    context.insert_grouped_type("Material", "FresnelMix", decode_fresnel_mix);
+pub fn register_types(context: &mut Prelude) {
+    let mut group = context.object("Material".into());
+    group.object("Diffuse".into()).add_decoder(decode_diffuse);
+    group.object("Emission".into()).add_decoder(decode_emission);
+    group.object("Refractive".into()).add_decoder(decode_refractive);
+    group.object("Mirror".into()).add_decoder(decode_mirror);
+    group.object("Mix".into()).add_decoder(decode_mix);
+    group.object("FresnelMix".into()).add_decoder(decode_fresnel_mix);
 }
 
-pub fn decode_diffuse(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
-    let mut fields = fields;
+pub fn decode_diffuse(entry: Entry) -> Result<(MaterialBox, bool), String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let color = match fields.remove("color") {
-        Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
+    let color = match fields.get("color") {
+        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into())
     };
 
     Ok((Box::new(Diffuse { color: color }) as MaterialBox, false))
 }
 
-pub fn decode_emission(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
-    let mut fields = fields;
+pub fn decode_emission(entry: Entry) -> Result<(MaterialBox, bool), String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let color = match fields.remove("color") {
-        Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
+    let color = match fields.get("color") {
+        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into())
     };
 
     Ok((Box::new(Emission { color: color }) as MaterialBox, true))
 }
 
-pub fn decode_mirror(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
-    let mut fields = fields;
+pub fn decode_mirror(entry: Entry) -> Result<(MaterialBox, bool), String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let color = match fields.remove("color") {
-        Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
+    let color = match fields.get("color") {
+        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into())
     };
 
     Ok((Box::new(Mirror { color: color }) as MaterialBox, false))
 }
 
-pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
-    let mut fields = fields;
+pub fn decode_mix(entry: Entry) -> Result<(MaterialBox, bool), String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let factor = match fields.remove("factor") {
-        Some(v) => try!(FromConfig::from_config(v), "factor"),
+    let factor = match fields.get("factor") {
+        Some(v) => try!(v.decode(), "factor"),
         None => return Err("missing field 'factor'".into())
     };
 
-    let (a, a_emissive): (MaterialBox, bool) = match fields.remove("a") {
-        Some(v) => try!(context.decode_structure_from_group("Material", v), "a"),
+    let (a, a_emissive): (MaterialBox, bool) = match fields.get("a") {
+        Some(v) => try!(v.dynamic_decode(), "a"),
         None => return Err("missing field 'a'".into())
     };
 
-    let (b, b_emissive): (MaterialBox, bool) = match fields.remove("b") {
-        Some(v) => try!(context.decode_structure_from_group("Material", v), "b"),
+    let (b, b_emissive): (MaterialBox, bool) = match fields.get("b") {
+        Some(v) => try!(v.dynamic_decode(), "b"),
         None => return Err("missing field 'b'".into())
     };
 
@@ -327,36 +327,36 @@ pub fn decode_mix(context: &config::ConfigContext, fields: HashMap<String, confi
     }) as MaterialBox, a_emissive || b_emissive))
 }
 
-pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
-    let mut fields = fields;
+pub fn decode_fresnel_mix(entry: Entry) -> Result<(MaterialBox, bool), String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let ior = match fields.remove("ior") {
-        Some(v) => try!(FromConfig::from_config(v), "ior"),
+    let ior = match fields.get("ior") {
+        Some(v) => try!(v.decode(), "ior"),
         None => return Err("missing field 'ior'".into())
     };
 
-    let env_ior = match fields.remove("env_ior") {
-        Some(v) => try!(FromConfig::from_config(v), "env_ior"),
+    let env_ior = match fields.get("env_ior") {
+        Some(v) => try!(v.decode(), "env_ior"),
         None => 1.0
     };
 
-    let dispersion = match fields.remove("dispersion") {
-        Some(v) => try!(FromConfig::from_config(v), "dispersion"),
+    let dispersion = match fields.get("dispersion") {
+        Some(v) => try!(v.decode(), "dispersion"),
         None => 0.0
     };
 
-    let env_dispersion = match fields.remove("env_dispersion") {
-        Some(v) => try!(FromConfig::from_config(v), "env_dispersion"),
+    let env_dispersion = match fields.get("env_dispersion") {
+        Some(v) => try!(v.decode(), "env_dispersion"),
         None => 0.0
     };
 
-    let (reflect, reflect_emissive): (MaterialBox, bool) = match fields.remove("reflect") {
-        Some(v) => try!(context.decode_structure_from_group("Material", v), "reflect"),
+    let (reflect, reflect_emissive): (MaterialBox, bool) = match fields.get("reflect") {
+        Some(v) => try!(v.dynamic_decode(), "reflect"),
         None => return Err("missing field 'reflect'".into())
     };
 
-    let (refract, refract_emissive): (MaterialBox, bool) = match fields.remove("refract") {
-        Some(v) => try!(context.decode_structure_from_group("Material", v), "refract"),
+    let (refract, refract_emissive): (MaterialBox, bool) = match fields.get("refract") {
+        Some(v) => try!(v.dynamic_decode(), "refract"),
         None => return Err("missing field 'refract'".into())
     };
 
@@ -370,31 +370,31 @@ pub fn decode_fresnel_mix(context: &config::ConfigContext, fields: HashMap<Strin
     }) as MaterialBox, refract_emissive || reflect_emissive))
 }
 
-pub fn decode_refractive(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<(MaterialBox, bool), String> {
-    let mut fields = fields;
+pub fn decode_refractive(entry: Entry) -> Result<(MaterialBox, bool), String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let ior = match fields.remove("ior") {
-        Some(v) => try!(FromConfig::from_config(v), "ior"),
+    let ior = match fields.get("ior") {
+        Some(v) => try!(v.decode(), "ior"),
         None => return Err("missing field 'ior'".into())
     };
 
-    let env_ior = match fields.remove("env_ior") {
-        Some(v) => try!(FromConfig::from_config(v), "env_ior"),
+    let env_ior = match fields.get("env_ior") {
+        Some(v) => try!(v.decode(), "env_ior"),
         None => 1.0
     };
 
-    let dispersion = match fields.remove("dispersion") {
-        Some(v) => try!(FromConfig::from_config(v), "dispersion"),
+    let dispersion = match fields.get("dispersion") {
+        Some(v) => try!(v.decode(), "dispersion"),
         None => 0.0
     };
 
-    let env_dispersion = match fields.remove("env_dispersion") {
-        Some(v) => try!(FromConfig::from_config(v), "env_dispersion"),
+    let env_dispersion = match fields.get("env_dispersion") {
+        Some(v) => try!(v.decode(), "env_dispersion"),
         None => 0.0
     };
 
-    let color = match fields.remove("color") {
-        Some(v) => try!(tracer::decode_parametric_number(context, v), "color"),
+    let color = match fields.get("color") {
+        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into())
     };
 

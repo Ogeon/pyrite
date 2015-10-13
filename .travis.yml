@@ -1,4 +1,7 @@
 language: rust
 script:
-  - cargo test -v
   - cargo build -v
+  - cargo test -v
+  - cd config
+  - cargo build -v
+  - cargo test -v

@@ -1,14 +1,14 @@
-use std::collections::HashMap;
-
 use tracer;
 
-use config;
+use config::Prelude;
+use config::entry::Entry;
 
 macro_rules! make_values {
     ($insert_fn:ident : $type_name:ident <$context_name:ty, $result_name:ty> { $($fn_name:ident : $variant_name:ident => $value_name:ident),* }) => (
-        fn $insert_fn(context: &mut config::ConfigContext) {
+        fn $insert_fn(context: &mut Prelude) {
+            let mut group = context.object("Value".into());
             $(
-                context.insert_grouped_type("Value", stringify!($variant_name), $fn_name);
+                group.object(stringify!($variant_name).into()).add_decoder($fn_name);
             )*
         }
 
@@ -27,14 +27,14 @@ macro_rules! make_values {
         }
 
         $(
-            fn $fn_name(_context: &config::ConfigContext, _fields: HashMap<String, config::ConfigItem>) -> Result<Box<tracer::ParametricValue<$context_name, $result_name>>, String> {
+            fn $fn_name(_entry: Entry) -> Result<Box<tracer::ParametricValue<$context_name, $result_name>>, String> {
                 Ok(Box::new($type_name::$variant_name) as Box<tracer::ParametricValue<$context_name, $result_name>>)
             }
         )*
     )
 }
 
-pub fn register_types(context: &mut config::ConfigContext) {
+pub fn register_types(context: &mut Prelude) {
     insert_render_numbers(context);
 }
 

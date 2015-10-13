@@ -1,11 +1,8 @@
-use std;
-use std::io::Read;
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
+use std::path::Path;
 
 use config;
-use config::FromConfig;
+use config::Prelude;
+use config::entry::Entry;
 
 use tracer;
 use renderer;
@@ -16,57 +13,30 @@ use materials;
 use math;
 use values;
 
-macro_rules! try_io {
-    ($e:expr) => (
-        match $e {
-            Ok(v) => v,
-            Err(e) => return ParseResult::IoError(e)
-        }
-    )
-}
-
 macro_rules! try_parse {
     ($e:expr) => (
         match $e {
             Ok(v) => v,
-            Err(e) => return ParseResult::ParseError(e)
+            Err(e) => return ParseResult::InterpretError(e)
         }
     );
 
     ($e:expr, $under:expr) => (
         match $e {
             Ok(v) => v,
-            Err(e) => return ParseResult::ParseError(format!("{}: {}", $under, e))
+            Err(e) => return ParseResult::InterpretError(format!("{}: {}", $under, e))
         }
     )
 }
 
 pub enum ParseResult<T> {
     Success(T),
-    IoError(std::io::Error),
-    ParseError(String)
+    ParseError(config::Error),
+    InterpretError(String)
 }
 
 pub fn from_file<P: AsRef<Path>>(path: P) -> ParseResult<Project> {
-    let mut config_src = String::new();
-    try_io!(File::open(&path).and_then(|mut f| f.read_to_string(&mut config_src)));
-    let mut config = try_parse!(
-        config::parse(config_src.chars(), &mut |source| {
-            let sub_path = PathBuf::from(source);
-
-            let mut content = String::new();
-            let file_path = path.as_ref().parent().unwrap_or(path.as_ref()).join(&sub_path);
-            if let Err(e) = File::open(&file_path).and_then(|mut f| f.read_to_string(&mut content)) {
-                return Err(format!("error while reading {}: {}", file_path.display(), e));
-            }
-            
-            let object_path = sub_path.with_extension("").components().map(|c| c.as_ref().to_string_lossy().into_owned()).collect();
-
-            Ok((content, object_path))
-        })
-    );
-
-    let mut context = config::ConfigContext::new();
+    let mut context = Prelude::new();
 
     types3d::register_types(&mut context);
     tracer::register_types(&mut context);
@@ -79,27 +49,39 @@ pub fn from_file<P: AsRef<Path>>(path: P) -> ParseResult<Project> {
     math::register_specific_types(&mut context);
     register_types(&mut context);
 
-    let image_spec = match config.remove("image") {
-        Some(v) => try_parse!(decode_image_spec(&context, v), "image"),
-        None => return ParseResult::ParseError("missing image specifications".into())
+    let mut config = context.into_parser();
+    if let Err(e) = config.parse_file(&path) {
+        return ParseResult::ParseError(e);
+    }
+    let root = config.root().as_object().unwrap();
+
+    println!("decoding image spec");
+    let image_spec = match root.get("image") {
+        Some(v) => try_parse!(decode_image_spec(v), "image"),
+        None => return ParseResult::InterpretError("missing image specifications".into())
     };
 
-    let renderer = match config.remove("renderer") {
-        Some(v) => try_parse!(context.decode_structure_from_group("Renderer", v), "renderer"),
-        None => return ParseResult::ParseError("missing renderer specifications".into())
+    println!("decoding renderer");
+    let renderer = match root.get("renderer") {
+        Some(v) => try_parse!(v.dynamic_decode(), "renderer"),
+        None => return ParseResult::InterpretError("missing renderer specifications".into())
     };
 
-    let camera = match config.remove("camera") {
-        Some(v) => try_parse!(context.decode_structure_from_group("Camera", v), "camera"),
-        None => return ParseResult::ParseError("missing camera specifications".into())
+    println!("decoding camera");
+    let camera = match root.get("camera") {
+        Some(v) => try_parse!(v.dynamic_decode(), "camera"),
+        None => return ParseResult::InterpretError("missing camera specifications".into())
     };
 
-    let world = match config.remove("world") {
-        Some(v) => try_parse!(tracer::decode_world(&context, v, |source| {
+    println!("decoding world");
+    let world = match root.get("world") {
+        Some(v) => try_parse!(tracer::decode_world(v, |source| {
             path.as_ref().parent().unwrap_or(path.as_ref()).join(&source)
         }), "world"),
-        None => return ParseResult::ParseError("missing world specifications".into())
+        None => return ParseResult::InterpretError("missing world specifications".into())
     };
+
+    println!("the project has been decoded");
 
     ParseResult::Success(Project {
         image: image_spec,
@@ -123,71 +105,66 @@ pub struct ImageSpec {
     pub rgb_curves: (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>)
 }
 
-fn decode_image_spec(context: &config::ConfigContext, item: config::ConfigItem) -> Result<ImageSpec, String> {
-    match item {
-        config::Structure(_, mut fields) => {
-            let width = match fields.remove("width") {
-                Some(v) => try!(FromConfig::from_config(v), "width"),
-                None => return Err("missing field 'width'".into())
-            };
+fn decode_image_spec(entry: Entry) -> Result<ImageSpec, String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-            let height = match fields.remove("height") {
-                Some(v) => try!(FromConfig::from_config(v), "height"),
-                None => return Err("missing field 'height'".into())
-            };
+    let width = match fields.get("width") {
+        Some(v) => try!(v.decode(), "width"),
+        None => return Err("missing field 'width'".into())
+    };
 
-            let format = match fields.remove("format") {
-                Some(v) => try!(context.decode_structure_from_group("Image", v), "format"),
-                None => return Err("missing field 'format'".into())
-            };
+    let height = match fields.get("height") {
+        Some(v) => try!(v.decode(), "height"),
+        None => return Err("missing field 'height'".into())
+    };
 
-            let rgb_curves = match fields.remove("rgb_curves") {
-                Some(config::Structure(_, f)) => try!(decode_rgb_curves(f), "rgb_curves"),
-                Some(_) => return Err(format!("expected a structure")),
-                None => return Err("missing field 'rgb_curves'".into())
-            };
+    let format = match fields.get("format") {
+        Some(v) => try!(v.dynamic_decode(), "format"),
+        None => return Err("missing field 'format'".into())
+    };
 
-            Ok(ImageSpec {
-                width: width,
-                height: height,
-                format: format,
-                rgb_curves: rgb_curves
-            })
-        },
-        config::Primitive(v) => Err(format!("unexpected {:?}", v)),
-        config::List(_) => Err(format!("unexpected list"))
-    }
+    let rgb_curves = match fields.get("rgb_curves") {
+        Some(v) => try!(decode_rgb_curves(v), "rgb_curves"),
+        None => return Err("missing field 'rgb_curves'".into())
+    };
+
+    Ok(ImageSpec {
+        width: width,
+        height: height,
+        format: format,
+        rgb_curves: rgb_curves
+    })
 }
 
-fn decode_rgb_curves(fields: HashMap<String, config::ConfigItem>) -> Result<(Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>), String> {
-    let mut fields = fields;
+fn decode_rgb_curves(entry: Entry) -> Result<(Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>), String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let red = match fields.remove("red") {
-        Some(v) => try!(FromConfig::from_config(v), "red"),
+    let red = match fields.get("red") {
+        Some(v) => try!(v.decode(), "red"),
         None => return Err("missing field 'red'".into())
     };
 
-    let green = match fields.remove("green") {
-        Some(v) => try!(FromConfig::from_config(v), "green"),
+    let green = match fields.get("green") {
+        Some(v) => try!(v.decode(), "green"),
         None => return Err("missing field 'green'".into())
     };
         
-    let blue = match fields.remove("blue") {
-        Some(v) => try!(FromConfig::from_config(v), "blue"),
+    let blue = match fields.get("blue") {
+        Some(v) => try!(v.decode(), "blue"),
         None => return Err("missing field 'blue'".into())
     };
 
     Ok((red, green, blue))
 }
 
-fn register_types(context: &mut config::ConfigContext) {
-    context.insert_grouped_type("Image", "Png", decode_png);
+fn register_types(context: &mut Prelude) {
+    context.object("Image".into()).object("Png".into()).add_decoder(decode_png);
 }
 
 pub enum ImageFormat {
     Png
 }
 
-fn decode_png(_context: &config::ConfigContext, _items: HashMap<String, config::ConfigItem>) -> Result<ImageFormat, String> {
+fn decode_png(_: Entry) -> Result<ImageFormat, String> {
     Ok(ImageFormat::Png)
 }

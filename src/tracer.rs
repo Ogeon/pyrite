@@ -1,6 +1,5 @@
 use std;
 use std::sync::Arc;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -14,7 +13,8 @@ use cgmath::{Point, Point3};
 use obj;
 use genmesh;
 
-use config;
+use config::{Prelude, Value, Decode};
+use config::entry::Entry;
 use shapes;
 use bkdtree;
 
@@ -434,102 +434,96 @@ fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: usize, wavelengths:
 
 
 
-pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_grouped_type("Sky", "Color", decode_sky_color);
+pub fn register_types(context: &mut Prelude) {
+    context.object("Sky".into()).object("Color".into()).add_decoder(decode_sky_color);
 }
 
-fn decode_sky_color(context: &config::ConfigContext, fields: HashMap<String, config::ConfigItem>) -> Result<Sky, String> {
-    let mut fields = fields;
+fn decode_sky_color(entry: Entry) -> Result<Sky, String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-    let color = match fields.remove("color") {
-        Some(v) => try!(decode_parametric_number(context, v), "color"),
+    let color = match fields.get("color") {
+        Some(v) => try!(decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into())
     };
 
     Ok(Sky::Color(color))
 }
 
-pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(context: &config::ConfigContext, item: config::ConfigItem, make_path: F) -> Result<World, String> {
-    match item {
-        config::Structure(_, mut fields) => {
-            let sky = match fields.remove("sky") {
-                Some(v) => try!(context.decode_structure_from_group("Sky", v), "sky"),
-                None => return Err("missing field 'sky'".into())
-            };
+pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(entry: Entry, make_path: F) -> Result<World, String> {
+    let fields = try!(entry.as_object().ok_or("not an object".into()));
 
-            let object_protos = match fields.remove("objects") {
-                Some(v) => try!(v.into_list(), "objects"),
-                None => return Err("missing field 'objects'".into())
-            };
+    let sky = match fields.get("sky") {
+        Some(v) => try!(v.dynamic_decode(), "sky"),
+        None => return Err("missing field 'sky'".into())
+    };
 
-            let mut objects: Vec<Arc<shapes::Shape>> = Vec::new();
-            let mut lights: Vec<Arc<shapes::Shape>> = Vec::new();
+    let object_protos = match fields.get("objects") {
+        Some(v) => try!(v.as_list().ok_or(String::from("expected a list")), "objects"),
+        None => return Err("missing field 'objects'".into())
+    };
 
-            for (i, object) in object_protos.into_iter().enumerate() {
-                let shape: shapes::ProxyShape = try!(context.decode_structure_from_group("Shape", object), format!("objects: [{}]", i));
-                match shape {
-                    shapes::DecodedShape { shape, emissive } => {
-                        let shape = Arc::new(shape);
-                        if emissive {
-                            lights.push(shape.clone());
-                        }
-                        objects.push(shape);
-                    },
-                    shapes::Mesh { file, mut materials } => {
-                        let path = make_path(file);
-                        let file = match File::open(&path) {
-                            Ok(f) => f,
-                            Err(e) => return Err(format!("failed to open {}: {}", path.as_ref().display(), e))
-                        };
-                        let mut file = BufReader::new(file);
-                        let obj = obj::Obj::load(&mut file);
-                        for object in obj.object_iter() {
-                            println!("adding object '{}'", object.name);
-                            
-                            let (object_material, emissive) = match materials.remove(&object.name) {
-                                Some(v) => {
-                                    let (material, emissive): (Box<Material + 'static + Send + Sync>, bool) =
-                                        try!(context.decode_structure_from_group("Material", v));
+    let mut objects: Vec<Arc<shapes::Shape>> = Vec::new();
+    let mut lights: Vec<Arc<shapes::Shape>> = Vec::new();
 
-                                    (Arc::new(material), emissive)
-                                },
-                                None => return Err(format!("objects: [{}]: missing field '{}'", i, object.name))
-                            };
+    for (i, object) in object_protos.into_iter().enumerate() {
+        let shape: shapes::ProxyShape = try!(object.dynamic_decode(), format!("objects: [{}]", i));
+        match shape {
+            shapes::DecodedShape { shape, emissive } => {
+                let shape = Arc::new(shape);
+                if emissive {
+                    lights.push(shape.clone());
+                }
+                objects.push(shape);
+            },
+            shapes::Mesh { file, mut materials } => {
+                let path = make_path(file);
+                let file = match File::open(&path) {
+                    Ok(f) => f,
+                    Err(e) => return Err(format!("failed to open {}: {}", path.as_ref().display(), e))
+                };
+                let mut file = BufReader::new(file);
+                let obj = obj::Obj::load(&mut file);
+                for object in obj.object_iter() {
+                    println!("adding object '{}'", object.name);
+                    
+                    let (object_material, emissive) = match materials.remove(&object.name) {
+                        Some(m) => {
+                            let (material, emissive): (Box<Material + 'static + Send + Sync>, bool) = m;
+                            (Arc::new(material), emissive)
+                        },
+                        None => return Err(format!("objects: [{}]: missing field '{}'", i, object.name))
+                    };
 
-                            for group in object.group_iter() {
-                                for shape in group.indices().iter() {
-                                    match *shape {
-                                        genmesh::Polygon::PolyTri(genmesh::Triangle{x, y, z}) => {
-                                            let triangle = Arc::new(make_triangle(&obj, x, y, z, object_material.clone()));
+                    for group in object.group_iter() {
+                        for shape in group.indices().iter() {
+                            match *shape {
+                                genmesh::Polygon::PolyTri(genmesh::Triangle{x, y, z}) => {
+                                    let triangle = Arc::new(make_triangle(&obj, x, y, z, object_material.clone()));
 
-                                            if emissive {
-                                                lights.push(triangle.clone());
-                                            }
-
-                                            objects.push(triangle);
-                                        },
-                                        _ => {}
+                                    if emissive {
+                                        lights.push(triangle.clone());
                                     }
-                                }
+
+                                    objects.push(triangle);
+                                },
+                                _ => {}
                             }
                         }
                     }
                 }
             }
-
-            println!("the scene contains {} objects", objects.len());
-            println!("building BKD-Tree... ");
-            let tree = bkdtree::BkdTree::new(objects, 3, 10); //TODO: make arrity configurable
-            println!("done building BKD-Tree");
-            Ok(World {
-                sky: sky,
-                lights: lights,
-                objects: Box::new(tree) as Box<ObjectContainer + 'static + Send + Sync>
-            })
-        },
-        config::Primitive(v) => Err(format!("unexpected {:?}", v)),
-        config::List(_) => Err(format!("unexpected list"))
+        }
     }
+
+    println!("the scene contains {} objects", objects.len());
+    println!("building BKD-Tree... ");
+    let tree = bkdtree::BkdTree::new(objects, 3, 10); //TODO: make arrity configurable
+    println!("done building BKD-Tree");
+    Ok(World {
+        sky: sky,
+        lights: lights,
+        objects: Box::new(tree) as Box<ObjectContainer + 'static + Send + Sync>
+    })
 }
 
 fn vertex_to_point(v: &[f32; 3]) -> Point3<f64> {
@@ -574,21 +568,10 @@ fn make_triangle<M>(
     }
 }
 
-pub fn decode_parametric_number<From: 'static>(context: &config::ConfigContext, item: config::ConfigItem) -> Result<Box<ParametricValue<From, f64>>, String> {
-    let group_names = vec!["Math", "Value"];
-
-    let name_collection = if group_names.len() == 1 {
-        format!("'{}'", group_names.first().unwrap())
-    } else if group_names.len() > 1 {
-        let names = &group_names[..group_names.len() - 1];
-        format!("'{}' or '{}'", names.connect("', '"), group_names.last().unwrap())
+pub fn decode_parametric_number<From: Decode + 'static>(item: Entry) -> Result<Box<ParametricValue<From, f64>>, String> {
+    if let Some(&Value::Number(num)) = item.as_value() {
+        Ok(Box::new(num.as_float()) as Box<ParametricValue<From, f64>>)
     } else {
-        return Err("internal error: trying to decode structure from one of 0 groups".into())
-    };
-
-    match item {
-        config::Structure(..) => context.decode_structure_from_groups(group_names, item),
-        config::Primitive(config::parser::Value::Number(n)) => Ok(Box::new(n) as Box<ParametricValue<From, f64>>),
-        v => return Err(format!("expected a number or a structure from group {}, but found {}", name_collection, v))
+        item.dynamic_decode()
     }
 }

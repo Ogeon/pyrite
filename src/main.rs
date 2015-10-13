@@ -8,9 +8,11 @@ extern crate rand;
 extern crate simple_parallel;
 extern crate num_cpus;
 extern crate time;
+extern crate pyrite_config as config;
 
 use std::fs::File;
 use std::path::Path;
+use std::io::{Write, stdout};
 
 use simple_parallel::Pool;
 
@@ -43,7 +45,6 @@ mod bkdtree;
 mod cameras;
 mod shapes;
 mod materials;
-mod config;
 mod project;
 mod renderer;
 mod types3d;
@@ -57,8 +58,8 @@ fn main() {
     if let Some(project_path) = args.next() {
         match project::from_file(&project_path) {
             project::ParseResult::Success(p) => render(p, project_path),
-            project::ParseResult::IoError(e) => println!("error while reading project file: {}", e),
-            project::ParseResult::ParseError(e) => println!("error while parsing project file: {}", e)
+            project::ParseResult::ParseError(e) => println!("error while parsing project file: {}", e),
+            project::ParseResult::InterpretError(e) => println!("error while interpreting project file: {}", e),
         }
     } else {
         println!("usage: {} project_file", name);
@@ -102,8 +103,10 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
         tile
     };
 
+    print!(" 0%");
+    stdout().flush().unwrap();
+
     let mut last_print = PreciseTime::now();
-    
     let num_tiles = tiles.len();
     for (i, (_, tile)) in unsafe { pool.unordered_map(tiles, &f) }.enumerate() {
         for (spectrum, position) in tile.pixels() {
@@ -117,12 +120,13 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
         }
 
         if last_print.to(PreciseTime::now()).num_seconds() >= 4 {
-            println!("{:2}%", (i * 100) / num_tiles);
+            print!("\r{:2}%", (i * 100) / num_tiles);
+            stdout().flush().unwrap();
             match File::create(&render_path) {
                 Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
-                    println!("error while writing image: {}", e);
+                    println!("\rerror while writing image: {}", e);
                 },
-                Err(e) => println!("failed to open/create file for writing: {}", e)
+                Err(e) => println!("\rfailed to open/create file for writing: {}", e)
             }
             last_print = PreciseTime::now();
         }
@@ -130,12 +134,12 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
 
     match File::create(&render_path) {
         Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
-            println!("error while writing image: {}", e);
+            println!("\rerror while writing image: {}", e);
         },
-        Err(e) => println!("failed to open/create file for writing: {}", e)
+        Err(e) => println!("\rfailed to open/create file for writing: {}", e)
     }
 
-    println!("Done!")
+    println!("\rDone!")
 }
 
 fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::utils::Interpolated) -> f64 {

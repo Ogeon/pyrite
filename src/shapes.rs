@@ -14,8 +14,8 @@ use cgmath::{Ray, Ray3};
 use tracer;
 use tracer::Material;
 
-use config;
-use config::{FromConfig, Type};
+use config::Prelude;
+use config::entry::Entry;
 
 use bkdtree;
 use materials;
@@ -32,7 +32,7 @@ pub struct Vertex<S> {
 
 pub enum ProxyShape {
     DecodedShape { shape: Shape, emissive: bool },
-    Mesh { file: String, materials: HashMap<String, config::ConfigItem> }
+    Mesh { file: String, materials: HashMap<String, (materials::MaterialBox, bool)> }
 }
 
 pub enum Shape {
@@ -198,27 +198,28 @@ impl<'a> bkdtree::Element<tracer::BkdRay<'a>> for Arc<Shape> {
 
 
 
-pub fn register_types(context: &mut config::ConfigContext) {
-    context.insert_grouped_type("Shape", "Sphere", decode_sphere);
-    context.insert_grouped_type("Shape", "Plane", decode_plane);
-    context.insert_grouped_type("Shape", "Mesh", decode_mesh);
+pub fn register_types(context: &mut Prelude) {
+    let mut group = context.object("Shape".into());
+    group.object("Sphere".into()).add_decoder(decode_sphere);
+    group.object("Plane".into()).add_decoder(decode_plane);
+    group.object("Mesh".into()).add_decoder(decode_mesh);
 }
 
-fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<ProxyShape, String> {
-    let mut items = items;
+fn decode_sphere(entry: Entry) -> Result<ProxyShape, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
 
-    let position = match items.remove("position") {
-        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "position"),
+    let position = match items.get("position") {
+        Some(v) => try!(v.dynamic_decode(), "position"),
         None => return Err("missing field 'position'".into())
     };
 
-    let radius = match items.remove("radius") {
-        Some(v) => try!(FromConfig::from_config(v), "radius"),
+    let radius = match items.get("radius") {
+        Some(v) => try!(v.decode(), "radius"),
         None => return Err("missing field 'radius'".into())
     };
 
-    let (material, emissive): (materials::MaterialBox, bool) = match items.remove("material") {
-        Some(v) => try!(context.decode_structure_from_group("Material", v), "material"),
+    let (material, emissive): (materials::MaterialBox, bool) = match items.get("material") {
+        Some(v) => try!(v.dynamic_decode(), "material"),
         None => return Err("missing field 'material'".into())
     };
 
@@ -232,19 +233,21 @@ fn decode_sphere(context: &config::ConfigContext, items: HashMap<String, config:
     })
 }
 
-fn decode_plane(context: &config::ConfigContext, mut items: HashMap<String, config::ConfigItem>) -> Result<ProxyShape, String> {
-    let origin = match items.remove("origin") {
-        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "origin"),
+fn decode_plane(entry: Entry) -> Result<ProxyShape, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
+
+    let origin = match items.get("origin") {
+        Some(v) => try!(v.dynamic_decode(), "origin"),
         None => return Err("missing field 'origin'".into())
     };
 
-    let normal = match items.remove("normal") {
-        Some(v) => try!(context.decode_structure_of_type(&Type::single("Vector"), v), "normal"),
+    let normal = match items.get("normal") {
+        Some(v) => try!(v.dynamic_decode(), "normal"),
         None => return Err("missing field 'normal'".into())
     };
 
-    let (material, emissive): (materials::MaterialBox, bool) = match items.remove("material") {
-        Some(v) => try!(context.decode_structure_from_group("Material", v), "material"),
+    let (material, emissive): (materials::MaterialBox, bool) = match items.get("material") {
+        Some(v) => try!(v.dynamic_decode(), "material"),
         None => return Err("missing field 'material'".into())
     };
 
@@ -257,17 +260,20 @@ fn decode_plane(context: &config::ConfigContext, mut items: HashMap<String, conf
     })
 }
 
-fn decode_mesh(_context: &config::ConfigContext, items: HashMap<String, config::ConfigItem>) -> Result<ProxyShape, String> {
-    let mut items = items;
+fn decode_mesh(entry: Entry) -> Result<ProxyShape, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
 
-    let file_name: String = match items.remove("file") {
-        Some(v) => try!(FromConfig::from_config(v), "file"),
+    let file_name: String = match items.get("file") {
+        Some(v) => try!(v.decode(), "file"),
         None => return Err("missing field 'file'".into())
     };
 
-    let materials = match items.remove("materials") {
-        Some(config::Structure(_, fields)) => fields,
-        Some(v) => return Err(format!("materials: expected a structure, but found '{}'", v)),
+    let materials = match items.get("materials").map(|e| e.as_object()) {
+        Some(Some(fields)) => try!(fields.into_iter().map(|(k, v)| {
+            let i = try!(v.dynamic_decode());
+            Ok((k.into(), i))
+        }).collect()),
+        Some(None) => return Err(format!("materials: expected a structure, but found something else")), //TODO: better handling
         None => return Err("missing field 'materials'".into())
     };
 
