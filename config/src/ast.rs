@@ -36,8 +36,17 @@ pub enum ExtensionChanges {
     FunctionStyle(Vec<Value>)
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Number {
     Integer(i64),
     Float(f64)
+}
+
+impl Number {
+    pub fn as_float(self) -> f64 {
+        match self {
+            Number::Integer(i) => i as f64,
+            Number::Float(f) => f,
+        }
+    }
 }

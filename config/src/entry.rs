@@ -61,54 +61,47 @@ impl<'a> Entry<'a> {
         self.as_list().expect("the entry is not a list").get(index).expect("invalid index")
     }
 
-    pub fn decode<T: FromEntry<'a>>(&self) -> Option<T> {
+    pub fn decode<T: FromEntry<'a>>(&self) -> Result<T, String> {
         T::from_entry(self.clone())
     }
 
-    pub fn dynamic_decode<T: Decode>(&self) -> Option<T> {
-        self.cfg.get_decoder(self.id).and_then(|&Decoder(ref decoder)| decoder(self.clone()))
+    pub fn dynamic_decode<T: Decode>(&self) -> Result<T, String> {
+        self.cfg.get_decoder(self.id)
+            .ok_or("could not decode dynamically".into())
+            .and_then(|&Decoder(ref decoder)| decoder(self.clone()))
     }
 }
 
 pub trait FromEntry<'a> {
-    fn from_entry(entry: Entry<'a>) -> Option<Self>;
+    fn from_entry(entry: Entry<'a>) -> Result<Self, String>;
 }
 
 impl<'a, T: FromEntry<'a>> FromEntry<'a> for Vec<T> {
-    fn from_entry(entry: Entry<'a>) -> Option<Vec<T>> {
+    fn from_entry(entry: Entry<'a>) -> Result<Vec<T>, String> {
         if let Some(list) = entry.as_list() {
-            let mut v = vec![];
-            for entry in list {
-                if let Some(item) = T::from_entry(entry) {
-                    v.push(item);
-                } else {
-                    return None;
-                }
-            }
-
-            Some(v)
+            list.into_iter().map(|e| e.decode()).collect()
         } else {
-            None
+            Err("expected a list".into())
         }
     }
 }
 
 impl<'a> FromEntry<'a> for &'a str {
-    fn from_entry(entry: Entry<'a>) -> Option<&'a str> {
-        entry.as_value().and_then(|v| if let &Value::String(ref s) = v {
-            Some(&**s)
+    fn from_entry(entry: Entry<'a>) -> Result<&'a str, String> {
+        entry.as_value().ok_or("expected a value".into()).and_then(|v| if let &Value::String(ref s) = v {
+            Ok(&**s)
         } else {
-            None
+            Err("expected a string".into())
         })
     }
 }
 
 impl<'a> FromEntry<'a> for String {
-    fn from_entry(entry: Entry<'a>) -> Option<String> {
-        entry.as_value().and_then(|v| if let &Value::String(ref s) = v {
-            Some(s.clone())
+    fn from_entry(entry: Entry<'a>) -> Result<String, String> {
+        entry.as_value().ok_or("expected a value".into()).and_then(|v| if let &Value::String(ref s) = v {
+            Ok(s.clone())
         } else {
-            None
+            Err("expected a string".into())
         })
     }
 }
@@ -116,11 +109,11 @@ impl<'a> FromEntry<'a> for String {
 macro_rules! int_from_entry {
     ($($ty: ty),+) => ($(
         impl<'a> FromEntry<'a> for $ty {
-            fn from_entry(entry: Entry<'a>) -> Option<$ty> {
-                entry.as_value().and_then(|v| if let &Value::Number(Number::Integer(i)) = v {
-                    Some(i as $ty)
+            fn from_entry(entry: Entry<'a>) -> Result<$ty, String> {
+                entry.as_value().ok_or("expected a value".into()).and_then(|v| if let &Value::Number(Number::Integer(i)) = v {
+                    Ok(i as $ty)
                 } else {
-                    None
+                    Err("expected an integer".into())
                 })
             }
         }
@@ -130,19 +123,68 @@ macro_rules! int_from_entry {
 macro_rules! float_from_entry {
     ($($ty: ty),+) => ($(
         impl<'a> FromEntry<'a> for $ty {
-            fn from_entry(entry: Entry<'a>) -> Option<$ty> {
-                entry.as_value().and_then(|v| match *v {
-                    Value::Number(Number::Float(f)) => Some(f as $ty),
-                    Value::Number(Number::Integer(i)) => Some(i as $ty),
-                    _ => None,
+            fn from_entry(entry: Entry<'a>) -> Result<$ty, String> {
+                entry.as_value().ok_or("expected a value".into()).and_then(|v| match *v {
+                    Value::Number(Number::Float(f)) => Ok(f as $ty),
+                    Value::Number(Number::Integer(i)) => Ok(i as $ty),
+                    _ => Err("expected a number".into()),
                 })
             }
         }
     )+)
 }
 
-int_from_entry!(u8, u16, u32, u64, i8, i16, i32, i64);
+macro_rules! tuple_from_entry {
+    ($first: ident $(,$types: ident)+) => (
+        impl<'a, $first $(,$types)*> FromEntry<'a> for ($first $(,$types)*) where $first: FromEntry<'a> $(,$types: FromEntry<'a>)* {
+            fn from_entry(entry: Entry<'a>) -> Result<Self, String> {
+                entry.as_list().ok_or("expected a list".into()).and_then(|list| {
+                    let len = list.len();
+                    let mut iter = list.into_iter();
+                    let result = ({
+                            let i = iter.next().ok_or("too few items".into()).and_then(|e| $first::from_entry(e));
+                            try!(i)
+                        }
+                        $(, {
+                            let i = iter.next().ok_or("too few items".into()).and_then(|e| $types::from_entry(e));
+                            try!(i)
+                        })*
+                    );
+
+                    let rest = iter.count();
+
+                    if rest == 0 {
+                        Ok(result)
+                    } else {
+                        Err(format!("expected exactly {} items", len - rest))
+                    }
+                })
+            }
+        }
+
+        tuple_from_entry!($($types),*);
+    );
+    ($ty: ident) => (
+        impl<'a, $ty: FromEntry<'a>> FromEntry<'a> for ($ty,) {
+            fn from_entry(entry: Entry<'a>) -> Result<Self, String> {
+                entry.as_list().ok_or("expected a list".into()).and_then(|list| {
+                    if list.len() == 1 {
+                        Ok(({
+                                try!($ty::from_entry(list.get(0).unwrap()))
+                            },
+                        ))
+                    } else {
+                        Err("expected exactly one item".into())
+                    }
+                })
+            }
+        }
+    );
+}
+
+int_from_entry!(u8, u16, u32, u64, i8, i16, i32, i64, isize, usize);
 float_from_entry!(f32, f64);
+tuple_from_entry!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
 
 #[derive(Clone)]
 pub struct List<'a> {
@@ -158,20 +200,24 @@ impl<'a> List<'a> {
         })
     }
 
-    pub fn iter(&self) -> IntoIter {
-        IntoIter {
+    pub fn iter(&self) -> Items {
+        Items {
             cfg: self.cfg,
             iter: self.list.iter()
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
 }
 
 impl<'a> IntoIterator for List<'a> {
-    type IntoIter = IntoIter<'a>;
+    type IntoIter = Items<'a>;
     type Item = Entry<'a>;
 
-    fn into_iter(self) -> IntoIter<'a> {
-        IntoIter {
+    fn into_iter(self) -> Items<'a> {
+        Items {
             cfg: self.cfg,
             iter: self.list.iter()
         }
@@ -179,23 +225,20 @@ impl<'a> IntoIterator for List<'a> {
 }
 
 impl<'a> IntoIterator for &'a List<'a> {
-    type IntoIter = IntoIter<'a>;
+    type IntoIter = Items<'a>;
     type Item = Entry<'a>;
 
-    fn into_iter(self) -> IntoIter<'a> {
-        IntoIter {
-            cfg: self.cfg,
-            iter: self.list.iter()
-        }
+    fn into_iter(self) -> Items<'a> {
+        self.iter()
     }
 }
 
-pub struct IntoIter<'a> {
+pub struct Items<'a> {
     cfg: &'a Parser,
     iter: ::std::slice::Iter<'a, usize>
 }
 
-impl<'a> Iterator for IntoIter<'a> {
+impl<'a> Iterator for Items<'a> {
     type Item = Entry<'a>;
 
     fn next(&mut self) -> Option<Entry<'a>> {
@@ -237,5 +280,49 @@ impl<'a> Object<'a> {
                 }
             }
         }
+    }
+
+    pub fn iter(&self) -> Entries {
+        Entries {
+            cfg: self.cfg,
+            iter: self.children.iter()
+        }
+    }
+}
+
+impl<'a> IntoIterator for Object<'a> {
+    type IntoIter = Entries<'a>;
+    type Item = (&'a str, Entry<'a>);
+
+    fn into_iter(self) -> Entries<'a> {
+        Entries {
+            cfg: self.cfg,
+            iter: self.children.iter()
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a Object<'a> {
+    type IntoIter = Entries<'a>;
+    type Item = (&'a str, Entry<'a>);
+
+    fn into_iter(self) -> Entries<'a> {
+        self.iter()
+    }
+}
+
+pub struct Entries<'a> {
+    cfg: &'a Parser,
+    iter: ::std::collections::hash_map::Iter<'a, String, NodeChild>
+}
+
+impl<'a> Iterator for Entries<'a> {
+    type Item = (&'a str, Entry<'a>);
+
+    fn next(&mut self) -> Option<(&'a str, Entry<'a>)> {
+        self.iter.next().map(|(key, entry)| (&**key, Entry {
+            cfg: self.cfg,
+            id: entry.id
+        }))
     }
 }

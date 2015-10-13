@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::Read;
 use std::ops::{Deref, DerefMut};
 use std::collections::HashMap;
+use std::fmt;
 
 use anymap::AnyMap;
 use anymap::any::Any;
@@ -37,6 +38,18 @@ impl Error {
             Error::CircularReference(ref mut p)
                 => *p = path,
             Error::Parse(_) | Error::Io(_) => {}
+        }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Error::Parse(ref e) => write!(f, "error while parsing: {:?}", e),
+            Error::Io(ref e) => write!(f, "IO error: {:?}", e),
+            Error::NonObjectTemplate(ref p) => write!(f, "the template for {:?} is not an object", p),
+            Error::NotAnObject(ref p) => write!(f, "{:?} is not an object", p),
+            Error::CircularReference(ref p) => write!(f, "circular reference detected in {:?}", p),
         }
     }
 }
@@ -81,11 +94,16 @@ impl Parser {
         let mut file = try!(File::open(&path));
         try!(file.read_to_string(&mut source));
         let new_root = if let Some(new_root) = new_root {
-            try!(self.expect(root, root, new_root))
+            let id = try!(self.expect(root, root, new_root));
+            if !self.infer_object(id) {
+                return Err(Error::NotAnObject(vec![]));
+            }
+            id
         } else {
             0
         };
-        self.parse(path, &source, new_root)
+
+        self.parse(path.as_ref().parent().unwrap(), &source, new_root)
     }
 
     pub fn parse_string(&mut self, source: &str) -> Result<(), Error> {
@@ -227,13 +245,14 @@ impl Parser {
         let mut section: Vec<StackEntry> = vec![];
 
         for ident in path {
-            let maybe_id = if let &mut NodeType::Object { ref mut children, .. } = &mut self.nodes[current_root].ty {
-                children.get_mut(&ident).map(|c| {
+            try!(self.verify_object_link(current_root));
+            let maybe_id = match &mut self.nodes[current_root].ty {
+                &mut NodeType::Object { ref mut children, .. } => children.get_mut(&ident).map(|c| {
                     c.real = true;
                     c.id
-                })
-            } else {
-                return Err(Error::NotAnObject(stack.to_path()));
+                }),
+                &mut NodeType::Link(_) => None,
+                _ =>  return Err(Error::NotAnObject(stack.to_path()))
             };
 
             let id = if let Some(id) = maybe_id {
@@ -287,15 +306,16 @@ impl Parser {
 
         for (i, ident) in path.path.into_iter().enumerate() {
             selection_path.push(Selection::Ident(ident.clone()));
+            self.infer_object(current_root);
 
-            let maybe_id = if let NodeType::Object { ref children, .. } = self.nodes[current_root].ty {
-                children.get(&ident).map(|c| c.id).or_else(|| if i == 0 {
+            let maybe_id = match self.nodes[current_root].ty {
+                NodeType::Object { ref children, .. } => children.get(&ident).map(|c| c.id).or_else(|| if i == 0 {
                     self.prelude.get(&ident).cloned()
                 } else {
                     None
-                })
-            } else {
-                return Err(Error::NotAnObject(selection_path));
+                }),
+                NodeType::Link(_) => None,
+                _ => return Err(Error::NotAnObject(selection_path))
             };
 
             let id = if let Some(id) = maybe_id {
@@ -439,11 +459,11 @@ pub trait Decode: Any {}
 
 impl<T: Any> Decode for T {}
 
-struct Decoder<T: Decode>(Box<Fn(Entry) -> Option<T>>);
+struct Decoder<T: Decode>(Box<Fn(Entry) -> Result<T, String>>);
 
 impl<T: Decode> Decoder<T> {
     fn new<F>(decode_fn: F) -> Decoder<T> where
-        F: Fn(Entry) -> Option<T>,
+        F: Fn(Entry) -> Result<T, String>,
         F: 'static
     {
         Decoder(Box::new(decode_fn))
@@ -619,18 +639,18 @@ mod tests {
     struct SingleItem2<T>(T);
 
     impl<'a, T: FromEntry<'a>> FromEntry<'a> for SingleItem<T> {
-        fn from_entry(entry: Entry<'a>) -> Option<SingleItem<T>> {
-            entry.as_object()
-                .and_then(|o| o.get("a"))
+        fn from_entry(entry: Entry<'a>) -> Result<SingleItem<T>, String> {
+            entry.as_object().ok_or("expected an object".into())
+                .and_then(|o| o.get("a").ok_or("missing field a".into()))
                 .and_then(|e| T::from_entry(e))
                 .map(|item| SingleItem(item))
         }
     }
 
     impl<'a, T: FromEntry<'a>> FromEntry<'a> for SingleItem2<T> {
-        fn from_entry(entry: Entry<'a>) -> Option<SingleItem2<T>> {
-            entry.as_object()
-                .and_then(|o| o.get("a"))
+        fn from_entry(entry: Entry<'a>) -> Result<SingleItem2<T>, String> {
+            entry.as_object().ok_or("expected an object".into())
+                .and_then(|o| o.get("a").ok_or("missing field a".into()))
                 .and_then(|e| T::from_entry(e))
                 .map(|item| SingleItem2(item))
         }
@@ -881,21 +901,21 @@ mod tests {
     fn decode_integer_list() {
         let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a = [1, 2, 3]"));
-        assert_eq!(Some(SingleItem(vec![1, 2, 3])), cfg.root().decode());
+        assert_eq!(Ok(SingleItem(vec![1, 2, 3])), cfg.root().decode());
     }
 
     #[test]
     fn decode_float_list() {
         let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a = [1.0, -2.4, 3.8]"));
-        assert_eq!(Some(SingleItem(vec![1.0, -2.4, 3.8])), cfg.root().decode());
+        assert_eq!(Ok(SingleItem(vec![1.0, -2.4, 3.8])), cfg.root().decode());
     }
 
     #[test]
     fn decode_string_list() {
         let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a = [\"foo\", \"bar\"]"));
-        assert_eq!(Some(SingleItem(vec!["foo", "bar"])), cfg.root().decode());
+        assert_eq!(Ok(SingleItem(vec!["foo", "bar"])), cfg.root().decode());
     }
 
     #[test]
@@ -903,8 +923,8 @@ mod tests {
         let mut cfg = with_prelude::<Vec<i32>>();
         assert_ok!(cfg.parse_string("b = o { a = [1, 2, 3] }"));
         let b = cfg.root().get("b");
-        assert_eq!(Some(SingleItem(vec![1, 2, 3])), b.dynamic_decode());
-        assert_eq!(Some(SingleItem2(vec![1, 2, 3])), b.dynamic_decode());
+        assert_eq!(Ok(SingleItem(vec![1, 2, 3])), b.dynamic_decode());
+        assert_eq!(Ok(SingleItem2(vec![1, 2, 3])), b.dynamic_decode());
     }
 
     #[test]
@@ -913,7 +933,7 @@ mod tests {
         assert_ok!(cfg.parse_string("a.b.c = {}"));
         let root = cfg.nodes.len() - 1;
         assert_ok!(cfg.parse(".", "d = 1", root));
-        assert_eq!(Some(1), cfg.root().get("a").get("b").get("c").get("d").decode());
+        assert_eq!(Ok(1), cfg.root().get("a").get("b").get("c").get("d").decode());
     }
 
     #[test]
@@ -922,7 +942,7 @@ mod tests {
         assert_ok!(cfg.parse_string("a.b.c = {}"));
         let root = cfg.nodes.len() - 1;
         assert_ok!(cfg.parse(".", "global.d = 1", root));
-        assert_eq!(Some(1), cfg.root().get("a").get("b").get("c").get("d").decode());
+        assert_eq!(Ok(1), cfg.root().get("a").get("b").get("c").get("d").decode());
     }
 
     #[test]

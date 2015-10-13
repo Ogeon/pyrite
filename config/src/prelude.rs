@@ -18,14 +18,21 @@ impl Prelude {
     }
 
     pub fn object<'a>(&'a mut self, ident: String) -> Object<'a> {
-        let id = self.0.add_node(Node::new(
-            NodeType::Object {
-                base: None,
-                children: HashMap::new()
-            },
-            0
-        ));
-        self.0.prelude.insert(ident, id);
+        let maybe_id = self.0.prelude.get(&ident).map(|&id| id);
+
+        let id = if let Some(id) = maybe_id {
+            id
+        } else {
+            let id = self.0.add_node(Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                0
+            ));
+            self.0.prelude.insert(ident, id);
+            id
+        };
 
         Object {
             cfg: &mut self.0,
@@ -34,11 +41,17 @@ impl Prelude {
     }
 
     pub fn list<'a>(&'a mut self, ident: String) -> List<'a> {
-        let id = self.0.add_node(Node::new(
-            NodeType::List(vec![]),
-            0
-        ));
-        self.0.prelude.insert(ident, id);
+        let maybe_id = self.0.prelude.get(&ident).map(|&id| id);
+        let id = if let Some(id) = maybe_id {
+            id
+        } else {
+            let id = self.0.add_node(Node::new(
+                NodeType::List(vec![]),
+                0
+            ));
+            self.0.prelude.insert(ident, id);
+            id
+        };
 
         List {
             cfg: &mut self.0,
@@ -66,20 +79,32 @@ pub struct Object<'a> {
 
 impl<'a> Object<'a> {
     pub fn object<'b>(&'b mut self, ident: String) -> Object<'b> {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::Object {
-                base: None,
-                children: HashMap::new()
-            },
-            self.id
-        ));
+        let maybe_id = if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
+            children.get(&ident).map(|node| node.id)
+        } else {
+            unreachable!()
+        };
 
-        if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
-            children.insert(ident, NodeChild {
-                id: new_id,
-                real: true
-            });
-        }
+        let new_id = if let Some(id) = maybe_id {
+            id
+        } else {
+            let id = self.cfg.add_node(Node::new(
+                NodeType::Object {
+                    base: None,
+                    children: HashMap::new()
+                },
+                self.id
+            ));
+
+            if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
+                children.insert(ident, NodeChild {
+                    id: id,
+                    real: true
+                });
+            }
+
+            id
+        };
 
         Object {
             cfg: self.cfg,
@@ -88,17 +113,29 @@ impl<'a> Object<'a> {
     }
 
     pub fn list<'b>(&'b mut self, ident: String) -> List<'b> {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::List(vec![]),
-            self.id
-        ));
+        let maybe_id = if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
+            children.get(&ident).map(|node| node.id)
+        } else {
+            unreachable!()
+        };
 
-        if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
-            children.insert(ident, NodeChild {
-                id: new_id,
-                real: true
-            });
-        }
+        let new_id = if let Some(id) = maybe_id {
+            id
+        } else {
+            let id = self.cfg.add_node(Node::new(
+                NodeType::List(vec![]),
+                self.id
+            ));
+
+            if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
+                children.insert(ident, NodeChild {
+                    id: id,
+                    real: true
+                });
+            }
+
+            id
+        };
 
         List {
             cfg: self.cfg,
@@ -121,7 +158,7 @@ impl<'a> Object<'a> {
 
     pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
         T: Decode,
-        F: Fn(Entry) -> Option<T>,
+        F: Fn(Entry) -> Result<T, String>,
         F: 'static
     {
         self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
@@ -182,7 +219,7 @@ impl<'a> List<'a> {
 
     pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
         T: Decode,
-        F: Fn(Entry) -> Option<T>,
+        F: Fn(Entry) -> Result<T, String>,
         F: 'static
     {
         self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
