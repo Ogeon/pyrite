@@ -261,12 +261,28 @@ fn refract<'a>(ior: f64, env_ior: f64, color: &'a Box<ParametricValue<tracer::Re
 
 pub fn register_types(context: &mut Prelude) {
     let mut group = context.object("Material".into());
-    group.object("Diffuse".into()).add_decoder(decode_diffuse);
-    group.object("Emission".into()).add_decoder(decode_emission);
-    group.object("Refractive".into()).add_decoder(decode_refractive);
-    group.object("Mirror".into()).add_decoder(decode_mirror);
-    group.object("Mix".into()).add_decoder(decode_mix);
+    {
+        let mut object = group.object("Diffuse".into());
+        object.add_decoder(decode_diffuse);
+        object.arguments(vec!["color".into()]);
+    }
+    {
+        let mut object = group.object("Emission".into());
+        object.add_decoder(decode_emission);
+        object.arguments(vec!["color".into()]);
+    }
+    {
+        let mut object = group.object("Mirror".into());
+        object.add_decoder(decode_mirror);
+        object.arguments(vec!["color".into()]);
+    }
+    {
+        let mut object = group.object("Mix".into());
+        object.add_decoder(decode_mix);
+        object.arguments(vec!["a".into(), "b".into(), "factor".into()]);
+    }
     group.object("FresnelMix".into()).add_decoder(decode_fresnel_mix);
+    group.object("Refractive".into()).add_decoder(decode_refractive);
 }
 
 pub fn decode_diffuse(entry: Entry) -> Result<(MaterialBox, bool), String> {

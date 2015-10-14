@@ -10,7 +10,11 @@ macro_rules! make_operators {
         fn insert_operators<From: Decode + 'static>(context: &mut Prelude) {
             let mut group = context.object("Math".into());
             $(
-                group.object(stringify!($struct_name).into()).add_decoder($fn_name::<From>);
+                {
+                    let mut object = group.object(stringify!($struct_name).into());
+                    object.add_decoder($fn_name::<From>);
+                    object.arguments(vec![$(stringify!($arg).into()),+]);
+                }
             )*
         }
         $(
@@ -135,7 +139,10 @@ pub fn register_types<From: Decode + 'static>(context: &mut Prelude) {
 }
 
 pub fn register_specific_types(context: &mut Prelude) {
-    context.object("Math".into()).object("Fresnel".into()).add_decoder(decode_fresnel);
+    let mut group = context.object("Math".into());
+    let mut object = group.object("Fresnel".into());
+    object.add_decoder(decode_fresnel);
+    object.arguments(vec!["ior".into(), "env_ior".into()]);
 }
 
 make_operators!{
@@ -146,7 +153,7 @@ make_operators!{
     decode_abs: Abs { a }            => a.abs(),
     decode_min: Min { a, b }         => a.min(b),
     decode_max: Max { a, b }         => a.max(b),
-    decode_mix: Mix { factor, a, b } => { let f = factor.min(1.0).max(0.0); a * (1.0 - f) + b * f }
+    decode_mix: Mix { a, b, factor } => { let f = factor.min(1.0).max(0.0); a * (1.0 - f) + b * f }
 }
 
 struct Curve<From> {

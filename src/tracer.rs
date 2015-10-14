@@ -435,7 +435,10 @@ fn trace_direct<'a, R: Rng + FloatRng>(rng: &mut R, samples: usize, wavelengths:
 
 
 pub fn register_types(context: &mut Prelude) {
-    context.object("Sky".into()).object("Color".into()).add_decoder(decode_sky_color);
+    let mut group = context.object("Sky".into());
+    let mut object = group.object("Color".into());
+    object.add_decoder(decode_sky_color);
+    object.arguments(vec!["color".into()]);
 }
 
 fn decode_sky_color(entry: Entry) -> Result<Sky, String> {

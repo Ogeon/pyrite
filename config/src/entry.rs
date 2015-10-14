@@ -42,7 +42,7 @@ impl<'a> Entry<'a> {
     }
 
     pub fn as_object(&self) -> Option<Object<'a>> {
-        if let NodeType::Object { ref base, ref children} = self.cfg.get_concrete_node(self.id).ty {
+        if let NodeType::Object { ref base, ref children, .. } = self.cfg.get_concrete_node(self.id).ty {
             Some(Object {
                 cfg: self.cfg,
                 template: base.clone(),
@@ -269,7 +269,7 @@ impl<'a> Object<'a> {
                 })
             } else {
                 if let Some(t) = template {
-                    if let NodeType::Object { base: ref t, children: ref c } = self.cfg.get_concrete_node(t).ty {
+                    if let NodeType::Object { base: ref t, children: ref c, .. } = self.cfg.get_concrete_node(t).ty {
                         children = c;
                         template = t.clone();
                     } else {

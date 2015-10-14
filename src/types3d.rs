@@ -6,7 +6,11 @@ use config::Prelude;
 use config::entry::Entry;
 
 pub fn register_types(context: &mut Prelude) {
-    context.object("Vector".into()).add_decoder(decode_vector_3d);
+    {
+        let mut object = context.object("Vector".into());
+        object.add_decoder(decode_vector_3d);
+        object.arguments(vec!["x".into(), "y".into(), "z".into()]);
+    }
     context.object("Transform".into()).object("LookAt".into()).add_decoder(decode_transform_look_at);
 }
 

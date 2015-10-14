@@ -27,7 +27,8 @@ pub enum Error {
     Io(std::io::Error),
     NonObjectTemplate(Vec<Selection>),
     NotAnObject(Vec<Selection>),
-    CircularReference(Vec<Selection>)
+    CircularReference(Vec<Selection>),
+    TooManyArguments(Vec<Selection>, usize),
 }
 
 impl Error {
@@ -35,7 +36,8 @@ impl Error {
         match *self {
             Error::NonObjectTemplate(ref mut p) |
             Error::NotAnObject(ref mut p) |
-            Error::CircularReference(ref mut p)
+            Error::CircularReference(ref mut p) |
+            Error::TooManyArguments(ref mut p, _)
                 => *p = path,
             Error::Parse(_) | Error::Io(_) => {}
         }
@@ -50,6 +52,7 @@ impl fmt::Display for Error {
             Error::NonObjectTemplate(ref p) => write!(f, "the template for {:?} is not an object", p),
             Error::NotAnObject(ref p) => write!(f, "{:?} is not an object", p),
             Error::CircularReference(ref p) => write!(f, "circular reference detected in {:?}", p),
+            Error::TooManyArguments(ref p, len) => write!(f, "too many arguments in {:?}. {} were expected", p, len),
         }
     }
 }
@@ -77,7 +80,8 @@ impl Parser {
             nodes: vec![Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 0
             )],
@@ -173,7 +177,8 @@ impl Parser {
             ast::Value::Object(ast::Object::New(children)) => {
                 self.nodes[target_id].ty = NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 };
 
                 for (path, value) in children {
@@ -185,7 +190,8 @@ impl Parser {
 
                 self.nodes[target_id].ty = NodeType::Object {
                     base: Some(base_id),
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 };
 
                 match extension {
@@ -203,9 +209,19 @@ impl Parser {
                             return Err(Error::NotAnObject(stack.to_path()));
                         }
 
-                        for value in changes {
-                            unimplemented!();
+                        if let Some(arguments) = self.cloned_arguments(target_id) {
+                            if arguments.len() < changes.len() {
+                                return Err(Error::TooManyArguments(stack.to_path(), arguments.len()));
+                            } else {
+                                for (field, value) in arguments.into_iter().zip(changes) {
+                                    try!(self.assign_with_stack(&mut stack, Some(ast::Path {
+                                        path_type: ast::PathType::Local,
+                                        path: vec![field]
+                                    }), value));
+                                }
+                            }
                         }
+
                     },
                     None => self.nodes[target_id].ty = NodeType::Link(base_id)
                 }
@@ -261,7 +277,8 @@ impl Parser {
                 let new_id = self.add_node(Node::new(
                     NodeType::Object {
                         base: None,
-                        children: HashMap::new()
+                        children: HashMap::new(),
+                        arguments: vec![]
                     },
                     current_root
                 ));
@@ -358,7 +375,8 @@ impl Parser {
 
                 *ty = NodeType::Object {
                     base: None,
-                    children: children
+                    children: children,
+                    arguments: vec![]
                 };
 
                 return Ok(());
@@ -378,7 +396,8 @@ impl Parser {
 
         self.nodes[id].ty = NodeType::Object {
             base: Some(template),
-            children: children
+            children: children,
+            arguments: vec![]
         };
 
         Ok(())
@@ -445,12 +464,25 @@ impl Parser {
             s @ &mut NodeType::Unknown => {
                 *s = NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 };
                 true
             },
             &mut NodeType::Object { .. } => true,
             _ => false
+        }
+    }
+
+    fn cloned_arguments(&self, id: usize) -> Option<Vec<String>> {
+        let mut current = self.get_concrete_node(id);
+        loop {
+            match current.ty {
+                NodeType::Object { ref arguments, .. } if arguments.len() > 0 => return Some(arguments.clone()),
+                NodeType::Object { base: Some(id), ..} | NodeType::Link(id) => current = &self.nodes[id],
+                NodeType::Object { base: None, .. } => return Some(vec![]),
+                _ => return None
+            }
         }
     }
 }
@@ -499,7 +531,8 @@ enum NodeType {
     Link(usize),
     Object {
         base: Option<usize>,
-        children: HashMap<String, NodeChild>
+        children: HashMap<String, NodeChild>,
+        arguments: Vec<String>,
     },
     Value(Value),
     List(Vec<usize>)
@@ -666,6 +699,18 @@ mod tests {
         prelude.into_parser()
     }
 
+    fn with_args<T: for<'a> FromEntry<'a> + Any>() -> Parser {
+        let mut prelude = Prelude::new();
+        {
+            let mut object = prelude.object("o".into());
+            object.object("a".into());
+            object.object("b".into());
+            object.object("c".into());
+            object.arguments(vec!["a".into(), "b".into(), "c".into()]);
+        }
+        prelude.into_parser()
+    }
+
     #[test]
     fn assign_object() {
         let mut cfg = Parser::new();
@@ -677,14 +722,16 @@ mod tests {
                     children: vec![("a".into(), NodeChild {
                         id: 1,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
             Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 0
             )
@@ -702,7 +749,8 @@ mod tests {
                     children: vec![("a".into(), NodeChild {
                         id: 1,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
@@ -712,14 +760,16 @@ mod tests {
                     children: vec![("b".into(), NodeChild {
                         id: 2,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
             Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 1
             )
@@ -737,7 +787,8 @@ mod tests {
                     children: vec![("a".into(), NodeChild {
                         id: 1,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
@@ -747,14 +798,16 @@ mod tests {
                     children: vec![("b".into(), NodeChild {
                         id: 2,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
             Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 1
             )
@@ -772,14 +825,16 @@ mod tests {
                     children: vec![("a".into(), NodeChild {
                         id: 1,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
             Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 0
             )
@@ -793,7 +848,8 @@ mod tests {
                     children: vec![("a".into(), NodeChild {
                         id: 1,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
@@ -803,14 +859,16 @@ mod tests {
                     children: vec![("b".into(), NodeChild {
                         id: 2,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
             Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 1
             )
@@ -832,14 +890,16 @@ mod tests {
                     ("b".into(), NodeChild {
                         id: 2,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
             Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 0
             ),
@@ -849,14 +909,16 @@ mod tests {
                     children: vec![("c".into(), NodeChild {
                         id: 3,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
             Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 2
             ),
@@ -874,7 +936,8 @@ mod tests {
                     children: vec![("a".into(), NodeChild {
                         id: 1,
                         real: true
-                    })].into_iter().collect()
+                    })].into_iter().collect(),
+                    arguments: vec![]
                 },
                 0
             ),
@@ -953,5 +1016,13 @@ mod tests {
         assert_ok!(cfg.parse(".", "d = f{}", root));
         assert_ok!(cfg.parse(".", "global.d = f{}", root));
         assert!(cfg.parse_string("d = f{}").is_err());
+    }
+
+    #[test]
+    fn function_style() {
+        let mut cfg = with_args::<i32>();
+        assert_ok!(cfg.parse_string("a = o(1, 2, 3)"));
+        assert_ok!(cfg.parse_string("b = o(1, 2)"));
+        assert!(cfg.parse_string("c = o(1, 2, 3, 4)").is_err());
     }
 }

@@ -26,7 +26,8 @@ impl Prelude {
             let id = self.0.add_node(Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 0
             ));
@@ -91,7 +92,8 @@ impl<'a> Object<'a> {
             let id = self.cfg.add_node(Node::new(
                 NodeType::Object {
                     base: None,
-                    children: HashMap::new()
+                    children: HashMap::new(),
+                    arguments: vec![]
                 },
                 self.id
             ));
@@ -163,6 +165,12 @@ impl<'a> Object<'a> {
     {
         self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
     }
+
+    pub fn arguments(&mut self, args: Vec<String>) {
+        if let &mut NodeType::Object { ref mut arguments, .. }  = &mut self.cfg.nodes[self.id].ty {
+            *arguments = args;
+        }
+    }
 }
 
 
@@ -176,7 +184,8 @@ impl<'a> List<'a> {
         let new_id = self.cfg.add_node(Node::new(
             NodeType::Object {
                 base: None,
-                children: HashMap::new()
+                children: HashMap::new(),
+                arguments: vec![]
             },
             self.id
         ));
