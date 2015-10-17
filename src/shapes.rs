@@ -1,5 +1,4 @@
 use std;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::ops::Deref;
 
@@ -11,7 +10,6 @@ use cgmath::{Point, Point3};
 use cgmath::Intersect;
 use cgmath::{Ray, Ray3};
 
-use tracer;
 use tracer::Material;
 
 use config::Prelude;
@@ -19,20 +17,15 @@ use config::entry::Entry;
 
 use bkdtree;
 use materials;
+use world;
 
 use rand;
 
 pub use self::Shape::{Sphere, Plane, Triangle};
-pub use self::ProxyShape::{DecodedShape, Mesh};
 
 pub struct Vertex<S> {
     pub position: Point3<S>,
     pub normal: Vector3<S>
-}
-
-pub enum ProxyShape {
-    DecodedShape { shape: Shape, emissive: bool },
-    Mesh { file: String, materials: HashMap<String, (materials::MaterialBox, bool)> }
 }
 
 pub enum Shape {
@@ -158,7 +151,7 @@ impl Shape {
     }
 }
 
-impl<'a> bkdtree::Element<tracer::BkdRay<'a>> for Arc<Shape> {
+impl<'a> bkdtree::Element<world::BkdRay<'a>> for Arc<Shape> {
     type Item = Ray3<f64>;
 
     fn get_bounds_interval(&self, axis: usize) -> (f64, f64) {
@@ -190,8 +183,8 @@ impl<'a> bkdtree::Element<tracer::BkdRay<'a>> for Arc<Shape> {
         }
     }
 
-    fn intersect(&self, ray: &tracer::BkdRay) -> Option<(f64, Ray3<f64>)> {
-        let &tracer::BkdRay(ray) = ray;
+    fn intersect(&self, ray: &world::BkdRay) -> Option<(f64, Ray3<f64>)> {
+        let &world::BkdRay(ray) = ray;
         self.ray_intersect(ray)
     }
 }
@@ -205,7 +198,7 @@ pub fn register_types(context: &mut Prelude) {
     group.object("Mesh".into()).add_decoder(decode_mesh);
 }
 
-fn decode_sphere(entry: Entry) -> Result<ProxyShape, String> {
+fn decode_sphere(entry: Entry) -> Result<world::Object, String> {
     let items = try!(entry.as_object().ok_or("not an object".into()));
 
     let position = match items.get("position") {
@@ -223,7 +216,7 @@ fn decode_sphere(entry: Entry) -> Result<ProxyShape, String> {
         None => return Err("missing field 'material'".into())
     };
 
-    Ok(DecodedShape {
+    Ok(world::Object::Shape {
         shape: Sphere {
             position: Point::from_vec(&position),
             radius: radius,
@@ -233,7 +226,7 @@ fn decode_sphere(entry: Entry) -> Result<ProxyShape, String> {
     })
 }
 
-fn decode_plane(entry: Entry) -> Result<ProxyShape, String> {
+fn decode_plane(entry: Entry) -> Result<world::Object, String> {
     let items = try!(entry.as_object().ok_or("not an object".into()));
 
     let origin = match items.get("origin") {
@@ -251,7 +244,7 @@ fn decode_plane(entry: Entry) -> Result<ProxyShape, String> {
         None => return Err("missing field 'material'".into())
     };
 
-    Ok(DecodedShape {
+    Ok(world::Object::Shape {
         shape: Plane {
             shape: cgmath::Plane::from_point_normal(Point::from_vec(&origin), normal),
             material: material
@@ -260,7 +253,7 @@ fn decode_plane(entry: Entry) -> Result<ProxyShape, String> {
     })
 }
 
-fn decode_mesh(entry: Entry) -> Result<ProxyShape, String> {
+fn decode_mesh(entry: Entry) -> Result<world::Object, String> {
     let items = try!(entry.as_object().ok_or("not an object".into()));
 
     let file_name: String = match items.get("file") {
@@ -277,7 +270,7 @@ fn decode_mesh(entry: Entry) -> Result<ProxyShape, String> {
         None => return Err("missing field 'materials'".into())
     };
 
-    Ok(Mesh{
+    Ok(world::Object::Mesh {
         file: file_name,
         materials: materials
     })

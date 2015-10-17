@@ -16,8 +16,8 @@ use config::Prelude;
 use config::entry::{Entry, Object};
 
 use cameras;
-
 use tracer;
+use world;
 
 static DEFAULT_SPECTRUM_SAMPLES: u32 = 10;
 static DEFAULT_SPECTRUM_BINS: usize = 64;
@@ -43,7 +43,7 @@ impl Renderer {
         self.algorithm.make_tiles(camera, image_size, self.spectrum_bins, self.spectrum_span)
     }
 
-    pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World) {
+    pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &world::World) {
         self.algorithm.render_tile(tile, camera, world, self)
     }
 }
@@ -84,7 +84,7 @@ impl RenderAlgorithm {
         }
     }
 
-    pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &tracer::World, renderer: &Renderer) {
+    pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &world::World, renderer: &Renderer) {
         match *self {
             RenderAlgorithm::Simple {..} => {
                 let mut rng: XorShiftRng = rand::thread_rng().gen();

@@ -50,6 +50,8 @@ mod renderer;
 mod types3d;
 mod math;
 mod values;
+mod lamp;
+mod world;
 
 fn main() {
     let mut args = std::env::args();
@@ -169,7 +171,7 @@ fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::utils::Inte
 
 struct RenderContext {
     camera: cameras::Camera,
-    world: tracer::World,
+    world: world::World,
     renderer: renderer::Renderer
 }
 

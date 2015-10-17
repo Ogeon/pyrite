@@ -12,6 +12,8 @@ use shapes;
 use materials;
 use math;
 use values;
+use world;
+use lamp;
 
 macro_rules! try_parse {
     ($e:expr) => (
@@ -39,10 +41,11 @@ pub fn from_file<P: AsRef<Path>>(path: P) -> ParseResult<Project> {
     let mut context = Prelude::new();
 
     types3d::register_types(&mut context);
-    tracer::register_types(&mut context);
+    world::register_types(&mut context);
     renderer::register_types(&mut context);
     cameras::register_types(&mut context);
     shapes::register_types(&mut context);
+    lamp::register_types(&mut context);
     materials::register_types(&mut context);
     values::register_types(&mut context);
     math::register_types::<tracer::RenderContext>(&mut context);
@@ -75,7 +78,7 @@ pub fn from_file<P: AsRef<Path>>(path: P) -> ParseResult<Project> {
 
     println!("decoding world");
     let world = match root.get("world") {
-        Some(v) => try_parse!(tracer::decode_world(v, |source| {
+        Some(v) => try_parse!(world::decode_world(v, |source| {
             path.as_ref().parent().unwrap_or(path.as_ref()).join(&source)
         }), "world"),
         None => return ParseResult::InterpretError("missing world specifications".into())
@@ -95,7 +98,7 @@ pub struct Project {
     pub image: ImageSpec,
     pub renderer: renderer::Renderer,
     pub camera: cameras::Camera,
-    pub world: tracer::World
+    pub world: world::World
 }
 
 pub struct ImageSpec {
