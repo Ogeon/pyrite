@@ -4,7 +4,7 @@ use cgmath::{EuclideanVector, Vector, Vector3};
 use cgmath::{Ray, Ray3};
 
 use tracer;
-use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect, Disperse};
+use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect, Light, Color};
 
 use config::Prelude;
 use config::entry::Entry;
@@ -14,11 +14,11 @@ use math;
 pub type MaterialBox = Box<Material + 'static + Send + Sync>;
 
 pub struct Diffuse {
-    pub color: Box<ParametricValue<tracer::RenderContext, f64>>
+    pub color: Box<Color>
 }
 
 impl Material for Diffuse {
-    fn reflect(&self, _wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, _light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
         let u = rng.next_float();
         let v = rng.next_float();
         let theta = 2.0f64 * std::f64::consts::PI * u;
@@ -58,7 +58,7 @@ impl Material for Diffuse {
         Reflect(Ray::new(normal.origin, reflected), & *self.color, 1.0, Some(lambertian))
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&Color> {
         None
     }
 }
@@ -68,25 +68,25 @@ fn lambertian(_ray_in: &Vector3<f64>, ray_out: &Vector3<f64>, normal: &Vector3<f
 }
 
 pub struct Emission {
-    pub color: Box<ParametricValue<tracer::RenderContext, f64>>
+    pub color: Box<Color>
 }
 
 impl Material for Emission {
-    fn reflect(&self, _wavelengths: &[f64], _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, _light: &mut Light, _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
         Emit(& *self.color)
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&Color> {
         Some(& *self.color)
     }
 }
 
 pub struct Mirror {
-    pub color: Box<ParametricValue<tracer::RenderContext, f64>>
+    pub color: Box<Color>
 }
 
 impl Material for Mirror {
-    fn reflect(&self, _wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, _light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
 
         let mut n = if ray_in.direction.dot(&normal.direction) < 0.0 {
             normal.direction
@@ -99,7 +99,7 @@ impl Material for Mirror {
         Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), & *self.color, 1.0, None)
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&Color> {
         None
     }
 }
@@ -111,19 +111,19 @@ pub struct Mix {
 }
 
 impl Material for Mix {
-    fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
         if self.factor < rng.next_float() {
-            self.a.reflect(wavelengths, ray_in, normal, rng)
+            self.a.reflect(light, ray_in, normal, rng)
         } else {
-            self.b.reflect(wavelengths, ray_in, normal, rng)
+            self.b.reflect(light, ray_in, normal, rng)
         }
     }
 
-    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, light: &mut Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&Color> {
         if self.factor < rng.next_float() {
-            self.a.get_emission(wavelengths, ray_in, normal, rng)
+            self.a.get_emission(light, ray_in, normal, rng)
         } else {
-            self.b.get_emission(wavelengths, ray_in, normal, rng)
+            self.b.get_emission(light, ray_in, normal, rng)
         }
     }
 }
@@ -138,38 +138,29 @@ struct FresnelMix {
 }
 
 impl Material for FresnelMix {
-    fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
-            let reflections = wavelengths.iter().map(|&wl| {
-                let wl = wl * 0.001;
-                let ior = self.ior + self.dispersion / (wl * wl);
-                let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
-                let wavelengths = &[wl];
-                let child = fresnel_mix(ior, env_ior, &self.reflect, &self.refract, &ray_in.direction, normal, rng);
-                child.reflect(wavelengths, ray_in, normal, rng)
-            }).collect();
-            Disperse(reflections)
+            let wl = light.colored() * 0.001;
+            let ior = self.ior + self.dispersion / (wl * wl);
+            let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
+            let child = fresnel_mix(ior, env_ior, &self.reflect, &self.refract, &ray_in.direction, normal, rng);
+            child.reflect(light, ray_in, normal, rng)
         } else {
             let child = fresnel_mix(self.ior, self.env_ior, &self.reflect, &self.refract, &ray_in.direction, normal, rng);
-            child.reflect(wavelengths, ray_in, normal, rng)
+            child.reflect(light, ray_in, normal, rng)
         }
     }
 
-    fn get_emission(&self, wavelengths: &[f64], ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, light: &mut Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&Color> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
-            /*let reflections = wavelengths.iter().map(|&wl| {
-                let wl = wl * 0.001;
-                let ior = self.ior + self.dispersion / (wl * wl);
-                let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
-                let wavelengths = [wl];
-                let child = fresnel_mix(wavelengths.as_slice(), ior, env_ior, &self.reflect, &self.refract, ray_in, normal, rng);
-                child.get_emission(wavelengths, ray_in, normal, rng)
-            }).collect();
-            Disperse(reflections)*/
-            None
+            let wl = light.colored() * 0.001;
+            let ior = self.ior + self.dispersion / (wl * wl);
+            let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
+            let child = fresnel_mix(ior, env_ior, &self.reflect, &self.refract, &ray_in, normal, rng);
+            child.get_emission(light, ray_in, normal, rng)
         } else {
             let child = fresnel_mix(self.ior, self.env_ior, &self.reflect, &self.refract, ray_in, normal, rng);
-            child.get_emission(wavelengths, ray_in, normal, rng)
+            child.get_emission(light, ray_in, normal, rng)
         }
     }
 }
@@ -189,7 +180,7 @@ fn fresnel_mix<'a>(ior: f64, env_ior: f64, reflect: &'a MaterialBox, refract: &'
 }
 
 struct Refractive {
-    color: Box<ParametricValue<tracer::RenderContext, f64>>,
+    color: Box<Color>,
     ior: f64,
     dispersion: f64,
     env_ior: f64,
@@ -197,26 +188,23 @@ struct Refractive {
 }
 
 impl Material for Refractive {
-    fn reflect(&self, wavelengths: &[f64], ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
-            let reflections = wavelengths.iter().map(|&wl| {
-                let wl = wl * 0.001;
-                let ior = self.ior + self.dispersion / (wl * wl);
-                let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
-                refract(ior, env_ior, &self.color, ray_in, normal, rng)
-            }).collect();
-            Disperse(reflections)
+            let wl = light.colored() * 0.001;
+            let ior = self.ior + self.dispersion / (wl * wl);
+            let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
+            refract(ior, env_ior, &self.color, ray_in, normal, rng)
         } else {
             refract(self.ior, self.env_ior, &self.color, ray_in, normal, rng)
         }
     }
 
-    fn get_emission(&self, _wavelengths: &[f64], _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&ParametricValue<tracer::RenderContext, f64>> {
+    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&Color> {
         None
     }
 }
 
-fn refract<'a>(ior: f64, env_ior: f64, color: &'a Box<ParametricValue<tracer::RenderContext, f64>>, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a> {
+fn refract<'a>(ior: f64, env_ior: f64, color: &'a Box<Color>, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a> {
     let nl = if normal.direction.dot(&ray_in.direction) < 0.0 {
         normal.direction
     } else {

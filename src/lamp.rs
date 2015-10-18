@@ -8,7 +8,7 @@ use rand::Rng;
 use config::Prelude;
 use config::entry::Entry;
 
-use tracer::{self, FloatRng, Material, ParametricValue, RenderContext};
+use tracer::{self, FloatRng, Material, ParametricValue, Color};
 use shapes::Shape;
 use world;
 
@@ -16,9 +16,9 @@ pub enum Lamp {
     Directional {
         direction: Vector3<f64>,
         width: f64,
-        color: Box<ParametricValue<RenderContext, f64>>
+        color: Box<Color>
     },
-    Point(Point3<f64>, Box<ParametricValue<RenderContext, f64>>),
+    Point(Point3<f64>, Box<Color>),
     Shape(Arc<Shape>)
 }
 
@@ -103,7 +103,7 @@ pub enum Surface<'a> {
         normal: Ray3<f64>,
         material: &'a Material
     },
-    Color(&'a ParametricValue<RenderContext, f64>),
+    Color(&'a Color),
 }
 
 pub fn register_types(context: &mut Prelude) {

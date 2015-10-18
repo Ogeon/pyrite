@@ -15,8 +15,8 @@ use cgmath::{Vector, EuclideanVector, Vector2};
 use config::Prelude;
 use config::entry::{Entry, Object};
 
+use tracer::{self, Bounce, RenderContext};
 use cameras;
-use tracer;
 use world;
 
 static DEFAULT_SPECTRUM_SAMPLES: u32 = 10;
@@ -91,23 +91,105 @@ impl RenderAlgorithm {
 
                 for _ in 0..(tile.pixel_count() * renderer.pixel_samples as usize) {
                     let position = tile.sample_position(&mut rng);
-                    let wavelengths = (0..renderer.spectrum_samples).map(|_| tile.sample_wavelength(&mut rng)).collect();
 
                     let ray = camera.ray_towards(&position, &mut rng);
-                    let samples = tracer::trace(&mut rng, ray, wavelengths, world, renderer.bounces, renderer.light_samples);
+                    let wavelength = tile.sample_wavelength(&mut rng);
+                    let light = tracer::Light::new(wavelength);
+                    let path = tracer::trace(&mut rng, ray, light, world, renderer.bounces, renderer.light_samples);
 
-                    for sample in samples.into_iter() {
-                        let sample = Sample {
-                            brightness: sample.brightness,
-                            wavelength: sample.wavelength,
-                            weight: sample.weight
-                        };
-                        tile.expose(sample, position);
+                    let mut main_sample = (Sample {
+                        wavelength: wavelength,
+                        brightness: 0.0,
+                        weight: 1.0
+                    }, 1.0);
+
+                    let mut used_additional = false;
+                    let mut additional_samples: Vec<_> = (0..renderer.spectrum_samples-1).map(|_| (Sample {
+                        wavelength: tile.sample_wavelength(&mut rng),
+                        brightness: 0.0,
+                        weight: 1.0,
+                    }, 1.0)).collect();
+
+                    for bounce in &path {
+                        for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
+                            used_additional = contribute(bounce, sample, reflectance, true) || used_additional;
+                        }
+
+                        let (ref mut sample, ref mut reflectance) = main_sample;
+                        contribute(bounce, sample, reflectance, false);
+                    }
+
+                    tile.expose(main_sample.0, position);
+
+                    if used_additional {
+                        for (sample, _) in additional_samples {
+                            tile.expose(sample, position);
+                        }
                     }
                 }
             }
         }
     }
+}
+
+fn contribute(bounce: &Bounce, sample: &mut Sample, reflectance: &mut f64, require_white: bool) -> bool {
+    let &Bounce {
+        ref ty,
+        ref light,
+        color,
+        incident,
+        normal,
+        probability,
+        ref direct_light,
+    } = bounce;
+
+    if !light.is_white() && require_white {
+        return false;
+    }
+
+    let context = RenderContext {
+        wavelength: sample.wavelength,
+        incident: incident,
+        normal: normal.direction
+    };
+
+    let mut light_added = false;
+
+    let c = color.get(&context) * probability;
+
+    if let tracer::BounceType::Emission = *ty {
+        sample.brightness += c * *reflectance;
+        light_added = true;
+    } else {
+        *reflectance *= c;
+
+        for direct in direct_light {
+            let &tracer::DirectLight {
+                light: ref l_light,
+                color: l_color,
+                incident: l_incident,
+                normal: l_normal,
+                probability: l_probability,
+            } = direct;
+
+            if l_light.is_white() || !require_white {
+                let context = RenderContext {
+                    wavelength: sample.wavelength,
+                    incident: l_incident,
+                    normal: l_normal
+                };
+
+                let l_c = l_color.get(&context) * l_probability;
+                sample.brightness += l_c * *reflectance;
+            }
+
+            light_added = true;
+        }
+
+        *reflectance *= ty.brdf(&incident, &normal.direction);
+    }
+
+    light_added
 }
 
 fn decode_renderer(items: Object, algorithm: RenderAlgorithm) -> Result<Renderer, String> {

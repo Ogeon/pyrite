@@ -4,6 +4,8 @@ use std::fs::File;
 use std::path::Path;
 use std::collections::HashMap;
 
+use rand::Rng;
+
 use obj;
 use genmesh;
 
@@ -14,17 +16,17 @@ use config::entry::Entry;
 
 use bkdtree;
 
-use tracer::{self, Material, ParametricValue, RenderContext};
+use tracer::{self, Material, ParametricValue, Color};
 use lamp::Lamp;
 use shapes::{self, Shape};
 use materials;
 
 pub enum Sky {
-    Color(Box<ParametricValue<RenderContext, f64>>)
+    Color(Box<Color>)
 }
 
 impl Sky {
-    pub fn color(&self, _direction: &Vector3<f64>) -> &ParametricValue<RenderContext, f64> {
+    pub fn color<'a>(&'a self, _direction: &Vector3<f64>) -> &'a Color {
         match *self {
             Sky::Color(ref c) => & **c,
         }
@@ -40,6 +42,10 @@ pub struct World {
 impl World {
     pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
         self.objects.intersect(ray)
+    }
+
+    pub fn pick_lamp<R: Rng>(&self, rng: &mut R) -> Option<(&Lamp, f64)> {
+        self.lights.get(rng.gen_range(0, self.lights.len())).map(|l| (l, 1.0 / self.lights.len() as f64))
     }
 }
 
