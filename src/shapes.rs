@@ -18,6 +18,7 @@ use config::entry::Entry;
 use bkdtree;
 use materials;
 use world;
+use math;
 
 use rand;
 
@@ -135,6 +136,40 @@ impl Shape {
 
                 Some(Ray::new(position, normal.normalize()))
             }
+        }
+    }
+
+    pub fn sample_towards<R: rand::Rng>(&self, rng: &mut R, target: &Point3<f64>) -> Option<Ray3<f64>> {
+        match *self {
+            Sphere { ref position, radius, .. } => {
+                let dir = position.sub_p(&target);
+                let dist2 = dir.length2();
+
+                if dist2 > radius * radius {
+                    let cos_theta_max = (1.0 - (radius * radius) / dist2).max(0.0).sqrt();
+                    let ray_dir = math::utils::sample_cone(rng, &dir.normalize(), cos_theta_max);
+                    self.ray_intersect(&Ray3::new(*target, ray_dir)).map(|(_, n)| n)
+                } else {
+                    self.sample_point(rng)
+                }
+            },
+            _ => self.sample_point(rng),
+        }
+    }
+
+    pub fn area_towards(&self, target: &Point3<f64>) -> Option<f64> {
+        match *self {
+            Sphere { ref position, radius, .. } => {
+                let dist2 = position.sub_p(target).length2();
+                if dist2 > radius * radius {
+                    let cos_theta_max = (1.0 - (radius * radius) / dist2).max(0.0).sqrt();
+                    let a = math::utils::solid_angle(cos_theta_max);
+                    Some(a * radius)
+                } else {
+                    None
+                }
+            },
+            _ => None
         }
     }
 

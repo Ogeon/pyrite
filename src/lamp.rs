@@ -1,7 +1,7 @@
 use std;
 use std::sync::Arc;
 
-use cgmath::{Vector, EuclideanVector, Vector3, Point, Point3, Ray3};
+use cgmath::{EuclideanVector, Vector3, Point, Point3, Ray3};
 
 use rand::Rng;
 
@@ -11,6 +11,7 @@ use config::entry::Entry;
 use tracer::{self, FloatRng, Material, ParametricValue, Color};
 use shapes::Shape;
 use world;
+use math::utils::sample_cone;
 
 pub enum Lamp {
     Directional {
@@ -22,40 +23,21 @@ pub enum Lamp {
     Shape(Arc<Shape>)
 }
 
-fn ortho(v: &Vector3<f64>) -> Vector3<f64> {
-    let unit = if v.x.abs() < 0.00001 {
-        Vector3::unit_x()
-    } else if v.y.abs() < 0.00001 {
-        Vector3::unit_y()
-    } else if v.z.abs() < 0.00001 {
-        Vector3::unit_z()
-    } else {
-        Vector3 {
-            x: -v.y,
-            y: v.x,
-            z: 0.0
-        }
-    };
-
-    v.cross(&unit)
-}
-
 impl Lamp {
     pub fn sample<R: Rng + FloatRng>(&self, rng: &mut R, target: Point3<f64>) -> Sample {
         match *self {
             Lamp::Directional { direction, width, ref color } => {
-                let o1 = ortho(&direction).normalize();
-                let o2 = direction.cross(&o1).normalize();
-                let r1: f64 = std::f64::consts::PI * 2.0 * rng.gen::<f64>();
-                let r2: f64 = width + (1.0 - width) * rng.gen::<f64>();
-                let oneminus = (1.0f64 - r2 * r2).sqrt();
-
-                let dir = o1.mul_s(r1.cos() * oneminus).add_v(&o2.mul_s(r1.sin() * oneminus)).add_v(&direction.mul_s(r2));
+                let dir = if width > 0.0 {
+                    sample_cone(rng, &direction, width)
+                } else {
+                    direction
+                };
 
                 Sample {
                     direction: dir,
                     sq_distance: None,
-                    surface: Surface::Color(&**color)
+                    surface: Surface::Color(&**color),
+                    weight: 1.0
                 }
             },
             Lamp::Point(ref center, ref color) => {
@@ -64,30 +46,27 @@ impl Lamp {
                 Sample {
                     direction: v.normalize(),
                     sq_distance: Some(distance),
-                    surface: Surface::Color(&**color)
+                    surface: Surface::Color(&**color),
+                    weight: 4.0 * std::f64::consts::PI / distance
                 }
             },
             Lamp::Shape(ref shape) => {
-                let ray = shape.sample_point(rng).expect("trying to use infinite shape in direct lighting");
+                let ray = shape.sample_towards(rng, &target).expect("trying to use infinite shape in direct lighting");
                 let v = ray.origin.sub_p(&target);
                 let distance = v.length2();
+                let weight = shape.area_towards(&target).unwrap_or_else(|| {
+                    shape.surface_area() / distance
+                });
                 Sample {
                     direction: v.normalize(),
                     sq_distance: Some(distance),
                     surface: Surface::Physical {
                         normal: ray,
                         material: shape.get_material()
-                    }
+                    },
+                    weight: weight
                 }
             }
-        }
-    }
-
-    pub fn surface_area(&self) -> f64 {
-        match *self {
-            Lamp::Directional { .. } => 1.0,
-            Lamp::Point(_, _) => 4.0 * std::f64::consts::PI,
-            Lamp::Shape(ref shape) => shape.surface_area()
         }
     }
 }
@@ -95,7 +74,8 @@ impl Lamp {
 pub struct Sample<'a> {
     pub direction: Vector3<f64>,
     pub sq_distance: Option<f64>,
-    pub surface: Surface<'a>
+    pub surface: Surface<'a>,
+    pub weight: f64,
 }
 
 pub enum Surface<'a> {

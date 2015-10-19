@@ -58,7 +58,11 @@ macro_rules! make_operators {
 }
 
 pub mod utils {
-    use cgmath::{Vector, Vector3};
+    use std;
+
+    use rand::Rng;
+
+    use cgmath::{Vector, EuclideanVector, Vector3};
 
     pub struct Interpolated {
         pub points: Vec<(f64, f64)>
@@ -130,6 +134,42 @@ pub mod utils {
         let inv_cos = 1.0 - cos_psi;
 
         return r0 * r0 + (1.0 - r0 * r0) * inv_cos * inv_cos * inv_cos * inv_cos * inv_cos;
+    }
+
+    pub fn ortho(v: &Vector3<f64>) -> Vector3<f64> {
+        let unit = if v.x.abs() < 0.00001 {
+            Vector3::unit_x()
+        } else if v.y.abs() < 0.00001 {
+            Vector3::unit_y()
+        } else if v.z.abs() < 0.00001 {
+            Vector3::unit_z()
+        } else {
+            Vector3 {
+                x: -v.y,
+                y: v.x,
+                z: 0.0
+            }
+        };
+
+        v.cross(&unit)
+    }
+
+    pub fn sample_cone<R: Rng>(rng: &mut R, direction: &Vector3<f64>, cos_half: f64) -> Vector3<f64> {
+        let o1 = ortho(&direction).normalize();
+        let o2 = direction.cross(&o1).normalize();
+        let r1: f64 = std::f64::consts::PI * 2.0 * rng.gen::<f64>();
+        let r2: f64 = cos_half + (1.0 - cos_half) * rng.gen::<f64>();
+        let oneminus = (1.0f64 - r2 * r2).sqrt();
+
+        o1.mul_s(r1.cos() * oneminus).add_v(&o2.mul_s(r1.sin() * oneminus)).add_v(&direction.mul_s(r2))
+    }
+
+    pub fn solid_angle(cos_half: f64) -> f64 {
+        if cos_half >= 1.0 {
+            0.0
+        } else {
+            2.0 * std::f64::consts::PI * (1.0 - cos_half)
+        }
     }
 }
 

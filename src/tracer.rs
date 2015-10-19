@@ -197,13 +197,14 @@ fn trace_direct<'w, R: Rng + FloatRng>(rng: &mut R, samples: usize, light: Light
 
         let normal = Ray::new(normal.origin, n);
 
-        let weight = lamp.surface_area() / (samples as f64 * 2.0 * std::f64::consts::PI * probability);
+        let probability = 1.0 / (samples as f64 * 2.0 * std::f64::consts::PI * probability);
 
         (0..samples).filter_map(|_| {
             let lamp::Sample {
                 direction,
                 sq_distance,
-                surface
+                surface,
+                weight
             } = lamp.sample(rng, normal.origin);
             
             let mut light = light.clone();
@@ -236,7 +237,7 @@ fn trace_direct<'w, R: Rng + FloatRng>(rng: &mut R, samples: usize, light: Light
                             (Some(color), 1.0, target_normal)
                         },
                     };
-                    let scale = weight * cos_in * brdf(ray_in, &normal.direction, &ray_out.direction) / sq_distance.unwrap_or(1.0);
+                    let scale = weight * probability * cos_in * brdf(ray_in, &normal.direction, &ray_out.direction);
                     
                     return color.map(|color| {
                         DirectLight {
