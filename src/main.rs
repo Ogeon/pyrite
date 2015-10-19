@@ -6,6 +6,7 @@ extern crate obj;
 extern crate genmesh;
 extern crate rand;
 extern crate simple_parallel;
+extern crate crossbeam;
 extern crate num_cpus;
 extern crate time;
 extern crate pyrite_config as config;
@@ -105,34 +106,37 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
         tile
     };
 
-    print!(" 0%");
-    stdout().flush().unwrap();
+    crossbeam::scope(|scope| {
+        print!(" 0%");
+        stdout().flush().unwrap();
 
-    let mut last_print = PreciseTime::now();
-    let num_tiles = tiles.len();
-    for (i, (_, tile)) in unsafe { pool.unordered_map(tiles, &f) }.enumerate() {
-        for (spectrum, position) in tile.pixels() {
-            let r = clamp_channel(calculate_channel(&spectrum, &red));
-            let g = clamp_channel(calculate_channel(&spectrum, &green));
-            let b = clamp_channel(calculate_channel(&spectrum, &blue));
-            
-            pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb {
-                data: [r, g, b]
-            })
-        }
+        let mut last_print = PreciseTime::now();
+        let num_tiles = tiles.len();
 
-        if last_print.to(PreciseTime::now()).num_seconds() >= 4 {
-            print!("\r{:2}%", (i * 100) / num_tiles);
-            stdout().flush().unwrap();
-            match File::create(&render_path) {
-                Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
-                    println!("\rerror while writing image: {}", e);
-                },
-                Err(e) => println!("\rfailed to open/create file for writing: {}", e)
+        for (i, (_, tile)) in pool.unordered_map(scope, tiles, &f).enumerate() {
+            for (spectrum, position) in tile.pixels() {
+                let r = clamp_channel(calculate_channel(&spectrum, &red));
+                let g = clamp_channel(calculate_channel(&spectrum, &green));
+                let b = clamp_channel(calculate_channel(&spectrum, &blue));
+                
+                pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb {
+                    data: [r, g, b]
+                })
             }
-            last_print = PreciseTime::now();
+
+            if last_print.to(PreciseTime::now()).num_seconds() >= 4 {
+                print!("\r{:2}%", (i * 100) / num_tiles);
+                stdout().flush().unwrap();
+                match File::create(&render_path) {
+                    Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
+                        println!("\rerror while writing image: {}", e);
+                    },
+                    Err(e) => println!("\rfailed to open/create file for writing: {}", e)
+                }
+                last_print = PreciseTime::now();
+            }
         }
-    }
+    });
 
     match File::create(&render_path) {
         Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {

@@ -12,12 +12,13 @@ path = "src/main.rs"
 [dependencies]
 cgmath = "0.3"
 image = "0.3"
-obj = "0.2"
-genmesh = "0.2"
+obj = "0.3"
+genmesh = "0.3"
 rand = "0.3"
-simple_parallel = "0.2"
+simple_parallel = "0.3"
 num_cpus = "0.2"
 time = "0.1"
+crossbeam = "0.1"
 
 [dependencies.pyrite-config]
 path = "config"
