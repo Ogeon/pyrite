@@ -26,13 +26,20 @@ Include: (String, Option<ast::Path>) = {
 
 Assignment: (ast::Path, ast::Value) = <p:Path> "=" <v:Value> => (p, v);
 
-Path: ast::Path = <g:("global" ".")?> <p:(<Ident>".")*> <last:Ident> => {
+Path: ast::Path = <p: BasePath> => ast::Path {
+    path_type: ast::PathType::Local,
+    path: p
+};
+
+Link: ast::Path = <l:("self" ".")?> <p: BasePath> => ast::Path {
+    path_type: if l.is_none() { ast::PathType::Global } else { ast::PathType::Local },
+    path: p
+};
+
+BasePath: Vec<String> = <p:(<Ident>".")*> <last:Ident> => {
     let mut p = p;
     p.push(last);
-    ast::Path {
-        path_type: if g.is_some() { ast::PathType::Global } else { ast::PathType::Local },
-        path: p
-    }
+    p
 };
 
 Ident: String = <i:r"[A-Za-z_]([A-Za-z_0-9]*)"> => i.into();
@@ -45,9 +52,9 @@ Value: ast::Value = {
 };
 
 Object: ast::Object = {
-    <p:Path> <t:Tuple> => ast::Object::Extension(p, Some(ast::ExtensionChanges::FunctionStyle(t))),
-    <p:Path> <b:Block> => ast::Object::Extension(p, Some(ast::ExtensionChanges::BlockStyle(b))),
-    <p:Path> => ast::Object::Extension(p, None),
+    <p:Link> <t:Tuple> => ast::Object::Extension(p, Some(ast::ExtensionChanges::FunctionStyle(t))),
+    <p:Link> <b:Block> => ast::Object::Extension(p, Some(ast::ExtensionChanges::BlockStyle(b))),
+    <p:Link> => ast::Object::Extension(p, None),
     <b:Block> => ast::Object::New(b),
 };
 

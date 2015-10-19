@@ -1000,21 +1000,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_absolute_in_inner_root() {
-        let mut cfg = Parser::new();
-        assert_ok!(cfg.parse_string("a.b.c = {}"));
-        let root = cfg.nodes.len() - 1;
-        assert_ok!(cfg.parse(".", "global.d = 1", root));
-        assert_eq!(Ok(1), cfg.root().get("a").get("b").get("c").get("d").decode());
-    }
-
-    #[test]
     fn link_in_inner_root() {
         let mut cfg = Parser::new();
         assert_ok!(cfg.parse_string("a.b.c = {} f = []"));
         let root = cfg.nodes.len() - 2;
         assert_ok!(cfg.parse(".", "d = f{}", root));
-        assert_ok!(cfg.parse(".", "global.d = f{}", root));
         assert!(cfg.parse_string("d = f{}").is_err());
     }
 
