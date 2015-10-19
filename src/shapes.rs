@@ -157,14 +157,14 @@ impl Shape {
         }
     }
 
-    pub fn area_towards(&self, target: &Point3<f64>) -> Option<f64> {
+    pub fn solid_angle_towards(&self, target: &Point3<f64>) -> Option<f64> {
         match *self {
             Sphere { ref position, radius, .. } => {
                 let dist2 = position.sub_p(target).length2();
                 if dist2 > radius * radius {
                     let cos_theta_max = (1.0 - (radius * radius) / dist2).max(0.0).sqrt();
                     let a = math::utils::solid_angle(cos_theta_max);
-                    Some(a * radius)
+                    Some(a)
                 } else {
                     None
                 }

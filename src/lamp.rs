@@ -1,7 +1,7 @@
 use std;
 use std::sync::Arc;
 
-use cgmath::{EuclideanVector, Vector3, Point, Point3, Ray3};
+use cgmath::{Vector, EuclideanVector, Vector3, Point, Point3, Ray3};
 
 use rand::Rng;
 
@@ -54,11 +54,13 @@ impl Lamp {
                 let ray = shape.sample_towards(rng, &target).expect("trying to use infinite shape in direct lighting");
                 let v = ray.origin.sub_p(&target);
                 let distance = v.length2();
-                let weight = shape.area_towards(&target).unwrap_or_else(|| {
-                    shape.surface_area() / distance
+                let direction = v.normalize();
+                let weight = shape.solid_angle_towards(&target).unwrap_or_else(|| {
+                    let cos_in = ray.direction.dot(& -direction).abs();
+                    cos_in * shape.surface_area() / distance
                 });
                 Sample {
-                    direction: v.normalize(),
+                    direction: direction,
                     sq_distance: Some(distance),
                     surface: Surface::Physical {
                         normal: ray,

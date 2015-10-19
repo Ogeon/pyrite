@@ -223,21 +223,20 @@ fn trace_direct<'w, R: Rng + FloatRng>(rng: &mut R, samples: usize, light: Light
                 };
 
                 if !blocked {
-                    let (color, cos_in, target_normal) = match surface {
+                    let (color, target_normal) = match surface {
                         lamp::Surface::Physical {
                             normal: target_normal,
                             material
                         } => {
                             let color = material.get_emission(&mut light, &ray_out.direction, &target_normal, &mut *rng as &mut FloatRng);
-                            let cos_in = target_normal.direction.dot(& -ray_out.direction).abs();
-                            (color, cos_in, target_normal.direction)
+                            (color, target_normal.direction)
                         },
                         lamp::Surface::Color(color) => {
                             let target_normal = -ray_out.direction;
-                            (Some(color), 1.0, target_normal)
+                            (Some(color), target_normal)
                         },
                     };
-                    let scale = weight * probability * cos_in * brdf(ray_in, &normal.direction, &ray_out.direction);
+                    let scale = weight * probability * brdf(ray_in, &normal.direction, &ray_out.direction);
                     
                     return color.map(|color| {
                         DirectLight {
