@@ -27,7 +27,6 @@ pub enum Error {
     NotAnObject(StackTrace),
     CircularReference(StackTrace),
     TooManyArguments(StackTrace, usize),
-    Relink(StackTrace),
     Reassign(StackTrace),
     LocalPathInList(StackTrace, Vec<String>)
 }
@@ -40,7 +39,6 @@ impl fmt::Display for Error {
             Error::NotAnObject(ref p) => write!(f, "{} is not an object", p),
             Error::CircularReference(ref p) => write!(f, "circular reference detected in {}", p),
             Error::TooManyArguments(ref p, len) => write!(f, "too many arguments in {}. {} were expected", p, len),
-            Error::Relink(ref p) => write!(f, "{} is already an extension and can't be relinked", p),
             Error::Reassign(ref p) => write!(f, "{} cannot be reassigned", p),
             Error::LocalPathInList(ref trace, ref p) => write!(f, "the item {:?} cannot be accessed from within the list {}", p, trace),
         }
