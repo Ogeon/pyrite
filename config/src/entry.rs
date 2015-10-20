@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use Value;
 use NodeType;
-use NodeChild;
 use Parser;
 use Number;
 use Decoder;
@@ -253,7 +252,7 @@ impl<'a> Iterator for Items<'a> {
 pub struct Object<'a> {
     cfg: &'a Parser,
     template: Option<usize>,
-    children: &'a HashMap<String, NodeChild>
+    children: &'a HashMap<String, usize>
 }
 
 impl<'a> Object<'a> {
@@ -262,10 +261,10 @@ impl<'a> Object<'a> {
         let mut template = self.template.clone();
 
         loop {
-            if let Some(child) = children.get(key) {
+            if let Some(&child) = children.get(key) {
                 return Some(Entry {
                     cfg: self.cfg,
-                    id: child.id
+                    id: child
                 })
             } else {
                 if let Some(t) = template {
@@ -313,16 +312,16 @@ impl<'a> IntoIterator for &'a Object<'a> {
 
 pub struct Entries<'a> {
     cfg: &'a Parser,
-    iter: ::std::collections::hash_map::Iter<'a, String, NodeChild>
+    iter: ::std::collections::hash_map::Iter<'a, String, usize>
 }
 
 impl<'a> Iterator for Entries<'a> {
     type Item = (&'a str, Entry<'a>);
 
     fn next(&mut self) -> Option<(&'a str, Entry<'a>)> {
-        self.iter.next().map(|(key, entry)| (&**key, Entry {
+        self.iter.next().map(|(key, &entry)| (&**key, Entry {
             cfg: self.cfg,
-            id: entry.id
+            id: entry
         }))
     }
 }

@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use Parser;
 use Node;
 use NodeType;
-use NodeChild;
 use Value;
 use Decode;
 use Decoder;
@@ -81,7 +80,7 @@ pub struct Object<'a> {
 impl<'a> Object<'a> {
     pub fn object<'b>(&'b mut self, ident: String) -> Object<'b> {
         let maybe_id = if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
-            children.get(&ident).map(|node| node.id)
+            children.get(&ident).map(|&node| node)
         } else {
             unreachable!()
         };
@@ -99,10 +98,7 @@ impl<'a> Object<'a> {
             ));
 
             if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
-                children.insert(ident, NodeChild {
-                    id: id,
-                    real: true
-                });
+                children.insert(ident, id);
             }
 
             id
@@ -116,7 +112,7 @@ impl<'a> Object<'a> {
 
     pub fn list<'b>(&'b mut self, ident: String) -> List<'b> {
         let maybe_id = if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
-            children.get(&ident).map(|node| node.id)
+            children.get(&ident).map(|&node| node)
         } else {
             unreachable!()
         };
@@ -130,10 +126,7 @@ impl<'a> Object<'a> {
             ));
 
             if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
-                children.insert(ident, NodeChild {
-                    id: id,
-                    real: true
-                });
+                children.insert(ident, id);
             }
 
             id
@@ -151,10 +144,7 @@ impl<'a> Object<'a> {
             self.id
         ));
         if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
-            children.insert(ident, NodeChild {
-                id: new_id,
-                real: true
-            });
+            children.insert(ident, new_id);
         }
     }
 
