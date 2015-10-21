@@ -1,3 +1,5 @@
+//!Tools for traversal and decoding of the parsed configuration.
+
 use std::collections::HashMap;
 
 use Value;
@@ -7,6 +9,7 @@ use Number;
 use Decoder;
 use Decode;
 
+///An entry in a parsed configuration.
 #[derive(Clone)]
 pub struct Entry<'a> {
     cfg: &'a Parser,
@@ -14,6 +17,7 @@ pub struct Entry<'a> {
 }
 
 impl<'a> Entry<'a> {
+    ///Get the root entry from a particular parser.
     pub fn root_of(cfg: &Parser) -> Entry {
         Entry {
             cfg: cfg,
@@ -21,6 +25,7 @@ impl<'a> Entry<'a> {
         }
     }
 
+    ///Use this entry as a primitive value, if possible.
     pub fn as_value(&self) -> Option<&'a Value> {
         if let NodeType::Value(ref val) = self.cfg.get_concrete_node(self.id).ty {
             Some(val)
@@ -29,6 +34,7 @@ impl<'a> Entry<'a> {
         }
     }
 
+    ///Use this entry as a list, if possible.
     pub fn as_list(&self) -> Option<List<'a>> {
         if let NodeType::List(ref list) = self.cfg.get_concrete_node(self.id).ty {
             Some(List {
@@ -40,6 +46,7 @@ impl<'a> Entry<'a> {
         }
     }
 
+    ///Use this entry as an object, if possible.
     pub fn as_object(&self) -> Option<Object<'a>> {
         if let NodeType::Object { ref base, ref children, .. } = self.cfg.get_concrete_node(self.id).ty {
             Some(Object {
@@ -52,18 +59,22 @@ impl<'a> Entry<'a> {
         }
     }
 
+    ///Assume that this is an object and get one of its entries.
     pub fn get(&self, key: &str) -> Entry<'a> {
         self.as_object().expect("the entry is not an object").get(key).expect("invalid key")
     }
 
+    ///Assume that this is a list and get one of its elements.
     pub fn index(&self, index: usize) -> Entry<'a> {
         self.as_list().expect("the entry is not a list").get(index).expect("invalid index")
     }
 
+    ///Try to decode this entry.
     pub fn decode<T: FromEntry<'a>>(&self) -> Result<T, String> {
         T::from_entry(self.clone())
     }
 
+    ///Try to dynamically decode this entry.
     pub fn dynamic_decode<T: Decode>(&self) -> Result<T, String> {
         self.cfg.get_decoder(self.id)
             .ok_or("could not decode dynamically".into())
@@ -71,7 +82,9 @@ impl<'a> Entry<'a> {
     }
 }
 
+///A trait for types that can be decoded statically.
 pub trait FromEntry<'a> {
+    ///Try to decode this type from an entry.
     fn from_entry(entry: Entry<'a>) -> Result<Self, String>;
 }
 
@@ -191,7 +204,9 @@ pub struct List<'a> {
     list: &'a [usize]
 }
 
+///A list in a parsed configuration.
 impl<'a> List<'a> {
+    ///Get an element from the list.
     pub fn get(&self, index: usize) -> Option<Entry<'a>> {
         self.list.get(index).map(|&id| Entry {
             cfg: self.cfg,
@@ -199,6 +214,7 @@ impl<'a> List<'a> {
         })
     }
 
+    ///Iterate over the elements of the list.
     pub fn iter(&self) -> Items {
         Items {
             cfg: self.cfg,
@@ -206,6 +222,7 @@ impl<'a> List<'a> {
         }
     }
 
+    ///The number of elements in the list.
     pub fn len(&self) -> usize {
         self.list.len()
     }
@@ -232,6 +249,7 @@ impl<'a> IntoIterator for &'a List<'a> {
     }
 }
 
+///An iterator for list items.
 pub struct Items<'a> {
     cfg: &'a Parser,
     iter: ::std::slice::Iter<'a, usize>
@@ -248,6 +266,7 @@ impl<'a> Iterator for Items<'a> {
     }
 }
 
+///An object in a parsed configuration.
 #[derive(Clone)]
 pub struct Object<'a> {
     cfg: &'a Parser,
@@ -256,6 +275,7 @@ pub struct Object<'a> {
 }
 
 impl<'a> Object<'a> {
+    ///Get an entry from the object.
     pub fn get(&self, key: &str) -> Option<Entry<'a>> {
         let mut children = self.children;
         let mut template = self.template.clone();
@@ -281,6 +301,7 @@ impl<'a> Object<'a> {
         }
     }
 
+    ///Iterate over the entries in the object.
     pub fn iter(&self) -> Entries {
         Entries {
             cfg: self.cfg,
@@ -310,6 +331,7 @@ impl<'a> IntoIterator for &'a Object<'a> {
     }
 }
 
+///An iterator for object entries.
 pub struct Entries<'a> {
     cfg: &'a Parser,
     iter: ::std::collections::hash_map::Iter<'a, String, usize>

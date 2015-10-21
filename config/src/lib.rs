@@ -1,3 +1,5 @@
+//!A parser and decoder for a human friendly configuration language.
+
 extern crate anymap;
 extern crate lalrpop_util;
 
@@ -20,14 +22,22 @@ use entry::Entry;
 pub use ast::Number;
 pub use prelude::Prelude;
 
+///A collective parsing and interpretation error.
 #[derive(Debug)]
 pub enum Error {
+    ///Failed to parse the source.
     Parse(parser::Error),
+    ///Failed to read a file.
     Io(std::io::Error),
+    ///Something should be an object, but it wasn't.
     NotAnObject(StackTrace),
+    ///A circular reference was discovered.
     CircularReference(StackTrace),
+    ///Too many arguments was passed while extending an object.
     TooManyArguments(StackTrace, usize),
+    ///Something was reassigned.
     Reassign(StackTrace),
+    ///An attempt to refer to a local value in a list.
     LocalPathInList(StackTrace, Vec<String>)
 }
 
@@ -57,12 +67,14 @@ impl From<std::io::Error> for Error {
     }
 }
 
+///Parses the configuration source.
 pub struct Parser {
     nodes: Vec<Node>,
     prelude: HashMap<String, usize>
 }
 
 impl Parser {
+    ///Create a new parser.
     pub fn new() -> Parser {
         Parser {
             nodes: vec![Node::new(
@@ -77,14 +89,17 @@ impl Parser {
         }
     }
 
+    ///Parse a file.
     pub fn parse_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
         parse_file_in(path, Object::root_of(self), None)
     }
 
+    ///Parse a string.
     pub fn parse_string(&mut self, source: &str) -> Result<(), Error> {
         parse(".", source, Object::root_of(self))
     }
 
+    ///Get a reference to the root entry.
     pub fn root(&self) -> Entry {
         Entry::root_of(self)
     }
@@ -293,6 +308,7 @@ fn parse<P: AsRef<Path>>(path: P, source: &str, mut root: Object) -> Result<(), 
     Ok(())
 }
 
+///A trait for things that can be dynamically decoded.
 pub trait Decode: Any {}
 
 impl<T: Any> Decode for T {}
@@ -364,9 +380,12 @@ macro_rules! impl_value_from_int {
     )
 }
 
+///A primitive value.
 #[derive(PartialEq, Debug)]
 pub enum Value {
+    ///A float or an int.
     Number(Number),
+    ///A string.
     String(String)
 }
 
@@ -385,6 +404,9 @@ enum Selection {
     Index(usize)
 }
 
+///The path to something in the configuration.
+///
+///It's only for printing purposes.
 #[derive(Debug)]
 pub struct StackTrace(Vec<Selection>);
 

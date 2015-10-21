@@ -36,6 +36,7 @@ pub enum ExtensionChanges {
     FunctionStyle(Vec<Value>)
 }
 
+///A float or an integer.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Number {
     Integer(i64),
