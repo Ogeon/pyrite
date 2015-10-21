@@ -1,6 +1,6 @@
 include "../cameras/canon_40d.pyr" as response_curves
-include "colors.pyr"
-include "lamp.pyr"
+include "colors.pyr" as colors
+include "lamp.pyr" as lamp
 
 image = {
 	width = 512
@@ -21,8 +21,8 @@ renderer = Renderer.Simple {
 camera = Camera.Perspective {
 	fov = 37.7
 	transform = Transform.LookAt
-	transform.from = Vector { x=-2.78, y=-8, z=2.73 }
-	transform.to = Vector { x=-2.78, y=0, z=2.73 }
+	transform.from = Vector(-2.78, -8, 2.73)
+	transform.to = Vector(-2.78, 0, 2.73)
 	transform.up = Vector { z=1 }
 }
 
@@ -54,7 +54,7 @@ red = Material.Diffuse {
 	}
 }
 
-world.sky = Sky.Color { color = 0 }
+world.sky = Sky.Color(0)
 world.objects = [
 	Shape.Mesh {
 		file = "box.obj"

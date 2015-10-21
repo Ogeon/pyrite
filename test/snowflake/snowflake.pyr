@@ -8,7 +8,7 @@ image = {
 }
 
 renderer = Renderer.Simple {
-	pixel_samples = 20
+	pixel_samples = 100
 	spectrum.samples = 5
 	spectrum.bins = 50
 	spectrum.span = [400, 700]
@@ -20,9 +20,9 @@ renderer = Renderer.Simple {
 camera = Camera.Perspective {
 	fov = 11
 	transform = Transform.LookAt
-	transform.from = Vector { x = 20, y = -10, z = 50 }
-	transform.up = Vector { y = 1 }
-	focus_distance = 54.75
+	transform.from = Vector(15, -10, 40)
+	transform.up = Vector { y = 1 z = 2 }
+	focus_distance = 43.874821937
 	aperture = 3
 }
 
@@ -33,13 +33,17 @@ ice = Material.Refractive {
 }
 
 background = Material.Diffuse {
-	color = Math.Curve {
-		input = Value.Wavelength
-		points = [
-			[400, 0.025],
-			[600, 0.0175],
-			[700, 0.01]
-		]
+	color = Math.Mul {
+		a = Math.Curve {
+			input = Value.Wavelength
+			points = [
+				[400, 0.025],
+				[600, 0.0175],
+				[700, 0.01]
+			]
+		}
+
+		b = 0.2
 	}
 }
 
@@ -58,23 +62,23 @@ world.objects = [
 	Shape.Mesh {
 		file = "snowflake.obj"
 		materials.snowflake = ice
-	}
+	},
 
 	Shape.Sphere {
-		position = Vector { x = 0, y = 150, z = 50 }
-		radius = 100
-		material = Material.Emission { color = 2 }
-	}
+		position = Vector(0, 150, 50)
+		radius = 30
+		material = Material.Emission { color = 6 }
+	},
 
 	Shape.Sphere {
-		position = Vector { x = 100, y = -100, z = 50 }
-		radius = 50
-		material = Material.Emission { color = 1 }
-	}
+		position = Vector(100, -100, 50)
+		radius = 10
+		material = Material.Emission { color = 3 }
+	},
 
 	Shape.Sphere {
 		radius = 200
-		position = Vector { z = -201 }
+		position = Vector { z = -205 }
 		material = background
 	}
 ]

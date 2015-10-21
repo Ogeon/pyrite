@@ -19,11 +19,11 @@ renderer = Renderer.Simple {
 camera = Camera.Perspective {
 	fov = 12.5
 	transform = Transform.LookAt
-	transform.from = Vector { x = -6.55068, y = -8.55076, z = 4.0 }
-	transform.to = Vector { x = 0.1, z = 0.1 }
+	transform.from = Vector(-6.55068, -8.55076, 4.0)
+	transform.to = Vector(0.1, 0, 0.1)
 	transform.up = Vector { z = 1 }
 	focus_distance = 11.08
-	aperture = .002
+	aperture = 0.002
 }
 
 diamond = Material.Refractive {
@@ -32,29 +32,16 @@ diamond = Material.Refractive {
 	color = 1
 }
 
-plexi = Material.Mirror {
-	color = Math.Mix {
-		factor = Math.Fresnel { ior = 1.1 }
-		a = 0
-		b = 0.2
-	}
-}
+plexi = Material.Mirror(Math.Mix(0, 0.2, Math.Fresnel(1.1)))
 
-world.sky = Sky.Color { color = 0 }
+world.sky = Sky.Color(0)
 world.objects = [
 	Shape.Mesh {
 		file = "diamonds.obj"
 
 		materials.diamonds = diamond
-
-		materials.light_left = Material.Emission {
-			color = 1
-		}
-
-		materials.light_right = Material.Emission {
-			color = 2
-		}
-
+		materials.light_left = Material.Emission(1)
+		materials.light_right = Material.Emission(2)
 		materials.bottom = plexi
 	}
 ]

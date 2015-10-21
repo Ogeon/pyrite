@@ -8,19 +8,20 @@ image = {
 }
 
 renderer = Renderer.Simple {
-	pixel_samples = 200
+	pixel_samples = 50
 	spectrum.samples = 1
 	spectrum.bins = 50
 	spectrum.span = [400, 700]
 	tile_size = 32
-	bounces = 6
+	bounces = 20
+	light_samples = 1
 }
 
 camera = Camera.Perspective {
 	fov = 27
 	transform = Transform.LookAt
-	transform.from = Vector { x = -8, y = -40, z = 8.0 }
-	transform.to = Vector { z = 4.7, x = 0 }
+	transform.from = Vector { x = -6 y = -40 z = 8.0 }
+	transform.to = Vector { z = 4.7 }
 	transform.up = Vector { z = 1 }
 }
 
@@ -34,23 +35,23 @@ world.objects = [
 			dispersion = 0.01371
 			color = 1
 		}
-	}
+	},
 
 	Shape.Plane {
-		origin = Vector,
-		normal = Vector { z = 1 },
-		material = Material.Diffuse { color = 1 }
-	}
+		origin = Vector
+		normal = Vector { z = 1 }
+		material = Material.Diffuse { color = 0.4 }
+	},
 
 	Shape.Plane {
-		origin = Vector { y = -10 },
-		normal = Vector { y = -1 },
-		material = Material.Diffuse { color = 1 }
-	}
+		origin = Vector { y = -10 }
+		normal = Vector { y = -1 }
+		material = Material.Diffuse { color = 0.4 }
+	},
 
-	Shape.Sphere {
-		position = Vector { x = 100, y = -100, z = 50 }
-		radius = 5
-		material = Material.Emission { color = 20 }
+	Light.Directional {
+		direction = Vector { x = 60 y = -100 z = 50 }
+		color = 5
+		width = 0.53
 	}
 ]

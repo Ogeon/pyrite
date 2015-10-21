@@ -1,5 +1,5 @@
 include "../cameras/canon_40d.pyr" as response_curves
-include "materials.pyr"
+include "materials.pyr" as materials
 
 image = {
 	width = 512
