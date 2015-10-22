@@ -103,7 +103,7 @@ impl RenderAlgorithm {
                         weight: 1.0
                     }, 1.0);
 
-                    let mut used_additional = false;
+                    let mut used_additional = true;
                     let mut additional_samples: Vec<_> = (0..renderer.spectrum_samples-1).map(|_| (Sample {
                         wavelength: tile.sample_wavelength(&mut rng),
                         brightness: 0.0,
@@ -112,7 +112,7 @@ impl RenderAlgorithm {
 
                     for bounce in &path {
                         for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
-                            used_additional = contribute(bounce, sample, reflectance, true) || used_additional;
+                            used_additional = contribute(bounce, sample, reflectance, true) && used_additional;
                         }
 
                         let (ref mut sample, ref mut reflectance) = main_sample;
@@ -153,13 +153,10 @@ fn contribute(bounce: &Bounce, sample: &mut Sample, reflectance: &mut f64, requi
         normal: normal.direction
     };
 
-    let mut light_added = false;
-
     let c = color.get(&context) * probability;
 
     if let tracer::BounceType::Emission = *ty {
         sample.brightness += c * *reflectance;
-        light_added = true;
     } else {
         *reflectance *= c;
 
@@ -182,14 +179,12 @@ fn contribute(bounce: &Bounce, sample: &mut Sample, reflectance: &mut f64, requi
                 let l_c = l_color.get(&context) * l_probability;
                 sample.brightness += l_c * *reflectance;
             }
-
-            light_added = true;
         }
 
         *reflectance *= ty.brdf(&incident, &normal.direction);
     }
 
-    light_added
+    true
 }
 
 fn decode_renderer(items: Object, algorithm: RenderAlgorithm) -> Result<Renderer, String> {
