@@ -8,10 +8,10 @@ use rand::Rng;
 use config::Prelude;
 use config::entry::Entry;
 
-use tracer::{self, FloatRng, Material, ParametricValue, Color};
+use tracer::{self, Material, ParametricValue, Color};
 use shapes::Shape;
 use world;
-use math::utils::sample_cone;
+use math::utils::{sample_cone, sample_sphere, sample_hemisphere};
 
 pub enum Lamp {
     Directional {
@@ -24,7 +24,7 @@ pub enum Lamp {
 }
 
 impl Lamp {
-    pub fn sample<R: Rng + FloatRng>(&self, rng: &mut R, target: Point3<f64>) -> Sample {
+    pub fn sample<R: Rng>(&self, rng: &mut R, target: Point3<f64>) -> Sample {
         match *self {
             Lamp::Directional { direction, width, ref color } => {
                 let dir = if width > 0.0 {
@@ -71,6 +71,34 @@ impl Lamp {
             }
         }
     }
+
+    pub fn sample_ray<R: Rng>(&self, rng: &mut R) -> Option<RaySample> {
+        match *self {
+            Lamp::Directional { .. } => {
+                None
+            },
+            Lamp::Point(center, ref color) => {
+                let direction = sample_sphere(rng);
+                Some(RaySample {
+                    ray: Ray3::new(center, direction),
+                    surface: Surface::Color(&**color),
+                    weight: (4.0 * std::f64::consts::PI)
+                })
+            },
+            Lamp::Shape(ref shape) => {
+                let normal = shape.sample_point(rng).expect("trying to use infinite shape as lamp");
+                let direction = sample_hemisphere(rng, &normal.direction);
+                Some(RaySample {
+                    ray: Ray3::new(normal.origin, direction),
+                    surface: Surface::Physical {
+                        normal: normal,
+                        material: shape.get_material()
+                    },
+                    weight: shape.surface_area()
+                })
+            }
+        }
+    }
 }
 
 pub struct Sample<'a> {
@@ -86,6 +114,12 @@ pub enum Surface<'a> {
         material: &'a Material
     },
     Color(&'a Color),
+}
+
+pub struct RaySample<'a> {
+    pub ray: Ray3<f64>,
+    pub surface: Surface<'a>,
+    pub weight: f64,
 }
 
 pub fn register_types(context: &mut Prelude) {

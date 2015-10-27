@@ -13,14 +13,16 @@ use renderer::algorithm::Algorithm;
 mod algorithm;
 mod tile;
 
-pub use renderer::tile::{Area, Tile, Spectrum};
+pub use renderer::tile::{Area, Tile, Spectrum, Pixel};
 
 static DEFAULT_SPECTRUM_SAMPLES: u32 = 10;
 static DEFAULT_SPECTRUM_BINS: usize = 64;
 static DEFAULT_SPECTRUM_SPAN: (f64, f64) = (400.0, 700.0);
 
 pub fn register_types(context: &mut Prelude) {
-    context.object("Renderer".into()).object("Simple".into()).add_decoder(decode_simple);
+    let mut group = context.object("Renderer".into());
+    group.object("Simple".into()).add_decoder(decode_simple);
+    group.object("Bidirectional".into()).add_decoder(decode_bidirectional);
 }
 
 pub struct Renderer {
@@ -29,8 +31,8 @@ pub struct Renderer {
     pixel_samples: u32,
     light_samples: usize,
     spectrum_samples: u32,
-    spectrum_bins: usize,
-    spectrum_span: (f64, f64),
+    pub spectrum_bins: usize,
+    pub spectrum_span: (f64, f64),
     algorithm: Algorithm
 }
 
@@ -114,6 +116,29 @@ fn decode_simple(entry: Entry) -> Result<Renderer, String> {
 
     let algorithm = Algorithm::Simple {
         tile_size: tile_size,
+    };
+
+    decode_renderer(items, algorithm)
+}
+
+fn decode_bidirectional(entry: Entry) -> Result<Renderer, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
+
+    let tile_size = match items.get("tile_size") {
+        Some(v) => try!(v.decode(), "tile_size"),
+        None => 64
+    };
+
+    let light_bounces = match items.get("light_bounces") {
+        Some(v) => try!(v.decode(), "light_bounces"),
+        None => 8
+    };
+
+    let algorithm = Algorithm::Bidirectional {
+        tile_size: tile_size,
+        params: algorithm::BidirParams {
+            bounces: light_bounces
+        }
     };
 
     decode_renderer(items, algorithm)

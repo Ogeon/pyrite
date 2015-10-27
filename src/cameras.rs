@@ -13,6 +13,8 @@ use renderer::Area;
 use config::Prelude;
 use config::entry::Entry;
 
+use world::World;
+
 pub fn register_types(context: &mut Prelude) {
     context.object("Camera".into()).object("Perspective".into()).add_decoder(decode_perspective);
 }
@@ -59,6 +61,59 @@ impl Camera {
 
                 direction.normalize_self();
                 transform.transform_ray(&Ray::new(origin, direction))
+            }
+        }
+    }
+
+    pub fn is_visible<R: Rng>(&self, target: &Point3<f64>, world: &World, rng: &mut R) -> Option<(Vector2<f64>, Ray3<f64>)> {
+        match *self {
+            Camera::Perspective { ref transform, view_plane, focus_distance, aperture } => {
+                let inv_transform = if let Some(t) = transform.invert() {
+                    t
+                } else {
+                    return None;
+                };
+
+                let mut local_target = inv_transform.transform_point(&target).to_vec();
+
+                if local_target.z >= 0.0 {
+                    return None;
+                }
+
+                let origin = if aperture > 0.0 {
+                    let sqrt_r = (aperture * rng.gen::<f64>()).sqrt();
+                    let psi = consts::PI * 2.0 * rng.gen::<f64>();
+                    let lens_x = sqrt_r * psi.cos();
+                    let lens_y = sqrt_r * psi.sin();
+                    Point3::new(lens_x, lens_y, 0.0)
+                } else {
+                    Point::origin()
+                };
+
+                
+                let world_origin = transform.transform_point(&origin);
+                let direction = target.sub_p(&world_origin);
+                let sq_distance = direction.length2();
+                let ray = Ray::new(world_origin, direction.normalize());
+                if let Some((hit, _)) = world.intersect(&ray) {
+                    let hit_distance = hit.origin.sub_p(&world_origin).length2();
+                    if hit_distance < sq_distance - 0.000001 {
+                        return None;
+                    }
+                }
+
+                local_target.z += focus_distance;
+                let dist = local_target.z;
+                local_target.sub_self_v(&origin.to_vec().mul_s(dist / focus_distance));
+                local_target.z -= focus_distance;
+
+                let view_plane_target = local_target.mul_s((-1.0) / local_target.z);
+                let focus_x = view_plane_target.x;
+                let focus_y = -view_plane_target.y;
+                let target_x = focus_x * view_plane;
+                let target_y = focus_y * view_plane;
+
+                Some((Vector2::new(target_x, target_y), ray))
             }
         }
     }

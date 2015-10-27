@@ -17,8 +17,8 @@ pub type Brdf = fn(ray_in: &Vector3<f64>, ray_out: &Vector3<f64>, normal: &Vecto
 pub type Color = ParametricValue<RenderContext, f64>;
 
 pub trait Material {
-    fn reflect<'a>(&'a self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a>;
-    fn get_emission<'a>(&'a self, light: &mut Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&'a Color>;
+    fn reflect<'a>(&'a self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Reflection<'a>;
+    fn get_emission<'a>(&'a self, light: &mut Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Option<&'a Color>;
 }
 
 pub trait ParametricValue<From, To>: Send + Sync {
@@ -28,16 +28,6 @@ pub trait ParametricValue<From, To>: Send + Sync {
 impl<From> ParametricValue<From, f64> for f64 {
     fn get(&self, _: &From) -> f64 {
         *self
-    }
-}
-
-pub trait FloatRng {
-    fn next_float(&mut self) -> f64;
-}
-
-impl<R: Rng> FloatRng for R {
-    fn next_float(&mut self) -> f64 {
-        self.gen()
     }
 }
 
@@ -110,13 +100,13 @@ impl Light {
     }
 }
 
-pub fn trace<'w, R: Rng + FloatRng>(rng: &mut R, mut ray: Ray3<f64>, mut light: Light, world: &'w World, bounces: u32, light_samples: usize) -> Vec<Bounce<'w>> {
+pub fn trace<'w, R: Rng>(rng: &mut R, mut ray: Ray3<f64>, mut light: Light, world: &'w World, bounces: u32, light_samples: usize) -> Vec<Bounce<'w>> {
     let mut sample_light = true;
     let mut path = Vec::with_capacity(bounces as usize);
 
     for _ in 0..bounces {
         match world.intersect(&ray) {
-            Some((normal, material)) => match material.reflect(&mut light, &ray, &normal, &mut *rng as &mut FloatRng) {
+            Some((normal, material)) => match material.reflect(&mut light, &ray, &normal, rng) {
                 Reflect(out_ray, color, prob, brdf) => {
 
                     let direct_light = if let Some(brdf) = brdf {
@@ -187,7 +177,7 @@ pub fn trace<'w, R: Rng + FloatRng>(rng: &mut R, mut ray: Ray3<f64>, mut light: 
     path
 }
 
-fn trace_direct<'w, R: Rng + FloatRng>(rng: &mut R, samples: usize, light: Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, world: &'w World, brdf: Brdf) -> Vec<DirectLight<'w>> {
+fn trace_direct<'w, R: Rng>(rng: &mut R, samples: usize, light: Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, world: &'w World, brdf: Brdf) -> Vec<DirectLight<'w>> {
     if let Some((lamp, probability)) = world.pick_lamp(rng) {
         let n = if ray_in.dot(&normal.direction) < 0.0 {
             normal.direction
@@ -228,7 +218,7 @@ fn trace_direct<'w, R: Rng + FloatRng>(rng: &mut R, samples: usize, light: Light
                             normal: target_normal,
                             material
                         } => {
-                            let color = material.get_emission(&mut light, &ray_out.direction, &target_normal, &mut *rng as &mut FloatRng);
+                            let color = material.get_emission(&mut light, &ray_out.direction, &target_normal, rng);
                             (color, target_normal.direction)
                         },
                         lamp::Surface::Color(color) => {

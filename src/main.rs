@@ -23,7 +23,7 @@ use image::GenericImage;
 
 use time::PreciseTime;
 
-use renderer::Tile;
+use renderer::{Tile, Pixel, Spectrum};
 
 macro_rules! try {
     ($e:expr) => (
@@ -71,6 +71,7 @@ fn main() {
 
 fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
     let image_size = Vector2::new(project.image.width, project.image.height);
+    let (min_wl, max_wl) = project.renderer.spectrum_span;
 
     let tiles = project.renderer.make_tiles(&project.camera, &image_size);
 
@@ -106,6 +107,8 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
         tile
     };
 
+    let mut film = vec![Pixel::new(config.renderer.spectrum_bins); image_size.x as usize * image_size.y as usize];
+
     crossbeam::scope(|scope| {
         print!(" 0%");
         stdout().flush().unwrap();
@@ -114,7 +117,23 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
         let num_tiles = tiles.len();
 
         for (i, (_, tile)) in pool.unordered_map(scope, tiles, &f).enumerate() {
-            for (spectrum, position) in tile.pixels() {
+            for (pixel, position) in tile.pixels() {
+                let mut film_pixel = &mut film[position.x as usize + position.y as usize * image_size.x as usize];
+                film_pixel.merge(pixel);
+                let spectrum = Spectrum::from_pixel(film_pixel, min_wl, max_wl);
+                let r = clamp_channel(calculate_channel(&spectrum, &red));
+                let g = clamp_channel(calculate_channel(&spectrum, &green));
+                let b = clamp_channel(calculate_channel(&spectrum, &blue));
+                
+                pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb {
+                    data: [r, g, b]
+                })
+            }
+
+            for (pixel, position) in tile.bonus_samples(&image_size) {
+                let mut film_pixel = &mut film[position.x + position.y * image_size.x as usize];
+                film_pixel.merge(pixel);
+                let spectrum = Spectrum::from_pixel(film_pixel, min_wl, max_wl);
                 let r = clamp_channel(calculate_channel(&spectrum, &red));
                 let g = clamp_channel(calculate_channel(&spectrum, &green));
                 let b = clamp_channel(calculate_channel(&spectrum, &blue));

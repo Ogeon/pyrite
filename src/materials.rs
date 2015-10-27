@@ -1,10 +1,10 @@
-use std;
+use rand::Rng;
 
 use cgmath::{EuclideanVector, Vector, Vector3};
 use cgmath::{Ray, Ray3};
 
 use tracer;
-use tracer::{Material, FloatRng, Reflection, ParametricValue, Emit, Reflect, Light, Color};
+use tracer::{Material, Reflection, ParametricValue, Emit, Reflect, Light, Color};
 
 use config::Prelude;
 use config::entry::Entry;
@@ -18,47 +18,18 @@ pub struct Diffuse {
 }
 
 impl Material for Diffuse {
-    fn reflect(&self, _light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
-        let u = rng.next_float();
-        let v = rng.next_float();
-        let theta = 2.0f64 * std::f64::consts::PI * u;
-        let phi = (2.0 * v - 1.0).acos();
-        let sphere_point = Vector3::new(
-            phi.sin() * theta.cos(),
-            phi.sin() * theta.sin(),
-            phi.cos().abs()
-            );
-
-        let mut n = if ray_in.direction.dot(&normal.direction) < 0.0 {
+    fn reflect(&self, _light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Reflection {
+        let n = if ray_in.direction.dot(&normal.direction) < 0.0 {
             normal.direction
         } else {
             -normal.direction
         };
 
-        let mut reflected = n.cross(
-            &if n.x.abs() < n.y.abs() && n.x.abs() < n.z.abs() {
-                Vector3::new(n.x.signum(), 0.0, 0.0)
-            } else if n.y.abs() < n.z.abs() {
-                Vector3::new(0.0, n.y.signum(), 0.0)
-            } else {
-                Vector3::new(0.0, 0.0, n.z.signum())
-            }
-        );
-
-        reflected.normalize_self_to(sphere_point.x);
-
-        let mut y = n.cross(&reflected);
-        y.normalize_self_to(sphere_point.y);
-
-        reflected.add_self_v(&y);
-
-        n.normalize_self_to(sphere_point.z);
-        reflected.add_self_v(&n);
-
+        let reflected = math::utils::sample_hemisphere(rng, &n);
         Reflect(Ray::new(normal.origin, reflected), & *self.color, 1.0, Some(lambertian))
     }
 
-    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&Color> {
+    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut Rng) -> Option<&Color> {
         None
     }
 }
@@ -72,11 +43,11 @@ pub struct Emission {
 }
 
 impl Material for Emission {
-    fn reflect(&self, _light: &mut Light, _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, _light: &mut Light, _ray_in: &Ray3<f64>, _normal: &Ray3<f64>, _rng: &mut Rng) -> Reflection {
         Emit(& *self.color)
     }
 
-    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&Color> {
+    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut Rng) -> Option<&Color> {
         Some(& *self.color)
     }
 }
@@ -86,7 +57,7 @@ pub struct Mirror {
 }
 
 impl Material for Mirror {
-    fn reflect(&self, _light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, _rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, _light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, _rng: &mut Rng) -> Reflection {
 
         let mut n = if ray_in.direction.dot(&normal.direction) < 0.0 {
             normal.direction
@@ -99,7 +70,7 @@ impl Material for Mirror {
         Reflect(Ray::new(normal.origin, ray_in.direction.sub_v(&n)), & *self.color, 1.0, None)
     }
 
-    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&Color> {
+    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut Rng) -> Option<&Color> {
         None
     }
 }
@@ -111,16 +82,16 @@ pub struct Mix {
 }
 
 impl Material for Mix {
-    fn reflect(&self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
-        if self.factor < rng.next_float() {
+    fn reflect(&self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Reflection {
+        if self.factor < rng.next_f64() {
             self.a.reflect(light, ray_in, normal, rng)
         } else {
             self.b.reflect(light, ray_in, normal, rng)
         }
     }
 
-    fn get_emission(&self, light: &mut Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&Color> {
-        if self.factor < rng.next_float() {
+    fn get_emission(&self, light: &mut Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Option<&Color> {
+        if self.factor < rng.next_f64() {
             self.a.get_emission(light, ray_in, normal, rng)
         } else {
             self.b.get_emission(light, ray_in, normal, rng)
@@ -138,7 +109,7 @@ struct FresnelMix {
 }
 
 impl Material for FresnelMix {
-    fn reflect(&self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Reflection {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
@@ -151,7 +122,7 @@ impl Material for FresnelMix {
         }
     }
 
-    fn get_emission(&self, light: &mut Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Option<&Color> {
+    fn get_emission(&self, light: &mut Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Option<&Color> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
@@ -165,14 +136,14 @@ impl Material for FresnelMix {
     }
 }
 
-fn fresnel_mix<'a>(ior: f64, env_ior: f64, reflect: &'a MaterialBox, refract: &'a MaterialBox, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> &'a MaterialBox {
+fn fresnel_mix<'a>(ior: f64, env_ior: f64, reflect: &'a MaterialBox, refract: &'a MaterialBox, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> &'a MaterialBox {
     let factor = if ray_in.dot(&normal.direction) < 0.0 {
         math::utils::schlick(env_ior, ior, &normal.direction, ray_in)
     } else {
         math::utils::schlick(ior, env_ior, &-normal.direction, ray_in)
     };
 
-    if factor > rng.next_float() {
+    if factor > rng.next_f64() {
         reflect
     } else {
         refract
@@ -188,7 +159,7 @@ struct Refractive {
 }
 
 impl Material for Refractive {
-    fn reflect(&self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection {
+    fn reflect(&self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Reflection {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
@@ -199,12 +170,12 @@ impl Material for Refractive {
         }
     }
 
-    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut FloatRng) -> Option<&Color> {
+    fn get_emission(&self, _light: &mut Light, _ray_in: &Vector3<f64>, _normal: &Ray3<f64>, _rng: &mut Rng) -> Option<&Color> {
         None
     }
 }
 
-fn refract<'a>(ior: f64, env_ior: f64, color: &'a Box<Color>, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut FloatRng) -> Reflection<'a> {
+fn refract<'a>(ior: f64, env_ior: f64, color: &'a Box<Color>, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Reflection<'a> {
     let nl = if normal.direction.dot(&ray_in.direction) < 0.0 {
         normal.direction
     } else {
@@ -237,7 +208,7 @@ fn refract<'a>(ior: f64, env_ior: f64, color: &'a Box<Color>, ray_in: &Ray3<f64>
     let rp = re / p;
     let tp = tr / (1.0 - p);
 
-    if rng.next_float() < p {
+    if rng.next_f64() < p {
         return Reflect(Ray::new(normal.origin, reflected), & **color, rp, None);
     } else {
         return Reflect(Ray::new(normal.origin, tdir), & **color, tp, None);

@@ -154,11 +154,11 @@ pub mod utils {
         v.cross(&unit)
     }
 
-    pub fn sample_cone<R: Rng>(rng: &mut R, direction: &Vector3<f64>, cos_half: f64) -> Vector3<f64> {
+    pub fn sample_cone<R: ?Sized + Rng>(rng: &mut R, direction: &Vector3<f64>, cos_half: f64) -> Vector3<f64> {
         let o1 = ortho(&direction).normalize();
         let o2 = direction.cross(&o1).normalize();
-        let r1: f64 = std::f64::consts::PI * 2.0 * rng.gen::<f64>();
-        let r2: f64 = cos_half + (1.0 - cos_half) * rng.gen::<f64>();
+        let r1: f64 = std::f64::consts::PI * 2.0 * rng.next_f64();
+        let r2: f64 = cos_half + (1.0 - cos_half) * rng.next_f64();
         let oneminus = (1.0f64 - r2 * r2).sqrt();
 
         o1.mul_s(r1.cos() * oneminus).add_v(&o2.mul_s(r1.sin() * oneminus)).add_v(&direction.mul_s(r2))
@@ -170,6 +170,26 @@ pub mod utils {
         } else {
             2.0 * std::f64::consts::PI * (1.0 - cos_half)
         }
+    }
+
+    pub fn sample_sphere<R: ?Sized + Rng>(rng: &mut R) -> Vector3<f64> {
+        let u = rng.next_f64();
+        let v = rng.next_f64();
+        let theta = 2.0 * std::f64::consts::PI * u;
+        let phi = (2.0 * v - 1.0).acos();
+        Vector3::new(
+            phi.sin() * theta.cos(),
+            phi.sin() * theta.sin(),
+            phi.cos()
+        )
+    }
+
+    pub fn sample_hemisphere<R: ?Sized + Rng>(rng: &mut R, direction: &Vector3<f64>) -> Vector3<f64> {
+        let s = sample_sphere(rng);
+        let x = ortho(direction).normalize_to(s.x);
+        let y = x.cross(direction).normalize_to(s.y);
+        let z = direction.normalize_to(s.z.abs());
+        x.add_v(&y).add_v(&z)
     }
 }
 

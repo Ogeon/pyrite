@@ -105,16 +105,7 @@ impl Shape {
     pub fn sample_point<R: rand::Rng>(&self, rng: &mut R) -> Option<Ray3<f64>> {
         match *self {
             Sphere { ref position, radius, .. } => {
-                let u: f64 = rng.gen();
-                let v: f64 = rng.gen();
-                let theta = 2.0 * std::f64::consts::PI * u;
-                let phi = (2.0 * v - 1.0).acos();
-                let sphere_point = Vector3::new(
-                    phi.sin() * theta.cos(),
-                    phi.sin() * theta.sin(),
-                    phi.cos()
-                );
-
+                let sphere_point = math::utils::sample_sphere(rng);
                 Some(Ray::new(position.add_v(&sphere_point.mul_s(radius)), sphere_point))
             },
             Plane {..} => None,
