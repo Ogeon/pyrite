@@ -9,7 +9,7 @@ use rand::Rng;
 use obj;
 use genmesh;
 
-use cgmath::{EuclideanVector, Vector3, Point, Point3, Ray3};
+use cgmath::{EuclideanVector, Vector3, Point, Point3, Ray3, AffineMatrix3};
 
 use config::Prelude;
 use config::entry::Entry;
@@ -52,7 +52,12 @@ impl World {
 pub enum Object {
     Lamp(Lamp),
     Shape { shape: Shape, emissive: bool },
-    Mesh { file: String, materials: HashMap<String, (materials::MaterialBox, bool)> },
+    Mesh {
+        file: String,
+        materials: HashMap<String, (materials::MaterialBox, bool)>,
+        scale: f64,
+        transform: AffineMatrix3<f64>
+    },
 }
 
 pub trait ObjectContainer {
@@ -154,7 +159,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(entry: Entry, make_path:
                 }
                 objects.push(shape);
             },
-            Object::Mesh { file, mut materials } => {
+            Object::Mesh { file, mut materials, scale, transform } => {
                 let path = make_path(file);
                 let file = match File::open(&path) {
                     Ok(f) => f,
@@ -177,8 +182,10 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(entry: Entry, make_path:
                         for shape in group.indices().iter() {
                             match *shape {
                                 genmesh::Polygon::PolyTri(genmesh::Triangle{x, y, z}) => {
-                                    let triangle = Arc::new(make_triangle(&obj, x, y, z, object_material.clone()));
-
+                                    let mut triangle = make_triangle(&obj, x, y, z, object_material.clone());
+                                    triangle.scale(scale);
+                                    triangle.transform(&transform);
+                                    let triangle = Arc::new(triangle);
                                     if emissive {
                                         lights.push(Lamp::Shape(triangle.clone()));
                                     }

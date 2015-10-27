@@ -9,6 +9,7 @@ use cgmath::{Vector, EuclideanVector, Vector3};
 use cgmath::{Point, Point3};
 use cgmath::Intersect;
 use cgmath::{Ray, Ray3};
+use cgmath::{Transform, AffineMatrix3};
 
 use tracer::Material;
 
@@ -175,6 +176,38 @@ impl Shape {
             }
         }
     }
+
+    pub fn scale(&mut self, scale: f64) {
+        match *self {
+            Sphere { ref mut radius, ref mut position, .. } => {
+                *radius *= scale;
+                position.mul_self_s(scale);
+            },
+            Plane { .. } => {},
+            Triangle { ref mut v1, ref mut v2, ref mut v3, .. } => {
+                v1.position.mul_self_s(scale);
+                v2.position.mul_self_s(scale);
+                v3.position.mul_self_s(scale);
+            }
+        }
+    }
+
+    pub fn transform(&mut self, transform: &AffineMatrix3<f64>) {
+        match *self {
+            Sphere { ref mut position, .. } => {
+                *position = transform.transform_point(position);
+            },
+            Plane { .. } => {},
+            Triangle { ref mut v1, ref mut v2, ref mut v3, .. } => {
+                v1.normal = transform.transform_vector(&v1.normal);
+                v2.normal = transform.transform_vector(&v2.normal);
+                v3.normal = transform.transform_vector(&v3.normal);
+                v1.position = transform.transform_point(&v1.position);
+                v2.position = transform.transform_point(&v2.position);
+                v3.position = transform.transform_point(&v3.position);
+            }
+        }
+    }
 }
 
 impl<'a> bkdtree::Element<world::BkdRay<'a>> for Arc<Shape> {
@@ -287,6 +320,18 @@ fn decode_mesh(entry: Entry) -> Result<world::Object, String> {
         None => return Err("missing field 'file'".into())
     };
 
+    let scale = match items.get("scale") {
+        Some(v) => try!(v.decode(), "scale"),
+        None => 1.0
+    };
+
+    let transform = match items.get("transform") {
+        Some(v) => AffineMatrix3 {
+            mat: try!(v.dynamic_decode(), "transform")
+        },
+        None => Transform::identity()
+    };
+
     let materials = match items.get("materials").map(|e| e.as_object()) {
         Some(Some(fields)) => try!(fields.into_iter().map(|(k, v)| {
             let i = try!(v.dynamic_decode());
@@ -298,6 +343,8 @@ fn decode_mesh(entry: Entry) -> Result<world::Object, String> {
 
     Ok(world::Object::Mesh {
         file: file_name,
-        materials: materials
+        materials: materials,
+        scale: scale,
+        transform: transform,
     })
 }
