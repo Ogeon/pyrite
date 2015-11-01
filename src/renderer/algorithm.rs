@@ -1,11 +1,9 @@
 use std;
-use std::cmp::Ordering::Equal;
-use std::cmp::min;
 
 use rand::{self, Rng, XorShiftRng};
 
-use cgmath::{Vector, EuclideanVector, Vector2, Vector3};
-use cgmath::{Point};
+use cgmath::{Vector, EuclideanVector, Vector3};
+use cgmath::Point;
 use cgmath::{Ray3};
 
 use tracer::{self, Bounce, BounceType, RenderContext};
@@ -14,48 +12,17 @@ use world::World;
 use lamp;
 
 use renderer::Renderer;
-use renderer::tile::{Tile, Sample, Area};
+use film::{Tile, Sample};
 
 pub enum Algorithm {
-    Simple {tile_size: u32},
+    Simple {tile_size: usize},
     Bidirectional {
-        tile_size: u32,
+        tile_size: usize,
         params: BidirParams
     },
 }
 
 impl Algorithm {
-    pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<u32>, spectrum_bins: usize, (spectrum_min, spectrum_max): (f64, f64)) -> Vec<Tile> {
-        match *self {
-            Algorithm::Simple {tile_size, ..} | Algorithm::Bidirectional { tile_size, ..} => {
-                let tiles_x = (image_size.x as f32 / tile_size as f32).ceil() as u32;
-                let tiles_y = (image_size.y as f32 / tile_size as f32).ceil() as u32;
-
-                let mut tiles = Vec::new();
-
-                for y in 0..tiles_y {
-                    for x in 0..tiles_x {
-                        let from = Vector2::new(x * tile_size, y * tile_size);
-                        let size = Vector2::new(min(image_size.x - from.x, tile_size), min(image_size.y - from.y, tile_size));
-
-                        let image_area = Area::new(from, size);
-                        let camera_area = camera.to_view_area(&image_area, image_size);
-
-                        tiles.push(Tile::new(image_area, camera_area, spectrum_min, spectrum_max, spectrum_bins));
-                    }
-                }
-
-                tiles.sort_by(|a, b| {
-                    let a = Vector2::new(a.screen_area().from.x as f32, a.screen_area().from.y as f32);
-                    let b = Vector2::new(b.screen_area().from.x as f32, b.screen_area().from.y as f32);
-                    let half_size = Vector2::new(image_size.x as f32 / 2.0, image_size.y as f32 / 2.0);
-                    a.sub_v(&half_size).length2().partial_cmp(&b.sub_v(&half_size).length2()).unwrap_or(Equal)
-                });
-                tiles
-            }
-        }
-    }
-
     pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &World, renderer: &Renderer) {
         let rng: XorShiftRng = rand::thread_rng().gen();
 
@@ -122,8 +89,8 @@ fn contribute(bounce: &Bounce, sample: &mut Sample, reflectance: &mut f64, requi
 }
 
 pub fn simple<R: Rng>(mut rng: R, tile: &mut Tile, camera: &cameras::Camera, world: &World, renderer: &Renderer) {
-    for _ in 0..(tile.pixel_count() * renderer.pixel_samples as usize) {
-        let position = tile.sample_position(&mut rng);
+    for _ in 0..(tile.area() * renderer.pixel_samples as usize) {
+        let position = tile.sample_point(&mut rng);
 
         let ray = camera.ray_towards(&position, &mut rng);
         let wavelength = tile.sample_wavelength(&mut rng);
@@ -152,11 +119,11 @@ pub fn simple<R: Rng>(mut rng: R, tile: &mut Tile, camera: &cameras::Camera, wor
             contribute(bounce, sample, reflectance, false);
         }
 
-        tile.expose(main_sample.0, position);
+        tile.expose(position, main_sample.0);
 
         if used_additional {
             for (sample, _) in additional_samples {
-                tile.expose(sample, position);
+                tile.expose(position, sample);
             }
         }
     }
@@ -167,8 +134,8 @@ pub struct BidirParams {
 }
 
 pub fn bidirectional<R: Rng>(mut rng: R, tile: &mut Tile, camera: &cameras::Camera, world: &World, renderer: &Renderer, bidir_params: &BidirParams) {
-    for _ in 0..(tile.pixel_count() * renderer.pixel_samples as usize) {
-        let position = tile.sample_position(&mut rng);
+    for _ in 0..(tile.area() * renderer.pixel_samples as usize) {
+        let position = tile.sample_point(&mut rng);
         let wavelength = tile.sample_wavelength(&mut rng);
         let light = tracer::Light::new(wavelength);
 
@@ -257,15 +224,15 @@ pub fn bidirectional<R: Rng>(mut rng: R, tile: &mut Tile, camera: &cameras::Came
 
             for mut contribution in connect_paths(&bounce, &main_sample, &additional_samples, &lamp_path, world, used_additional) {
                 contribution.weight = weight;
-                tile.expose(contribution, position);
+                tile.expose(position, contribution);
             }
         }
 
-        tile.expose(main_sample.0.clone(), position);
+        tile.expose(position, main_sample.0.clone());
 
         if used_additional {
             for &(ref sample, _) in &additional_samples {
-                tile.expose(sample.clone(), position);
+                tile.expose(position, sample.clone());
             }
         }
 
@@ -310,11 +277,11 @@ pub fn bidirectional<R: Rng>(mut rng: R, tile: &mut Tile, camera: &cameras::Came
                         }
                     }
 
-                    tile.expose(main_sample.0.clone(), position);
+                    tile.expose(position, main_sample.0.clone());
 
                     if used_additional {
                         for &(ref sample, _) in &additional_samples {
-                            tile.expose(sample.clone(), position);
+                            tile.expose(position, sample.clone());
                         }
                     }
                 }

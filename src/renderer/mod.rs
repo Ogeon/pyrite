@@ -1,7 +1,5 @@
 use num_cpus;
 
-use cgmath::Vector2;
-
 use config::Prelude;
 use config::entry::{Entry, Object};
 
@@ -11,9 +9,7 @@ use world;
 use renderer::algorithm::Algorithm;
 
 mod algorithm;
-mod tile;
-
-pub use renderer::tile::{Area, Tile, Spectrum, Pixel};
+use film::Tile;
 
 static DEFAULT_SPECTRUM_SAMPLES: u32 = 10;
 static DEFAULT_SPECTRUM_BINS: usize = 64;
@@ -37,12 +33,15 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn make_tiles(&self, camera: &cameras::Camera, image_size: &Vector2<u32>) -> Vec<Tile> {
-        self.algorithm.make_tiles(camera, image_size, self.spectrum_bins, self.spectrum_span)
-    }
-
     pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &world::World) {
         self.algorithm.render_tile(tile, camera, world, self)
+    }
+
+    pub fn tile_size(&self) -> usize {
+        match self.algorithm {
+            Algorithm::Simple { tile_size } => tile_size,
+            Algorithm::Bidirectional { tile_size, .. } => tile_size,
+        }
     }
 }
 

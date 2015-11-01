@@ -23,7 +23,7 @@ use image::GenericImage;
 
 use time::PreciseTime;
 
-use renderer::{Tile, Pixel, Spectrum};
+use film::{Film, Tile, Spectrum};
 
 macro_rules! try {
     ($e:expr) => (
@@ -53,6 +53,7 @@ mod math;
 mod values;
 mod lamp;
 mod world;
+mod film;
 
 fn main() {
     let mut args = std::env::args();
@@ -71,9 +72,6 @@ fn main() {
 
 fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
     let image_size = Vector2::new(project.image.width, project.image.height);
-    let (min_wl, max_wl) = project.renderer.spectrum_span;
-
-    let tiles = project.renderer.make_tiles(&project.camera, &image_size);
 
     let config = RenderContext {
         camera: project.camera,
@@ -104,47 +102,42 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
 
     let f = |mut tile: Tile| {
         config.renderer.render_tile(&mut tile, &config.camera, &config.world);
-        tile
     };
 
-    let mut film = vec![Pixel::new(config.renderer.spectrum_bins); image_size.x as usize * image_size.y as usize];
+    let film = Film::new(
+        image_size.x, image_size.y,
+        config.renderer.tile_size(),
+        config.renderer.spectrum_span,
+        config.renderer.spectrum_bins,
+        &config.camera
+    );
 
     crossbeam::scope(|scope| {
         print!(" 0%");
         stdout().flush().unwrap();
 
         let mut last_print = PreciseTime::now();
-        let num_tiles = tiles.len();
+        let num_tiles = film.num_tiles();
 
-        for (i, (_, tile)) in pool.unordered_map(scope, tiles, &f).enumerate() {
-            for (pixel, position) in tile.pixels() {
-                let mut film_pixel = &mut film[position.x as usize + position.y as usize * image_size.x as usize];
-                film_pixel.merge(pixel);
-                let spectrum = Spectrum::from_pixel(film_pixel, min_wl, max_wl);
-                let r = clamp_channel(calculate_channel(&spectrum, &red));
-                let g = clamp_channel(calculate_channel(&spectrum, &green));
-                let b = clamp_channel(calculate_channel(&spectrum, &blue));
-                
-                pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb {
-                    data: [r, g, b]
-                })
-            }
-
-            for (pixel, position) in tile.bonus_samples(&image_size) {
-                let mut film_pixel = &mut film[position.x + position.y * image_size.x as usize];
-                film_pixel.merge(pixel);
-                let spectrum = Spectrum::from_pixel(film_pixel, min_wl, max_wl);
-                let r = clamp_channel(calculate_channel(&spectrum, &red));
-                let g = clamp_channel(calculate_channel(&spectrum, &green));
-                let b = clamp_channel(calculate_channel(&spectrum, &blue));
-                
-                pixels.put_pixel(position.x as u32, position.y as u32, image::Rgb {
-                    data: [r, g, b]
-                })
-            }
-
+        for (i, _) in pool.unordered_map(scope, &film, &f).enumerate() {
+            print!("\r{:2}%", (i * 100) / num_tiles);
+            stdout().flush().unwrap();
             if last_print.to(PreciseTime::now()).num_seconds() >= 4 {
-                print!("\r{:2}%", (i * 100) / num_tiles);
+                let begin_iter = PreciseTime::now();
+                film.with_changed_pixels(|position, spectrum| {
+                    let r = clamp_channel(calculate_channel(&spectrum, &red));
+                    let g = clamp_channel(calculate_channel(&spectrum, &green));
+                    let b = clamp_channel(calculate_channel(&spectrum, &blue));
+                    
+                    unsafe {
+                        pixels.unsafe_put_pixel(position.x as u32, position.y as u32, image::Rgb {
+                            data: [r, g, b]
+                        })
+                    }
+                });
+                let diff = begin_iter.to(PreciseTime::now()).num_milliseconds() as f64 / 1000.0;
+
+                print!("\r{:2}% - updated iamge in {} seconds", (i * 100) / num_tiles, diff);
                 stdout().flush().unwrap();
                 match File::create(&render_path) {
                     Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
@@ -154,6 +147,18 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
                 }
                 last_print = PreciseTime::now();
             }
+        }
+    });
+
+    film.with_changed_pixels(|position, spectrum| {
+        let r = clamp_channel(calculate_channel(&spectrum, &red));
+        let g = clamp_channel(calculate_channel(&spectrum, &green));
+        let b = clamp_channel(calculate_channel(&spectrum, &blue));
+        
+        unsafe {
+            pixels.unsafe_put_pixel(position.x as u32, position.y as u32, image::Rgb {
+                data: [r, g, b]
+            })
         }
     });
 
@@ -167,7 +172,7 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
     println!("\rDone!")
 }
 
-fn calculate_channel(spectrum: &renderer::Spectrum, response: &math::utils::Interpolated) -> f64 {
+fn calculate_channel(spectrum: &Spectrum, response: &math::utils::Interpolated) -> f64 {
     let mut sum = 0.0;
     let mut weight = 0.0;
 

@@ -102,8 +102,8 @@ pub struct Project {
 }
 
 pub struct ImageSpec {
-    pub width: u32,
-    pub height: u32,
+    pub width: usize,
+    pub height: usize,
     pub format: ImageFormat,
     pub rgb_curves: (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>)
 }

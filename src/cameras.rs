@@ -3,12 +3,12 @@ use std::f64::consts;
 use rand::Rng;
 
 use cgmath::{Vector, EuclideanVector, Vector2};
-use cgmath::{Point, Point3};
+use cgmath::{Point, Point2, Point3};
 use cgmath::{AffineMatrix3, Transform};
 use cgmath::{Angle, Rad, cos, sin, deg};
 use cgmath::{Ray, Ray3};
 
-use renderer::Area;
+use film::Area;
 
 use config::Prelude;
 use config::entry::Entry;
@@ -29,18 +29,18 @@ pub enum Camera {
 }
 
 impl Camera {
-    pub fn to_view_area(&self, area: &Area<u32>, image_size: &Vector2<u32>) -> Area<f64> {
-        let float_image_size = Vector2::new(image_size.x as f64, image_size.y as f64);
-        let float_coord = Vector2::new(area.from.x as f64, area.from.y as f64);
+    pub fn to_view_area(&self, area: &Area<usize>, width: usize, height: usize) -> Area<f64> {
+        let float_image_size = Vector2::new(width as f64, height as f64);
+        let float_coord = Point2::new(area.from.x as f64, area.from.y as f64);
         let float_size = Vector2::new(area.size.x as f64, area.size.y as f64);
 
-        let from = (float_coord.sub_v(&float_image_size.div_s(2.0))).div_s(float_image_size.comp_max() / 2.0);
+        let from = (float_coord.add_v(&-float_image_size.div_s(2.0))).div_s(float_image_size.comp_max() / 2.0);
         let size = float_size.div_s(float_image_size.comp_max() / 2.0);
 
         Area::new(from, size)
     }
 
-    pub fn ray_towards<R: Rng>(&self, target: &Vector2<f64>, rng: &mut R) -> Ray3<f64> {
+    pub fn ray_towards<R: Rng>(&self, target: &Point2<f64>, rng: &mut R) -> Ray3<f64> {
         match *self {
             Camera::Perspective { ref transform, view_plane, focus_distance, aperture } => {
                 let focus_x = target.x / view_plane * focus_distance;
@@ -65,7 +65,7 @@ impl Camera {
         }
     }
 
-    pub fn is_visible<R: Rng>(&self, target: &Point3<f64>, world: &World, rng: &mut R) -> Option<(Vector2<f64>, Ray3<f64>)> {
+    pub fn is_visible<R: Rng>(&self, target: &Point3<f64>, world: &World, rng: &mut R) -> Option<(Point2<f64>, Ray3<f64>)> {
         match *self {
             Camera::Perspective { ref transform, view_plane, focus_distance, aperture } => {
                 let inv_transform = if let Some(t) = transform.invert() {
@@ -113,7 +113,7 @@ impl Camera {
                 let target_x = focus_x * view_plane;
                 let target_y = focus_y * view_plane;
 
-                Some((Vector2::new(target_x, target_y), ray))
+                Some((Point2::new(target_x, target_y), ray))
             }
         }
     }
