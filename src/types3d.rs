@@ -1,6 +1,6 @@
 use cgmath::{Matrix, Matrix4};
 use cgmath::Vector3;
-use cgmath::{Point, Point3};
+use cgmath::{Point, Point3, Quaternion};
 
 use config::Prelude;
 use config::entry::Entry;
@@ -10,7 +10,8 @@ pub fn register_types(context: &mut Prelude) {
         let mut object = context.object("Vector".into());
         object.add_decoder(decode_vector_3d);
         object.add_decoder(decode_point_3d);
-        object.arguments(vec!["x".into(), "y".into(), "z".into()]);
+        object.add_decoder(decode_quaternion);
+        object.arguments(vec!["x".into(), "y".into(), "z".into(), "w".into()]);
     }
     context.object("Transform".into()).object("LookAt".into()).add_decoder(decode_transform_look_at);
 }
@@ -57,6 +58,32 @@ fn decode_point_3d(entry: Entry) -> Result<Point3<f64>, String> {
 
     Ok(Point3::new(x, y, z))
 
+}
+
+fn decode_quaternion(entry: Entry) -> Result<Quaternion<f64>, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
+
+    let x = match items.get("x") {
+        Some(v) => try!(v.decode(), "x"),
+        None => 0.0
+    };
+
+    let y = match items.get("y") {
+        Some(v) => try!(v.decode(), "y"),
+        None => 0.0
+    };
+
+    let z = match items.get("z") {
+        Some(v) => try!(v.decode(), "z"),
+        None => 0.0
+    };
+
+    let w = match items.get("w") {
+        Some(v) => try!(v.decode(), "w"),
+        None => 0.0
+    };
+
+    Ok(Quaternion::new(x, y, z, w))
 }
 
 fn decode_transform_look_at(entry: Entry) -> Result<Matrix4<f64>, String> {

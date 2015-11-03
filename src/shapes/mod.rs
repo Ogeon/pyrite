@@ -11,7 +11,7 @@ use cgmath::Intersect;
 use cgmath::{Ray, Ray3};
 use cgmath::{Transform, AffineMatrix3};
 
-use tracer::Material;
+use tracer::{Material, ParametricValue};
 
 use config::Prelude;
 use config::entry::Entry;
@@ -23,7 +23,13 @@ use math;
 
 use rand;
 
-pub use self::Shape::{Sphere, Plane, Triangle};
+const EPSILON: f64 = 0.000000001;
+
+mod distance_estimators;
+
+pub use self::Shape::{ Sphere, Plane, Triangle, RayMarched };
+
+type DistanceEstimator = Box<ParametricValue<Point3<f64>, f64>>;
 
 pub struct Vertex<S> {
     pub position: Point3<S>,
@@ -33,7 +39,8 @@ pub struct Vertex<S> {
 pub enum Shape {
     Sphere { position: Point3<f64>, radius: f64, material: materials::MaterialBox },
     Plane { shape: cgmath::Plane<f64>, material: materials::MaterialBox },
-    Triangle { v1: Vertex<f64>, v2: Vertex<f64>, v3: Vertex<f64>, material: Arc<materials::MaterialBox> }
+    Triangle { v1: Vertex<f64>, v2: Vertex<f64>, v3: Vertex<f64>, material: Arc<materials::MaterialBox> },
+    RayMarched { estimator: DistanceEstimator, bounds: BoundingVolume, material: materials::MaterialBox }
 }
 
 impl Shape {
@@ -55,14 +62,13 @@ impl Shape {
             },
             Triangle {ref v1, ref v2, ref v3, ..} => {
                 //Möller–Trumbore intersection algorithm
-                let epsilon = 0.000001f64;
                 let e1 = v2.position.sub_p(&v1.position);
                 let e2 = v3.position.sub_p(&v1.position);
 
                 let p = ray.direction.cross(&e2);
                 let det = e1.dot(&p);
 
-                if det > -epsilon && det < epsilon {
+                if det > -EPSILON && det < EPSILON {
                     return None;
                 }
 
@@ -84,14 +90,44 @@ impl Shape {
                 }
 
                 let dist = e2.dot(&q) * inv_det;
-                if dist > epsilon {
+                if dist > EPSILON {
                     let hit_position = ray.origin.add_v(&ray.direction.mul_s(dist));
                     let normal = v1.normal.mul_s(1.0 - (u + v)).add_v(&v2.normal.mul_s(u)).add_v(&v3.normal.mul_s(v));
                     Some(( dist, Ray::new(hit_position, normal.normalize()) ))
                 } else {
                     None
                 }
-            }
+            },
+            RayMarched { ref estimator, ref bounds, .. } => bounds.intersect(ray).and_then(|(min, max)| {
+                let origin = ray.origin.add_v(&-bounds.center().to_vec());
+                let mut total_distance = min;
+                while total_distance < max {
+                    let p = origin.add_v(&ray.direction.mul_s(total_distance));
+                    let distance = estimator.get(&p);
+                    total_distance += distance;
+                    if distance < EPSILON || total_distance > max {
+                        //println!("dist: {}", distance);
+                        break;
+                    }
+                }
+
+                if total_distance <= max {
+                    let p = origin.add_v(&ray.direction.mul_s(total_distance - EPSILON));
+                    let x_dir = Vector3::new(EPSILON, 0.0, 0.0);
+                    let y_dir = Vector3::new(0.0, EPSILON, 0.0);
+                    let z_dir = Vector3::new(0.0, 0.0, EPSILON);
+                    let n = Vector3::new(
+                        estimator.get(&p.add_v(&x_dir)) - estimator.get(&p.add_v(&-x_dir)),
+                        estimator.get(&p.add_v(&y_dir)) - estimator.get(&p.add_v(&-y_dir)),
+                        estimator.get(&p.add_v(&z_dir)) - estimator.get(&p.add_v(&-z_dir)),
+                    ).normalize();
+                    let p = ray.origin.add_v(&ray.direction.mul_s(total_distance));
+                    //println!("n: {:?}", n);
+                    Some((total_distance, Ray3::new(p, n)))
+                } else {
+                    None
+                }
+            }),
         }
     }
 
@@ -99,7 +135,8 @@ impl Shape {
         match *self {
             Sphere { ref material, .. } => & **material,
             Plane { ref material, .. } => & **material,
-            Triangle { ref material, .. } => & **material.deref()
+            Triangle { ref material, .. } => & **material.deref(),
+            RayMarched { ref material, .. } => & **material
         }
     }
 
@@ -127,7 +164,8 @@ impl Shape {
                 let normal = v1.normal.mul_s(1.0 - (u + v)).add_v(&v2.normal.mul_s(u)).add_v(&v3.normal.mul_s(v));
 
                 Some(Ray::new(position, normal.normalize()))
-            }
+            },
+            RayMarched { .. } => None
         }
     }
 
@@ -173,7 +211,8 @@ impl Shape {
                 let a = v2.position.sub_p(&v1.position);
                 let b = v3.position.sub_p(&v1.position);
                 0.5 * a.cross(&b).length()
-            }
+            },
+            RayMarched { .. } => INFINITY
         }
     }
 
@@ -188,7 +227,8 @@ impl Shape {
                 v1.position.mul_self_s(scale);
                 v2.position.mul_self_s(scale);
                 v3.position.mul_self_s(scale);
-            }
+            },
+            RayMarched { .. } => {}
         }
     }
 
@@ -205,7 +245,8 @@ impl Shape {
                 v1.position = transform.transform_point(&v1.position);
                 v2.position = transform.transform_point(&v2.position);
                 v3.position = transform.transform_point(&v3.position);
-            }
+            },
+            RayMarched { .. } => {}
         }
     }
 }
@@ -238,6 +279,11 @@ impl<'a> bkdtree::Element<world::BkdRay<'a>> for Arc<Shape> {
                     1 => (min.y, max.y),
                     _ => (min.z, max.z)
                 }
+            },
+            RayMarched { ref bounds, .. } => match axis {
+                0 => bounds.x_interval(),
+                1 => bounds.y_interval(),
+                _ => bounds.z_interval(),
             }
         }
     }
@@ -248,13 +294,123 @@ impl<'a> bkdtree::Element<world::BkdRay<'a>> for Arc<Shape> {
     }
 }
 
+pub enum BoundingVolume {
+    Box(Point3<f64>, Point3<f64>),
+    Sphere(Point3<f64>, f64)
+}
+
+impl BoundingVolume {
+    pub fn x_interval(&self) -> (f64, f64) {
+        match *self {
+            BoundingVolume::Box(min, max) => (min.x, max.x),
+            BoundingVolume::Sphere(center, radius) => (center.x - radius, center.x + radius),
+        }
+    }
+
+    pub fn y_interval(&self) -> (f64, f64) {
+        match *self {
+            BoundingVolume::Box(min, max) => (min.y, max.y),
+            BoundingVolume::Sphere(center, radius) => (center.y - radius, center.y + radius),
+        }
+    }
+
+    pub fn z_interval(&self) -> (f64, f64) {
+        match *self {
+            BoundingVolume::Box(min, max) => (min.z, max.z),
+            BoundingVolume::Sphere(center, radius) => (center.z - radius, center.z + radius),
+        }
+    }
+
+    pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(f64, f64)> {
+        match *self {
+            BoundingVolume::Box(min, max) => {
+                let inv_dir = Vector3::new(1.0 / ray.direction.x, 1.0 / ray.direction.y, 1.0 / ray.direction.z);
+                let (mut t_min, mut t_max) = if inv_dir.x < 0.0 {
+                    ((max.x - ray.origin.x) * inv_dir.x, (min.x - ray.origin.x) * inv_dir.x)
+                } else {
+                    ((min.x - ray.origin.x) * inv_dir.x, (max.x - ray.origin.x) * inv_dir.x)
+                };
+
+                let (ty_min, ty_max) = if inv_dir.y < 0.0 {
+                    ((max.y - ray.origin.y) * inv_dir.y, (min.y - ray.origin.y) * inv_dir.y)
+                } else {
+                    ((min.y - ray.origin.y) * inv_dir.y, (max.y - ray.origin.y) * inv_dir.y)
+                };
+
+                if t_min > ty_max || ty_min > t_max {
+                    return None;
+                }
+
+                if ty_min > t_min {
+                    t_min = ty_min;
+                }
+
+                if ty_max > t_max {
+                    t_max = ty_max;
+                }
+
+                let (tz_min, tz_max) = if inv_dir.z < 0.0 {
+                    ((max.z - ray.origin.z) * inv_dir.z, (min.z - ray.origin.z) * inv_dir.z)
+                } else {
+                    ((min.z - ray.origin.z) * inv_dir.z, (max.z - ray.origin.z) * inv_dir.z)
+                };
+
+                if t_min > tz_max || tz_min > t_max {
+                    return None;
+                }
+
+                if tz_min > t_min {
+                    t_min = tz_min;
+                }
+
+                if tz_max > t_max {
+                    t_max = tz_max;
+                }
+
+                t_min = t_min.max(0.0);
+
+                if t_min < t_max {
+                    Some((t_min, t_max))
+                } else {
+                    None
+                }
+            },
+            BoundingVolume::Sphere(center, radius) => {
+                let l = center.sub_p(&ray.origin);
+                let tca = l.dot(&ray.direction);
+                if tca < 0.0 { return None; }
+                let d2 = l.dot(&l) - tca*tca;
+                if d2 > radius*radius { return None; }
+                let thc = (radius*radius - d2).sqrt();
+                Some((tca - thc, tca + thc))
+            },
+        }
+    }
+
+    fn center(&self) -> Point3<f64> {
+        match *self {
+            BoundingVolume::Box(min, max) => min.add_v(&max.to_vec()).mul_s(0.5),
+            BoundingVolume::Sphere(center, _) => center
+        }
+    }
+}
 
 
 pub fn register_types(context: &mut Prelude) {
-    let mut group = context.object("Shape".into());
-    group.object("Sphere".into()).add_decoder(decode_sphere);
-    group.object("Plane".into()).add_decoder(decode_plane);
-    group.object("Mesh".into()).add_decoder(decode_mesh);
+    {
+        let mut group = context.object("Shape".into());
+        group.object("Sphere".into()).add_decoder(decode_sphere);
+        group.object("Plane".into()).add_decoder(decode_plane);
+        group.object("Mesh".into()).add_decoder(decode_mesh);
+        group.object("RayMarched".into()).add_decoder(decode_ray_marched);
+    }
+    {
+        let mut group = context.object("Bounds".into());
+        group.object("Box".into()).add_decoder(decode_bounding_box);
+        group.object("Sphere".into()).add_decoder(decode_bounding_sphere);
+    }
+
+    distance_estimators::register_types(context);
 }
 
 fn decode_sphere(entry: Entry) -> Result<world::Object, String> {
@@ -347,4 +503,64 @@ fn decode_mesh(entry: Entry) -> Result<world::Object, String> {
         scale: scale,
         transform: transform,
     })
+}
+
+fn decode_ray_marched(entry: Entry) -> Result<world::Object, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
+
+    let bounds = match items.get("bounds") {
+        Some(v) => try!(v.dynamic_decode(), "bounds"),
+        None => return Err("missing field 'bounds'".into())
+    };
+
+    let estimator = match items.get("shape") {
+        Some(v) => try!(v.dynamic_decode(), "shape"),
+        None => return Err("missing field 'shape'".into())
+    };
+
+    let (material, emissive): (materials::MaterialBox, bool) = match items.get("material") {
+        Some(v) => try!(v.dynamic_decode(), "material"),
+        None => return Err("missing field 'material'".into())
+    };
+
+    Ok(world::Object::Shape {
+        shape: RayMarched {
+            bounds: bounds,
+            estimator: estimator,
+            material: material
+        },
+        emissive: emissive
+    })
+}
+
+fn decode_bounding_sphere(entry: Entry) -> Result<BoundingVolume, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
+
+    let position = match items.get("position") {
+        Some(v) => try!(v.dynamic_decode(), "position"),
+        None => return Err("missing field 'position'".into())
+    };
+
+    let radius = match items.get("radius") {
+        Some(v) => try!(v.decode(), "radius"),
+        None => return Err("missing field 'radius'".into())
+    };
+
+    Ok(BoundingVolume::Sphere(position, radius))
+}
+
+fn decode_bounding_box(entry: Entry) -> Result<BoundingVolume, String> {
+    let items = try!(entry.as_object().ok_or("not an object".into()));
+
+    let min = match items.get("min") {
+        Some(v) => try!(v.dynamic_decode(), "min"),
+        None => return Err("missing field 'min'".into())
+    };
+
+    let max = match items.get("max") {
+        Some(v) => try!(v.dynamic_decode(), "max"),
+        None => return Err("missing field 'max'".into())
+    };
+
+    Ok(BoundingVolume::Box(min, max))
 }
