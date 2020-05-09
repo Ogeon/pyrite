@@ -1,73 +1,78 @@
-use std::sync::Arc;
-use std::io::BufReader;
-use std::fs::File;
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
 use rand::Rng;
 
-use obj;
 use genmesh;
+use obj;
 
-use cgmath::{EuclideanVector, Vector3, Point, Point3, Ray3, AffineMatrix3};
+use cgmath::{InnerSpace, Matrix4, Point3, Vector3};
+use collision::Ray3;
 
-use config::Prelude;
 use config::entry::Entry;
+use config::Prelude;
 
 use spatial::{bkd_tree, Dim3};
 
-use tracer::{self, Material, ParametricValue, Color};
 use lamp::Lamp;
-use shapes::{self, Shape};
 use materials;
+use shapes::{self, Shape};
+use tracer::{self, Color, Material};
 
 pub enum Sky {
-    Color(Box<Color>)
+    Color(Box<Color>),
 }
 
 impl Sky {
     pub fn color<'a>(&'a self, _direction: &Vector3<f64>) -> &'a Color {
         match *self {
-            Sky::Color(ref c) => & **c,
+            Sky::Color(ref c) => &**c,
         }
     }
 }
 
-pub struct World {
+pub struct World<R: Rng> {
     pub sky: Sky,
-    pub lights: Vec<Lamp>,
-    pub objects: Box<ObjectContainer + 'static + Send + Sync>
+    pub lights: Vec<Lamp<R>>,
+    pub objects: Box<ObjectContainer<R> + 'static + Send + Sync>,
 }
 
-impl World {
-    pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
+impl<R: Rng> World<R> {
+    pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material<R>)> {
         self.objects.intersect(ray)
     }
 
-    pub fn pick_lamp<R: Rng>(&self, rng: &mut R) -> Option<(&Lamp, f64)> {
-        self.lights.get(rng.gen_range(0, self.lights.len())).map(|l| (l, 1.0 / self.lights.len() as f64))
+    pub fn pick_lamp(&self, rng: &mut R) -> Option<(&Lamp<R>, f64)> {
+        self.lights
+            .get(rng.gen_range(0, self.lights.len()))
+            .map(|l| (l, 1.0 / self.lights.len() as f64))
     }
 }
 
-pub enum Object {
-    Lamp(Lamp),
-    Shape { shape: Shape, emissive: bool },
+pub enum Object<R: Rng> {
+    Lamp(Lamp<R>),
+    Shape {
+        shape: Shape<R>,
+        emissive: bool,
+    },
     Mesh {
         file: String,
-        materials: HashMap<String, (materials::MaterialBox, bool)>,
+        materials: HashMap<String, (materials::MaterialBox<R>, bool)>,
         scale: f64,
-        transform: AffineMatrix3<f64>
+        transform: Matrix4<f64>,
     },
 }
 
-pub trait ObjectContainer {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)>;
+pub trait ObjectContainer<R: Rng> {
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material<R>)>;
 }
 
-impl ObjectContainer for bkd_tree::BkdTree<Arc<shapes::Shape>> {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
+impl<R: Rng> ObjectContainer<R> for bkd_tree::BkdTree<Arc<shapes::Shape<R>>> {
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material<R>)> {
         let ray = BkdRay(*ray);
-        self.find(&ray).map(|(normal, object)| (normal, object.get_material()))
+        self.find(&ray)
+            .map(|(normal, object)| (normal, object.get_material()))
     }
 }
 
@@ -82,7 +87,7 @@ impl bkd_tree::Ray for BkdRay {
         let (origin, direction) = match axis {
             Dim3::X => (ray.origin.x, ray.direction.x),
             Dim3::Y => (ray.origin.y, ray.direction.y),
-            Dim3::Z => (ray.origin.z, ray.direction.z)
+            Dim3::Z => (ray.origin.z, ray.direction.z),
         };
 
         let min = (min - origin) / direction;
@@ -104,11 +109,11 @@ impl bkd_tree::Ray for BkdRay {
         let (origin, direction) = match axis {
             Dim3::X => (ray.origin.x, ray.direction.x),
             Dim3::Y => (ray.origin.y, ray.direction.y),
-            Dim3::Z => (ray.origin.z, ray.direction.z)
+            Dim3::Z => (ray.origin.z, ray.direction.z),
         };
         let min = (min - origin) / direction;
         let max = (max - origin) / direction;
-        
+
         if min < max {
             (min, max)
         } else {
@@ -129,26 +134,32 @@ fn decode_sky_color(entry: Entry) -> Result<Sky, String> {
 
     let color = match fields.get("color") {
         Some(v) => try!(tracer::decode_parametric_number(v), "color"),
-        None => return Err("missing field 'color'".into())
+        None => return Err("missing field 'color'".into()),
     };
 
     Ok(Sky::Color(color))
 }
 
-pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(entry: Entry, make_path: F) -> Result<World, String> {
+pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
+    entry: Entry,
+    make_path: F,
+) -> Result<World<R>, String> {
     let fields = try!(entry.as_object().ok_or("not an object".into()));
 
     let sky = match fields.get("sky") {
         Some(v) => try!(v.dynamic_decode(), "sky"),
-        None => return Err("missing field 'sky'".into())
+        None => return Err("missing field 'sky'".into()),
     };
 
     let object_protos = match fields.get("objects") {
-        Some(v) => try!(v.as_list().ok_or(String::from("expected a list")), "objects"),
-        None => return Err("missing field 'objects'".into())
+        Some(v) => try!(
+            v.as_list().ok_or(String::from("expected a list")),
+            "objects"
+        ),
+        None => return Err("missing field 'objects'".into()),
     };
 
-    let mut objects: Vec<Arc<shapes::Shape>> = Vec::new();
+    let mut objects: Vec<Arc<shapes::Shape<R>>> = Vec::new();
     let mut lights = Vec::new();
 
     for (i, object) in object_protos.into_iter().enumerate() {
@@ -160,47 +171,56 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(entry: Entry, make_path:
                     lights.push(Lamp::Shape(shape.clone()));
                 }
                 objects.push(shape);
-            },
-            Object::Mesh { file, mut materials, scale, transform } => {
+            }
+            Object::Mesh {
+                file,
+                mut materials,
+                scale,
+                transform,
+            } => {
                 let path = make_path(file);
-                let file = match File::open(&path) {
-                    Ok(f) => f,
-                    Err(e) => return Err(format!("failed to open {}: {}", path.as_ref().display(), e))
-                };
-                let mut file = BufReader::new(file);
-                let obj = obj::Obj::load(&mut file);
-                for object in obj.object_iter() {
+                let obj = obj::Obj::load(path.as_ref()).map_err(|error| error.to_string())?;
+                for object in &obj.objects {
                     println!("adding object '{}'", object.name);
-                    
+
                     let (object_material, emissive) = match materials.remove(&object.name) {
                         Some(m) => {
-                            let (material, emissive): (Box<Material + 'static + Send + Sync>, bool) = m;
+                            let (material, emissive): (
+                                Box<Material<R> + 'static + Send + Sync>,
+                                bool,
+                            ) = m;
                             (Arc::new(material), emissive)
-                        },
-                        None => return Err(format!("objects: [{}]: missing field '{}'", i, object.name))
+                        }
+                        None => {
+                            return Err(format!(
+                                "objects: [{}]: missing field '{}'",
+                                i, object.name
+                            ))
+                        }
                     };
 
-                    for group in object.group_iter() {
-                        for shape in group.indices().iter() {
+                    for group in &object.groups {
+                        for shape in &group.polys {
                             match *shape {
-                                genmesh::Polygon::PolyTri(genmesh::Triangle{x, y, z}) => {
-                                    let mut triangle = make_triangle(&obj, x, y, z, object_material.clone());
+                                genmesh::Polygon::PolyTri(genmesh::Triangle { x, y, z }) => {
+                                    let mut triangle =
+                                        make_triangle(&obj, x, y, z, object_material.clone());
                                     triangle.scale(scale);
-                                    triangle.transform(&transform);
+                                    triangle.transform(transform);
                                     let triangle = Arc::new(triangle);
                                     if emissive {
                                         lights.push(Lamp::Shape(triangle.clone()));
                                     }
 
                                     objects.push(triangle);
-                                },
+                                }
                                 _ => {}
                             }
                         }
                     }
                 }
-            },
-            Object::Lamp(light) => lights.push(light)
+            }
+            Object::Lamp(light) => lights.push(light),
         }
     }
 
@@ -211,7 +231,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(entry: Entry, make_path:
     Ok(World {
         sky: sky,
         lights: lights,
-        objects: Box::new(tree) as Box<ObjectContainer + 'static + Send + Sync>
+        objects: Box::new(tree) as Box<ObjectContainer<R> + 'static + Send + Sync>,
     })
 }
 
@@ -223,36 +243,45 @@ fn vertex_to_vector(v: &[f32; 3]) -> Vector3<f64> {
     Vector3::new(v[0] as f64, v[1] as f64, v[2] as f64)
 }
 
-fn make_triangle<M>(
+fn make_triangle<M: obj::GenPolygon, R: Rng>(
     obj: &obj::Obj<M>,
-    (v1, _t1, n1): (usize, Option<usize>, Option<usize>),
-    (v2, _t2, n2): (usize, Option<usize>, Option<usize>),
-    (v3, _t3, n3): (usize, Option<usize>, Option<usize>),
-    material: Arc<Box<Material + 'static + Send + Sync>>
-) -> shapes::Shape {
-    let v1 = vertex_to_point(&obj.position()[v1]);
-    let v2 = vertex_to_point(&obj.position()[v2]);
-    let v3 = vertex_to_point(&obj.position()[v3]);
+    obj::IndexTuple(v1, _t1, n1): obj::IndexTuple,
+    obj::IndexTuple(v2, _t2, n2): obj::IndexTuple,
+    obj::IndexTuple(v3, _t3, n3): obj::IndexTuple,
+    material: Arc<Box<Material<R> + 'static + Send + Sync>>,
+) -> shapes::Shape<R> {
+    let v1 = vertex_to_point(&obj.position[v1]);
+    let v2 = vertex_to_point(&obj.position[v2]);
+    let v3 = vertex_to_point(&obj.position[v3]);
 
     let (n1, n2, n3) = match (n1, n2, n3) {
         (Some(n1), Some(n2), Some(n3)) => {
-            let n1 = vertex_to_vector(&obj.normal()[n1]);
-            let n2 = vertex_to_vector(&obj.normal()[n2]);
-            let n3 = vertex_to_vector(&obj.normal()[n3]);
+            let n1 = vertex_to_vector(&obj.normal[n1]);
+            let n2 = vertex_to_vector(&obj.normal[n2]);
+            let n3 = vertex_to_vector(&obj.normal[n3]);
             (n1, n2, n3)
-        },
+        }
         _ => {
-            let a = v2.sub_p(&v1);
-            let b = v3.sub_p(&v1);
-            let normal = a.cross(&b).normalize();
+            let a = v2 - &v1;
+            let b = v3 - &v1;
+            let normal = a.cross(b).normalize();
             (normal, normal, normal)
         }
     };
 
     shapes::Triangle {
-        v1: shapes::Vertex { position: v1, normal: n1 },
-        v2: shapes::Vertex { position: v2, normal: n2 },
-        v3: shapes::Vertex { position: v3, normal: n3 },
-        material: material
+        v1: shapes::Vertex {
+            position: v1,
+            normal: n1,
+        },
+        v2: shapes::Vertex {
+            position: v2,
+            normal: n2,
+        },
+        v3: shapes::Vertex {
+            position: v3,
+            normal: n3,
+        },
+        material: material,
     }
 }

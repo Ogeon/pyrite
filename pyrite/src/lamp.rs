@@ -1,34 +1,39 @@
 use std;
 use std::sync::Arc;
 
-use cgmath::{Vector, EuclideanVector, Vector3, Point, Point3, Ray3};
+use cgmath::{InnerSpace, Point3, Vector3};
+use collision::Ray3;
 
 use rand::Rng;
 
-use config::Prelude;
 use config::entry::Entry;
+use config::Prelude;
 
-use tracer::{self, Material, ParametricValue, Color};
+use math::utils::{sample_cone, sample_hemisphere, sample_sphere};
 use shapes::Shape;
+use tracer::{self, Color, Material, ParametricValue};
 use world;
-use math::utils::{sample_cone, sample_sphere, sample_hemisphere};
 
-pub enum Lamp {
+pub enum Lamp<R: Rng> {
     Directional {
         direction: Vector3<f64>,
         width: f64,
-        color: Box<Color>
+        color: Box<Color>,
     },
     Point(Point3<f64>, Box<Color>),
-    Shape(Arc<Shape>)
+    Shape(Arc<Shape<R>>),
 }
 
-impl Lamp {
-    pub fn sample<R: Rng>(&self, rng: &mut R, target: Point3<f64>) -> Sample {
+impl<R: Rng> Lamp<R> {
+    pub fn sample(&self, rng: &mut R, target: Point3<f64>) -> Sample<R> {
         match *self {
-            Lamp::Directional { direction, width, ref color } => {
+            Lamp::Directional {
+                direction,
+                width,
+                ref color,
+            } => {
                 let dir = if width > 0.0 {
-                    sample_cone(rng, &direction, width)
+                    sample_cone(rng, direction, width)
                 } else {
                     direction
                 };
@@ -37,26 +42,28 @@ impl Lamp {
                     direction: dir,
                     sq_distance: None,
                     surface: Surface::Color(&**color),
-                    weight: 1.0
+                    weight: 1.0,
                 }
-            },
+            }
             Lamp::Point(ref center, ref color) => {
-                let v = center.sub_p(&target);
-                let distance = v.length2();
+                let v = center - target;
+                let distance = v.magnitude2();
                 Sample {
                     direction: v.normalize(),
                     sq_distance: Some(distance),
                     surface: Surface::Color(&**color),
-                    weight: 4.0 * std::f64::consts::PI / distance
+                    weight: 4.0 * std::f64::consts::PI / distance,
                 }
-            },
+            }
             Lamp::Shape(ref shape) => {
-                let ray = shape.sample_towards(rng, &target).expect("trying to use infinite shape in direct lighting");
-                let v = ray.origin.sub_p(&target);
-                let distance = v.length2();
+                let ray = shape
+                    .sample_towards(rng, &target)
+                    .expect("trying to use infinite shape in direct lighting");
+                let v = ray.origin - target;
+                let distance = v.magnitude2();
                 let direction = v.normalize();
                 let weight = shape.solid_angle_towards(&target).unwrap_or_else(|| {
-                    let cos_in = ray.direction.dot(& -direction).abs();
+                    let cos_in = ray.direction.dot(-direction).abs();
                     cos_in * shape.surface_area() / distance
                 });
                 Sample {
@@ -64,86 +71,88 @@ impl Lamp {
                     sq_distance: Some(distance),
                     surface: Surface::Physical {
                         normal: ray,
-                        material: shape.get_material()
+                        material: shape.get_material(),
                     },
-                    weight: weight
+                    weight: weight,
                 }
             }
         }
     }
 
-    pub fn sample_ray<R: Rng>(&self, rng: &mut R) -> Option<RaySample> {
+    pub fn sample_ray(&self, rng: &mut R) -> Option<RaySample<R>> {
         match *self {
-            Lamp::Directional { .. } => {
-                None
-            },
+            Lamp::Directional { .. } => None,
             Lamp::Point(center, ref color) => {
                 let direction = sample_sphere(rng);
                 Some(RaySample {
                     ray: Ray3::new(center, direction),
                     surface: Surface::Color(&**color),
-                    weight: (4.0 * std::f64::consts::PI)
+                    weight: (4.0 * std::f64::consts::PI),
                 })
-            },
+            }
             Lamp::Shape(ref shape) => {
-                let normal = shape.sample_point(rng).expect("trying to use infinite shape as lamp");
-                let direction = sample_hemisphere(rng, &normal.direction);
+                let normal = shape
+                    .sample_point(rng)
+                    .expect("trying to use infinite shape as lamp");
+                let direction = sample_hemisphere(rng, normal.direction);
                 Some(RaySample {
                     ray: Ray3::new(normal.origin, direction),
                     surface: Surface::Physical {
                         normal: normal,
-                        material: shape.get_material()
+                        material: shape.get_material(),
                     },
-                    weight: shape.surface_area()
+                    weight: shape.surface_area(),
                 })
             }
         }
     }
 }
 
-pub struct Sample<'a> {
+pub struct Sample<'a, R: Rng> {
     pub direction: Vector3<f64>,
     pub sq_distance: Option<f64>,
-    pub surface: Surface<'a>,
+    pub surface: Surface<'a, R>,
     pub weight: f64,
 }
 
-pub enum Surface<'a> {
+pub enum Surface<'a, R: Rng> {
     Physical {
         normal: Ray3<f64>,
-        material: &'a Material
+        material: &'a Material<R>,
     },
     Color(&'a Color),
 }
 
-pub struct RaySample<'a> {
+pub struct RaySample<'a, R: Rng> {
     pub ray: Ray3<f64>,
-    pub surface: Surface<'a>,
+    pub surface: Surface<'a, R>,
     pub weight: f64,
 }
 
-pub fn register_types(context: &mut Prelude) {
+pub fn register_types<R: Rng + 'static>(context: &mut Prelude) {
     let mut group = context.object("Light".into());
-    group.object("Directional".into()).add_decoder(decode_directional);
-    group.object("Point".into()).add_decoder(decode_point);
+    group
+        .object("Directional".into())
+        .add_decoder(decode_directional::<R>);
+    group.object("Point".into()).add_decoder(decode_point::<R>);
 }
 
-fn decode_directional(entry: Entry) -> Result<world::Object, String> {
+fn decode_directional<R: Rng>(entry: Entry) -> Result<world::Object<R>, String> {
     let fields = try!(entry.as_object().ok_or("not an object".into()));
 
     let direction: Vector3<_> = match fields.get("direction") {
         Some(v) => try!(v.dynamic_decode(), "direction"),
-        None => return Err("missing field 'direction'".into())
+        None => return Err("missing field 'direction'".into()),
     };
 
     let width: f64 = match fields.get("width") {
         Some(v) => try!(v.decode(), "width"),
-        None => 0.0
+        None => 0.0,
     };
 
     let color = match fields.get("color") {
         Some(v) => try!(tracer::decode_parametric_number(v), "color"),
-        None => return Err("missing field 'color'".into())
+        None => return Err("missing field 'color'".into()),
     };
 
     Ok(world::Object::Lamp(Lamp::Directional {
@@ -153,17 +162,17 @@ fn decode_directional(entry: Entry) -> Result<world::Object, String> {
     }))
 }
 
-fn decode_point(entry: Entry) -> Result<world::Object, String> {
+fn decode_point<R: Rng>(entry: Entry) -> Result<world::Object<R>, String> {
     let fields = try!(entry.as_object().ok_or("not an object".into()));
 
     let position = match fields.get("position") {
         Some(v) => try!(v.dynamic_decode(), "position"),
-        None => return Err("missing field 'position'".into())
+        None => return Err("missing field 'position'".into()),
     };
 
     let color = match fields.get("color") {
         Some(v) => try!(tracer::decode_parametric_number(v), "color"),
-        None => return Err("missing field 'color'".into())
+        None => return Err("missing field 'color'".into()),
     };
 
     Ok(world::Object::Lamp(Lamp::Point(position, color)))

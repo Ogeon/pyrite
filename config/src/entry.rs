@@ -2,27 +2,24 @@
 
 use std::collections::HashMap;
 
-use Value;
-use NodeType;
-use Parser;
-use Number;
-use Decoder;
 use Decode;
+use Decoder;
+use NodeType;
+use Number;
+use Parser;
+use Value;
 
 ///An entry in a parsed configuration.
 #[derive(Clone)]
 pub struct Entry<'a> {
     cfg: &'a Parser,
-    id: usize
+    id: usize,
 }
 
 impl<'a> Entry<'a> {
     ///Get the root entry from a particular parser.
     pub fn root_of(cfg: &Parser) -> Entry {
-        Entry {
-            cfg: cfg,
-            id: 0
-        }
+        Entry { cfg: cfg, id: 0 }
     }
 
     ///Use this entry as a primitive value, if possible.
@@ -39,7 +36,7 @@ impl<'a> Entry<'a> {
         if let NodeType::List(ref list) = self.cfg.get_concrete_node(self.id).ty {
             Some(List {
                 cfg: self.cfg,
-                list: list
+                list: list,
             })
         } else {
             None
@@ -48,11 +45,16 @@ impl<'a> Entry<'a> {
 
     ///Use this entry as an object, if possible.
     pub fn as_object(&self) -> Option<Object<'a>> {
-        if let NodeType::Object { ref base, ref children, .. } = self.cfg.get_concrete_node(self.id).ty {
+        if let NodeType::Object {
+            ref base,
+            ref children,
+            ..
+        } = self.cfg.get_concrete_node(self.id).ty
+        {
             Some(Object {
                 cfg: self.cfg,
                 template: base.clone(),
-                children: children
+                children: children,
             })
         } else {
             None
@@ -61,12 +63,18 @@ impl<'a> Entry<'a> {
 
     ///Assume that this is an object and get one of its entries.
     pub fn get(&self, key: &str) -> Entry<'a> {
-        self.as_object().expect("the entry is not an object").get(key).expect("invalid key")
+        self.as_object()
+            .expect("the entry is not an object")
+            .get(key)
+            .expect("invalid key")
     }
 
     ///Assume that this is a list and get one of its elements.
     pub fn index(&self, index: usize) -> Entry<'a> {
-        self.as_list().expect("the entry is not a list").get(index).expect("invalid index")
+        self.as_list()
+            .expect("the entry is not a list")
+            .get(index)
+            .expect("invalid index")
     }
 
     ///Try to decode this entry.
@@ -76,14 +84,15 @@ impl<'a> Entry<'a> {
 
     ///Try to dynamically decode this entry.
     pub fn dynamic_decode<T: Decode>(&self) -> Result<T, String> {
-        self.cfg.get_decoder(self.id)
+        self.cfg
+            .get_decoder(self.id)
             .ok_or("could not decode dynamically".into())
             .and_then(|&Decoder(ref decoder)| decoder(self.clone()))
     }
 }
 
 ///A trait for types that can be decoded statically.
-pub trait FromEntry<'a> {
+pub trait FromEntry<'a>: Sized {
     ///Try to decode this type from an entry.
     fn from_entry(entry: Entry<'a>) -> Result<Self, String>;
 }
@@ -100,21 +109,31 @@ impl<'a, T: FromEntry<'a>> FromEntry<'a> for Vec<T> {
 
 impl<'a> FromEntry<'a> for &'a str {
     fn from_entry(entry: Entry<'a>) -> Result<&'a str, String> {
-        entry.as_value().ok_or("expected a value".into()).and_then(|v| if let &Value::String(ref s) = v {
-            Ok(&**s)
-        } else {
-            Err("expected a string".into())
-        })
+        entry
+            .as_value()
+            .ok_or("expected a value".into())
+            .and_then(|v| {
+                if let &Value::String(ref s) = v {
+                    Ok(&**s)
+                } else {
+                    Err("expected a string".into())
+                }
+            })
     }
 }
 
 impl<'a> FromEntry<'a> for String {
     fn from_entry(entry: Entry<'a>) -> Result<String, String> {
-        entry.as_value().ok_or("expected a value".into()).and_then(|v| if let &Value::String(ref s) = v {
-            Ok(s.clone())
-        } else {
-            Err("expected a string".into())
-        })
+        entry
+            .as_value()
+            .ok_or("expected a value".into())
+            .and_then(|v| {
+                if let &Value::String(ref s) = v {
+                    Ok(s.clone())
+                } else {
+                    Err("expected a string".into())
+                }
+            })
     }
 }
 
@@ -201,7 +220,7 @@ tuple_from_entry!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
 #[derive(Clone)]
 pub struct List<'a> {
     cfg: &'a Parser,
-    list: &'a [usize]
+    list: &'a [usize],
 }
 
 ///A list in a parsed configuration.
@@ -210,7 +229,7 @@ impl<'a> List<'a> {
     pub fn get(&self, index: usize) -> Option<Entry<'a>> {
         self.list.get(index).map(|&id| Entry {
             cfg: self.cfg,
-            id: id
+            id: id,
         })
     }
 
@@ -218,7 +237,7 @@ impl<'a> List<'a> {
     pub fn iter(&self) -> Items {
         Items {
             cfg: self.cfg,
-            iter: self.list.iter()
+            iter: self.list.iter(),
         }
     }
 
@@ -235,7 +254,7 @@ impl<'a> IntoIterator for List<'a> {
     fn into_iter(self) -> Items<'a> {
         Items {
             cfg: self.cfg,
-            iter: self.list.iter()
+            iter: self.list.iter(),
         }
     }
 }
@@ -252,7 +271,7 @@ impl<'a> IntoIterator for &'a List<'a> {
 ///An iterator for list items.
 pub struct Items<'a> {
     cfg: &'a Parser,
-    iter: ::std::slice::Iter<'a, usize>
+    iter: ::std::slice::Iter<'a, usize>,
 }
 
 impl<'a> Iterator for Items<'a> {
@@ -261,7 +280,7 @@ impl<'a> Iterator for Items<'a> {
     fn next(&mut self) -> Option<Entry<'a>> {
         self.iter.next().map(|&id| Entry {
             cfg: self.cfg,
-            id: id
+            id: id,
         })
     }
 }
@@ -271,7 +290,7 @@ impl<'a> Iterator for Items<'a> {
 pub struct Object<'a> {
     cfg: &'a Parser,
     template: Option<usize>,
-    children: &'a HashMap<String, usize>
+    children: &'a HashMap<String, usize>,
 }
 
 impl<'a> Object<'a> {
@@ -284,18 +303,23 @@ impl<'a> Object<'a> {
             if let Some(&child) = children.get(key) {
                 return Some(Entry {
                     cfg: self.cfg,
-                    id: child
-                })
+                    id: child,
+                });
             } else {
                 if let Some(t) = template {
-                    if let NodeType::Object { base: ref t, children: ref c, .. } = self.cfg.get_concrete_node(t).ty {
+                    if let NodeType::Object {
+                        base: ref t,
+                        children: ref c,
+                        ..
+                    } = self.cfg.get_concrete_node(t).ty
+                    {
                         children = c;
                         template = t.clone();
                     } else {
-                        return None
+                        return None;
                     }
                 } else {
-                    return None
+                    return None;
                 }
             }
         }
@@ -305,7 +329,7 @@ impl<'a> Object<'a> {
     pub fn iter(&self) -> Entries {
         Entries {
             cfg: self.cfg,
-            iter: self.children.iter()
+            iter: self.children.iter(),
         }
     }
 }
@@ -317,7 +341,7 @@ impl<'a> IntoIterator for Object<'a> {
     fn into_iter(self) -> Entries<'a> {
         Entries {
             cfg: self.cfg,
-            iter: self.children.iter()
+            iter: self.children.iter(),
         }
     }
 }
@@ -334,16 +358,21 @@ impl<'a> IntoIterator for &'a Object<'a> {
 ///An iterator for object entries.
 pub struct Entries<'a> {
     cfg: &'a Parser,
-    iter: ::std::collections::hash_map::Iter<'a, String, usize>
+    iter: ::std::collections::hash_map::Iter<'a, String, usize>,
 }
 
 impl<'a> Iterator for Entries<'a> {
     type Item = (&'a str, Entry<'a>);
 
     fn next(&mut self) -> Option<(&'a str, Entry<'a>)> {
-        self.iter.next().map(|(key, &entry)| (&**key, Entry {
-            cfg: self.cfg,
-            id: entry
-        }))
+        self.iter.next().map(|(key, &entry)| {
+            (
+                &**key,
+                Entry {
+                    cfg: self.cfg,
+                    id: entry,
+                },
+            )
+        })
     }
 }

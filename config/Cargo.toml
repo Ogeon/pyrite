@@ -8,9 +8,9 @@ build = "build.rs"
 name = "pyrite_config"
 
 [dependencies]
-anymap = "0.11"
-lalrpop-util = "0.6"
+anymap = "0.12"
+lalrpop-util = "0.18"
 
 
 [build-dependencies]
-lalrpop = "0.6"
+lalrpop = {version = "0.18", features = ["lexer"]}

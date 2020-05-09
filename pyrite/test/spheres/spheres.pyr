@@ -12,7 +12,7 @@ renderer = Renderer.Simple {
 	spectrum.samples = 10
 	spectrum.bins = 50
 	tile_size = 32
-	light_samples = 2
+	light_samples = 20
 }
 
 camera = Camera.Perspective {

@@ -1,8 +1,7 @@
-use cgmath::{Point, Point3};
-use cgmath::{Vector, EuclideanVector, Vector3, Quaternion};
+use cgmath::{EuclideanSpace, InnerSpace, Point3, Quaternion, Vector3};
 
-use config::Prelude;
 use config::entry::Entry;
+use config::Prelude;
 
 use tracer::ParametricValue;
 
@@ -20,14 +19,10 @@ impl ParametricValue<Point3<f64>, f64> for Mandelbulb {
         let mut z = point.to_vec();
         let mut r = 0.0;
         let mut dr = 1.0;
-        let dc = if self.constant.is_none() {
-            1.0
-        } else {
-            0.0
-        };
+        let dc = if self.constant.is_none() { 1.0 } else { 0.0 };
 
         for _ in 0..self.iterations {
-            r = z.length();
+            r = z.magnitude();
             if r > self.threshold {
                 break;
             }
@@ -39,8 +34,12 @@ impl ParametricValue<Point3<f64>, f64> for Mandelbulb {
             let zr = r.powf(self.power);
             theta *= self.power;
             phi *= self.power;
-            z = Vector3::new(zr * theta.sin() * phi.cos(), zr * phi.sin() * theta.sin(), zr * theta.cos());
-            z.add_self_v(&self.constant.unwrap_or(point.to_vec()));
+            z = Vector3::new(
+                zr * theta.sin() * phi.cos(),
+                zr * phi.sin() * theta.sin(),
+                zr * theta.cos(),
+            );
+            z += self.constant.unwrap_or(point.to_vec());
         }
 
         0.5 * r.ln() * r / dr
@@ -52,7 +51,7 @@ struct QuaternionJulia {
     threshold: f64,
     constant: Quaternion<f64>,
     slice_plane: f64,
-    ty: QuatMul
+    ty: QuatMul,
 }
 
 impl ParametricValue<Point3<f64>, f64> for QuaternionJulia {
@@ -68,7 +67,7 @@ impl ParametricValue<Point3<f64>, f64> for QuaternionJulia {
             }
 
             dz = self.ty.pow_prim(&z, &dz);
-            z = self.ty.pow(&z).add_q(&self.constant);
+            z = self.ty.pow(&z) + self.constant;
         }
 
         0.5 * r.ln() * r / dz.magnitude()
@@ -84,17 +83,17 @@ enum QuatMul {
 impl QuatMul {
     fn pow(&self, z: &Quaternion<f64>) -> Quaternion<f64> {
         match *self {
-            QuatMul::Regular => z.mul_q(z),
-            QuatMul::Cubic => z.mul_q(z).mul_q(z),
+            QuatMul::Regular => z * z,
+            QuatMul::Cubic => z * z * z,
             QuatMul::Bicomplex => bicomplex_mul(z, z),
         }
     }
 
     fn pow_prim(&self, z: &Quaternion<f64>, dz: &Quaternion<f64>) -> Quaternion<f64> {
         match *self {
-            QuatMul::Regular => dz.mul_q(&z).mul_s(2.0),
-            QuatMul::Cubic => dz.mul_q(&z).mul_q(&z).mul_s(3.0),
-            QuatMul::Bicomplex => bicomplex_mul(&bicomplex_mul(dz, z), z).mul_s(2.0),
+            QuatMul::Regular => dz * z * 2.0,
+            QuatMul::Cubic => dz * z * z * 3.0,
+            QuatMul::Bicomplex => bicomplex_mul(&bicomplex_mul(dz, z), z) * 2.0,
         }
     }
 }
@@ -112,19 +111,28 @@ fn bicomplex_mul(a: &Quaternion<f64>, b: &Quaternion<f64>) -> Quaternion<f64> {
     Quaternion::new(x, y, z, w)
 }
 
-
 pub fn register_types(context: &mut Prelude) {
     {
         let mut group = context.object("RayMarched".into());
-        group.object("Mandelbulb".into()).add_decoder(decode_mandelbulb);
-        group.object("QuaternionJulia".into()).add_decoder(decode_quaternion_julia);
+        group
+            .object("Mandelbulb".into())
+            .add_decoder(decode_mandelbulb);
+        group
+            .object("QuaternionJulia".into())
+            .add_decoder(decode_quaternion_julia);
     }
 
     {
         let mut group = context.object("QuaternionJulia".into());
-        group.object("Regular".into()).add_decoder(decode_quat_mul_regular);
-        group.object("Cubic".into()).add_decoder(decode_quat_mul_cubic);
-        group.object("Bicomplex".into()).add_decoder(decode_quat_mul_bicomplex);
+        group
+            .object("Regular".into())
+            .add_decoder(decode_quat_mul_regular);
+        group
+            .object("Cubic".into())
+            .add_decoder(decode_quat_mul_cubic);
+        group
+            .object("Bicomplex".into())
+            .add_decoder(decode_quat_mul_bicomplex);
     }
 }
 
@@ -133,22 +141,22 @@ fn decode_mandelbulb(entry: Entry) -> Result<DistanceEstimator, String> {
 
     let iterations = match items.get("iterations") {
         Some(v) => try!(v.decode(), "iterations"),
-        None => return Err("missing field 'iterations'".into())
+        None => return Err("missing field 'iterations'".into()),
     };
 
     let threshold = match items.get("threshold") {
         Some(v) => try!(v.decode(), "threshold"),
-        None => return Err("missing field 'threshold'".into())
+        None => return Err("missing field 'threshold'".into()),
     };
 
     let power = match items.get("power") {
         Some(v) => try!(v.decode(), "power"),
-        None => return Err("missing field 'power'".into())
+        None => return Err("missing field 'power'".into()),
     };
 
     let constant = match items.get("constant") {
         Some(v) => Some(try!(v.dynamic_decode(), "constant")),
-        None => None
+        None => None,
     };
 
     Ok(Box::new(Mandelbulb {
@@ -164,27 +172,27 @@ fn decode_quaternion_julia(entry: Entry) -> Result<DistanceEstimator, String> {
 
     let iterations = match items.get("iterations") {
         Some(v) => try!(v.decode(), "iterations"),
-        None => return Err("missing field 'iterations'".into())
+        None => return Err("missing field 'iterations'".into()),
     };
 
     let threshold = match items.get("threshold") {
         Some(v) => try!(v.decode(), "threshold"),
-        None => return Err("missing field 'threshold'".into())
+        None => return Err("missing field 'threshold'".into()),
     };
 
     let constant = match items.get("constant") {
         Some(v) => try!(v.dynamic_decode(), "constant"),
-        None => return Err("missing field 'constant'".into())
+        None => return Err("missing field 'constant'".into()),
     };
 
     let slice_plane = match items.get("slice_plane") {
         Some(v) => try!(v.decode(), "slice_plane"),
-        None => return Err("missing field 'slice_plane'".into())
+        None => return Err("missing field 'slice_plane'".into()),
     };
 
     let ty = match items.get("type") {
         Some(v) => try!(v.dynamic_decode(), "type"),
-        None => QuatMul::Regular
+        None => QuatMul::Regular,
     };
 
     Ok(Box::new(QuaternionJulia {

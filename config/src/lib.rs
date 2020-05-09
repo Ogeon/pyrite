@@ -4,18 +4,22 @@ extern crate anymap;
 extern crate lalrpop_util;
 
 mod ast;
-mod parser;
 pub mod entry;
+mod parser;
 pub mod prelude;
 
-use std::path::Path;
-use std::fs::File;
-use std::io::Read;
+lalrpop_mod!(grammar);
+
 use std::collections::HashMap;
 use std::fmt;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 
-use anymap::AnyMap;
 use anymap::any::Any;
+use anymap::AnyMap;
+
+use lalrpop_util::lalrpop_mod;
 
 use entry::Entry;
 
@@ -26,7 +30,7 @@ pub use prelude::Prelude;
 #[derive(Debug)]
 pub enum Error {
     ///Failed to parse the source.
-    Parse(parser::Error),
+    Parse(String),
     ///Failed to read a file.
     Io(std::io::Error),
     ///Something should be an object, but it wasn't.
@@ -38,7 +42,7 @@ pub enum Error {
     ///Something was reassigned.
     Reassign(StackTrace),
     ///An attempt to refer to a local value in a list.
-    LocalPathInList(StackTrace, Vec<String>)
+    LocalPathInList(StackTrace, Vec<String>),
 }
 
 impl fmt::Display for Error {
@@ -48,16 +52,22 @@ impl fmt::Display for Error {
             Error::Io(ref e) => write!(f, "IO error: {:?}", e),
             Error::NotAnObject(ref p) => write!(f, "{} is not an object", p),
             Error::CircularReference(ref p) => write!(f, "circular reference detected in {}", p),
-            Error::TooManyArguments(ref p, len) => write!(f, "too many arguments in {}. {} were expected", p, len),
+            Error::TooManyArguments(ref p, len) => {
+                write!(f, "too many arguments in {}. {} were expected", p, len)
+            }
             Error::Reassign(ref p) => write!(f, "{} cannot be reassigned", p),
-            Error::LocalPathInList(ref trace, ref p) => write!(f, "the item {:?} cannot be accessed from within the list {}", p, trace),
+            Error::LocalPathInList(ref trace, ref p) => write!(
+                f,
+                "the item {:?} cannot be accessed from within the list {}",
+                p, trace
+            ),
         }
     }
 }
 
-impl From<parser::Error> for Error {
-    fn from(e: parser::Error) -> Error {
-        Error::Parse(e)
+impl<'s> From<parser::Error<'s>> for Error {
+    fn from(e: parser::Error<'s>) -> Error {
+        Error::Parse(e.to_string())
     }
 }
 
@@ -70,7 +80,7 @@ impl From<std::io::Error> for Error {
 ///Parses the configuration source.
 pub struct Parser {
     nodes: Vec<Node>,
-    prelude: HashMap<String, usize>
+    prelude: HashMap<String, usize>,
 }
 
 impl Parser {
@@ -81,11 +91,11 @@ impl Parser {
                 NodeType::Object {
                     base: None,
                     children: HashMap::new(),
-                    arguments: vec![]
+                    arguments: vec![],
                 },
-                0
+                0,
             )],
-            prelude: HashMap::new()
+            prelude: HashMap::new(),
         }
     }
 
@@ -115,7 +125,7 @@ impl Parser {
             let node = &self.nodes[current_template];
             current_template = match node.ty {
                 NodeType::Link(t) => t,
-                _ => return node
+                _ => return node,
             };
         }
     }
@@ -125,7 +135,7 @@ impl Parser {
         loop {
             match self.nodes[current_template].ty {
                 NodeType::Link(t) => current_template = t,
-                _ => break
+                _ => break,
             }
         }
 
@@ -144,7 +154,7 @@ impl Parser {
             current_id = match node.ty {
                 NodeType::Link(t) => t,
                 NodeType::Object { base: Some(b), .. } => b,
-                _ => return None
+                _ => return None,
             };
         }
     }
@@ -155,12 +165,12 @@ impl Parser {
                 *s = NodeType::Object {
                     base: None,
                     children: HashMap::new(),
-                    arguments: vec![]
+                    arguments: vec![],
                 };
                 true
-            },
+            }
             &mut NodeType::Object { .. } => true,
-            _ => false
+            _ => false,
         }
     }
 
@@ -168,10 +178,14 @@ impl Parser {
         let mut current = self.get_concrete_node(id);
         loop {
             match current.ty {
-                NodeType::Object { ref arguments, .. } if arguments.len() > 0 => return Some(arguments.clone()),
-                NodeType::Object { base: Some(id), ..} | NodeType::Link(id) => current = &self.nodes[id],
+                NodeType::Object { ref arguments, .. } if arguments.len() > 0 => {
+                    return Some(arguments.clone())
+                }
+                NodeType::Object { base: Some(id), .. } | NodeType::Link(id) => {
+                    current = &self.nodes[id]
+                }
                 NodeType::Object { base: None, .. } => return Some(vec![]),
-                _ => return None
+                _ => return None,
             }
         }
     }
@@ -181,7 +195,9 @@ impl Parser {
 
         loop {
             match self.nodes[node].ty {
-                NodeType::Object { base, ref children, .. } => {
+                NodeType::Object {
+                    base, ref children, ..
+                } => {
                     if let Some(&child) = children.get(key) {
                         return Some(child);
                     } else if let Some(base) = base {
@@ -189,9 +205,9 @@ impl Parser {
                     } else {
                         return None;
                     }
-                },
+                }
                 NodeType::Link(base) => node = base,
-                _ => return None
+                _ => return None,
             }
         }
     }
@@ -202,19 +218,22 @@ impl Parser {
         while id != 0 {
             let parent = self.nodes[id].parent;
             match self.nodes[parent].ty {
-                NodeType::Object { ref children, ..} => {
+                NodeType::Object { ref children, .. } => {
                     for (ident, &child) in children {
                         if child == id {
                             stack.push(Selection::Ident(ident.clone()));
                             break;
                         }
                     }
-                },
+                }
                 NodeType::List(ref list) => {
-                    let i = list.iter().position(|&child| child == id).expect("child not found in parent list");
+                    let i = list
+                        .iter()
+                        .position(|&child| child == id)
+                        .expect("child not found in parent list");
                     stack.push(Selection::Index(i));
-                },
-                _ => panic!("non-object and non-list is set as parent")
+                }
+                _ => panic!("non-object and non-list is set as parent"),
             }
             id = parent;
         }
@@ -225,13 +244,15 @@ impl Parser {
 
     fn find_in_prelude(&self, path: &[String]) -> Option<usize> {
         let mut path = path.iter();
-        let mut current_id = path.next().and_then(|key| self.prelude.get(key).map(|&id| id));
+        let mut current_id = path
+            .next()
+            .and_then(|key| self.prelude.get(key).map(|&id| id));
 
         while let (Some(id), Some(key)) = (current_id, path.next()) {
             if let NodeType::Object { ref children, .. } = self.nodes[id].ty {
                 current_id = children.get(key).map(|&child| child);
             } else {
-                return None
+                return None;
             }
         }
 
@@ -253,7 +274,7 @@ impl Parser {
             self.nodes[id].ty = NodeType::Object {
                 base: Some(base),
                 children: HashMap::new(),
-                arguments: vec![]
+                arguments: vec![],
             }
         }
         Ok(())
@@ -263,9 +284,8 @@ impl Parser {
         let mut current = link_id;
         while current != target_id {
             current = match self.nodes[current].ty {
-                NodeType::Object { base: Some(t), .. } |
-                NodeType::Link(t) => t,
-                _ => return false
+                NodeType::Object { base: Some(t), .. } | NodeType::Link(t) => t,
+                _ => return false,
             };
         }
 
@@ -273,7 +293,11 @@ impl Parser {
     }
 }
 
-fn parse_file_in<P: AsRef<Path>>(path: P, mut root: Object, new_root: Option<ast::Path>) -> Result<(), Error> {
+fn parse_file_in<P: AsRef<Path>>(
+    path: P,
+    mut root: Object,
+    new_root: Option<ast::Path>,
+) -> Result<(), Error> {
     let mut source = String::new();
     let mut file = try!(File::open(&path));
     try!(file.read_to_string(&mut source));
@@ -300,8 +324,8 @@ fn parse<P: AsRef<Path>>(path: P, source: &str, mut root: Object) -> Result<(), 
             ast::Statement::Include(file, new_root) => {
                 let path = path.as_ref().join(file);
                 try!(parse_file_in(path, root.borrow(), new_root))
-            },
-            ast::Statement::Assign(path, value) => try!(root.assign(path.path, value))
+            }
+            ast::Statement::Assign(path, value) => try!(root.assign(path.path, value)),
         }
     }
 
@@ -316,9 +340,10 @@ impl<T: Any> Decode for T {}
 struct Decoder<T: Decode>(Box<Fn(Entry) -> Result<T, String>>);
 
 impl<T: Decode> Decoder<T> {
-    fn new<F>(decode_fn: F) -> Decoder<T> where
+    fn new<F>(decode_fn: F) -> Decoder<T>
+    where
         F: Fn(Entry) -> Result<T, String>,
-        F: 'static
+        F: 'static,
     {
         Decoder(Box::new(decode_fn))
     }
@@ -328,7 +353,7 @@ impl<T: Decode> Decoder<T> {
 struct Node {
     ty: NodeType,
     parent: usize,
-    decoder: AnyMap
+    decoder: AnyMap,
 }
 
 impl Node {
@@ -336,7 +361,7 @@ impl Node {
         Node {
             ty: ty,
             parent: parent,
-            decoder: AnyMap::new()
+            decoder: AnyMap::new(),
         }
     }
 }
@@ -357,7 +382,7 @@ enum NodeType {
         arguments: Vec<String>,
     },
     Value(Value),
-    List(Vec<usize>)
+    List(Vec<usize>),
 }
 
 macro_rules! impl_value_from_float {
@@ -386,7 +411,7 @@ pub enum Value {
     ///A float or an int.
     Number(Number),
     ///A string.
-    String(String)
+    String(String),
 }
 
 impl_value_from_float!(f32, f64);
@@ -401,7 +426,7 @@ impl From<String> for Value {
 #[derive(Clone, Debug)]
 enum Selection {
     Ident(String),
-    Index(usize)
+    Index(usize),
 }
 
 ///The path to something in the configuration.
@@ -416,7 +441,7 @@ impl fmt::Display for StackTrace {
         match path.next() {
             Some(&Selection::Ident(ref ident)) => try!(ident.fmt(f)),
             Some(&Selection::Index(index)) => try!(write!(f, "{{root}}[{}]", index)),
-            None => try!("{root}".fmt(f))
+            None => try!("{root}".fmt(f)),
         }
 
         for s in path {
@@ -441,7 +466,7 @@ impl<'a> Object<'a> {
         Object {
             cfg: cfg,
             id: 0,
-            root: 0
+            root: 0,
         }
     }
 
@@ -449,7 +474,7 @@ impl<'a> Object<'a> {
         Object {
             cfg: self.cfg,
             id: self.root,
-            root: self.root
+            root: self.root,
         }
     }
 
@@ -465,7 +490,7 @@ impl<'a> Object<'a> {
         Object {
             cfg: self.cfg,
             id: self.id,
-            root: self.root
+            root: self.root,
         }
     }
 
@@ -482,10 +507,11 @@ impl<'a> Object<'a> {
         }
     }
 
-    fn assign<P>(&mut self, path: P, value: ast::Value) -> Result<(), Error> where
-        P: IntoIterator<Item=String>,
+    fn assign<P>(&mut self, path: P, value: ast::Value) -> Result<(), Error>
+    where
+        P: IntoIterator<Item = String>,
         P::IntoIter: Iterator,
-        P::IntoIter: ExactSizeIterator
+        P::IntoIter: ExactSizeIterator,
     {
         match value {
             ast::Value::Object(ast::Object::New(values)) => {
@@ -493,13 +519,12 @@ impl<'a> Object<'a> {
                 for (path, value) in values {
                     try!(obj.assign(path.path, value));
                 }
-            },
+            }
             ast::Value::Object(ast::Object::Extension(base, Some(values))) => {
                 let base_id = match base.path_type {
                     ast::PathType::Local => try!(self.id_of(base.path)),
-                    ast::PathType::Global => try!(self.root().id_of(base.path))
+                    ast::PathType::Global => try!(self.root().id_of(base.path)),
                 };
-
 
                 let mut obj = try!(self.object(path));
                 try!(obj.set_base(base_id));
@@ -509,7 +534,7 @@ impl<'a> Object<'a> {
                         for (path, value) in values {
                             try!(obj.assign(path.path, value));
                         }
-                    },
+                    }
                     ast::ExtensionChanges::FunctionStyle(values) => {
                         if let Some(arguments) = obj.arguments() {
                             if arguments.len() < values.len() {
@@ -522,14 +547,14 @@ impl<'a> Object<'a> {
                         }
                     }
                 }
-            },
+            }
             ast::Value::Object(ast::Object::Extension(base, None)) => {
                 let base_id = match base.path_type {
                     ast::PathType::Local => try!(self.id_of(base.path)),
-                    ast::PathType::Global => try!(self.root().id_of(base.path))
+                    ast::PathType::Global => try!(self.root().id_of(base.path)),
                 };
                 try!(self.link(path, base_id));
-            },
+            }
             ast::Value::Number(number) => try!(self.value(path, Value::Number(number))),
             ast::Value::String(string) => try!(self.value(path, Value::String(string))),
             ast::Value::List(values) => {
@@ -542,15 +567,16 @@ impl<'a> Object<'a> {
         Ok(())
     }
 
-    fn object<P>(&mut self, path: P) -> Result<Object, Error> where
-        P: IntoIterator<Item=String>,
+    fn object<P>(&mut self, path: P) -> Result<Object, Error>
+    where
+        P: IntoIterator<Item = String>,
         P::IntoIter: Iterator,
-        P::IntoIter: ExactSizeIterator
+        P::IntoIter: ExactSizeIterator,
     {
         enum Action {
             Continue(usize),
             Upgrade(Option<usize>),
-            Create(Option<usize>)
+            Create(Option<usize>),
         }
 
         let path = path.into_iter();
@@ -560,13 +586,15 @@ impl<'a> Object<'a> {
 
         for ident in path {
             let child_action = match self.cfg.nodes[obj].ty {
-                NodeType::Object { base, ref children, .. } => {
+                NodeType::Object {
+                    base, ref children, ..
+                } => {
                     if let Some(id) = children.get(&ident).map(|&child| child) {
                         Action::Continue(id)
                     } else {
                         Action::Create(base.and_then(|id| self.cfg.find_child_id(id, &ident)))
                     }
-                },
+                }
                 NodeType::Link(base) => Action::Upgrade(Some(base)),
                 NodeType::Unknown => unreachable!("{}: unknown type", self.cfg.trace(obj)),
                 NodeType::List(_) => unreachable!("{}: list", self.cfg.trace(obj)),
@@ -580,7 +608,7 @@ impl<'a> Object<'a> {
                     }
 
                     obj = child;
-                },
+                }
                 Action::Upgrade(base) => {
                     if let Some(base) = base {
                         if !self.cfg.infer_object(base) {
@@ -591,7 +619,7 @@ impl<'a> Object<'a> {
                     self.cfg.nodes[obj].ty = NodeType::Object {
                         base: base,
                         children: HashMap::new(),
-                        arguments: vec![]
+                        arguments: vec![],
                     };
 
                     let child_base = base.and_then(|id| self.cfg.find_child_id(id, &ident));
@@ -599,15 +627,18 @@ impl<'a> Object<'a> {
                     let mut o = Object {
                         cfg: self.cfg,
                         id: obj,
-                        root: self.root
+                        root: self.root,
                     };
 
-                    obj = try!(o.add_child(ident, NodeType::Object {
-                        base: child_base,
-                        children: HashMap::new(),
-                        arguments: vec![]
-                    }));
-                },
+                    obj = try!(o.add_child(
+                        ident,
+                        NodeType::Object {
+                            base: child_base,
+                            children: HashMap::new(),
+                            arguments: vec![]
+                        }
+                    ));
+                }
                 Action::Create(base) => {
                     if let Some(base) = base {
                         if !self.cfg.infer_object(base) {
@@ -618,14 +649,17 @@ impl<'a> Object<'a> {
                     let mut o = Object {
                         cfg: self.cfg,
                         id: obj,
-                        root: self.root
+                        root: self.root,
                     };
 
-                    obj = try!(o.add_child(ident, NodeType::Object {
-                        base: base,
-                        children: HashMap::new(),
-                        arguments: vec![]
-                    }));
+                    obj = try!(o.add_child(
+                        ident,
+                        NodeType::Object {
+                            base: base,
+                            children: HashMap::new(),
+                            arguments: vec![]
+                        }
+                    ));
                 }
             }
         }
@@ -639,10 +673,11 @@ impl<'a> Object<'a> {
         })
     }
 
-    fn link<P>(&mut self, path: P, base_id: usize) -> Result<(), Error> where
-        P: IntoIterator<Item=String>,
+    fn link<P>(&mut self, path: P, base_id: usize) -> Result<(), Error>
+    where
+        P: IntoIterator<Item = String>,
         P::IntoIter: Iterator,
-        P::IntoIter: ExactSizeIterator
+        P::IntoIter: ExactSizeIterator,
     {
         let mut path = path.into_iter();
         let len = path.len();
@@ -657,10 +692,11 @@ impl<'a> Object<'a> {
         obj.add_child(key, NodeType::Link(base_id)).map(|_| ())
     }
 
-    fn value<P>(&mut self, path: P, value: Value) -> Result<(), Error> where
-        P: IntoIterator<Item=String>,
+    fn value<P>(&mut self, path: P, value: Value) -> Result<(), Error>
+    where
+        P: IntoIterator<Item = String>,
         P::IntoIter: Iterator,
-        P::IntoIter: ExactSizeIterator
+        P::IntoIter: ExactSizeIterator,
     {
         let mut path = path.into_iter();
         let len = path.len();
@@ -675,10 +711,11 @@ impl<'a> Object<'a> {
         obj.add_child(key, NodeType::Value(value)).map(|_| ())
     }
 
-    fn list<P>(&mut self, path: P) -> Result<List, Error> where
-        P: IntoIterator<Item=String>,
+    fn list<P>(&mut self, path: P) -> Result<List, Error>
+    where
+        P: IntoIterator<Item = String>,
         P::IntoIter: Iterator,
-        P::IntoIter: ExactSizeIterator
+        P::IntoIter: ExactSizeIterator,
     {
         let mut path = path.into_iter();
         let len = path.len();
@@ -696,13 +733,15 @@ impl<'a> Object<'a> {
         Ok(List {
             cfg: self.cfg,
             id: id,
-            root: self.root
+            root: self.root,
         })
     }
 
     fn add_child(&mut self, key: String, ty: NodeType) -> Result<usize, Error> {
         let current_child = match self.cfg.nodes[self.id].ty {
-            NodeType::Object { ref mut children, .. } => children.get(&key).map(|&child| child),
+            NodeType::Object {
+                ref mut children, ..
+            } => children.get(&key).map(|&child| child),
             NodeType::Link(_) => unreachable!("(id: {}) why am I a link?", self.id),
             NodeType::Unknown => unreachable!("(id: {}) why am I an unknown type?", self.id),
             NodeType::List(_) => unreachable!("(id: {}) why am I a list?", self.id),
@@ -711,24 +750,32 @@ impl<'a> Object<'a> {
 
         if let Some(id) = current_child {
             match ty {
-                NodeType::Object { base: Some(base_id), .. } |
-                NodeType::Link(base_id) => if self.cfg.links_to(base_id, id) {
-                    return Err(Error::CircularReference(self.cfg.trace(id)));
-                },
+                NodeType::Object {
+                    base: Some(base_id),
+                    ..
+                }
+                | NodeType::Link(base_id) => {
+                    if self.cfg.links_to(base_id, id) {
+                        return Err(Error::CircularReference(self.cfg.trace(id)));
+                    }
+                }
                 _ => {}
             }
 
             if let current_ty @ &mut NodeType::Unknown = &mut self.cfg.nodes[id].ty {
-
                 *current_ty = ty;
                 Ok(id)
             } else {
                 Err(())
-            }.map_err(|_| Error::Reassign(self.cfg.trace(id)))
+            }
+            .map_err(|_| Error::Reassign(self.cfg.trace(id)))
         } else {
             let node = Node::new(ty, self.id);
             let id = self.cfg.add_node(node);
-            if let NodeType::Object { ref mut children, .. } = self.cfg.nodes[self.id].ty {
+            if let NodeType::Object {
+                ref mut children, ..
+            } = self.cfg.nodes[self.id].ty
+            {
                 children.insert(key, id);
             } else {
                 unreachable!();
@@ -736,7 +783,6 @@ impl<'a> Object<'a> {
 
             Ok(id)
         }
-
     }
 
     fn id_of(&mut self, path: Vec<String>) -> Result<usize, Error> {
@@ -754,9 +800,12 @@ impl<'a> Object<'a> {
             } else {
                 self.borrow()
             };
-            
+
             let key = path.next().unwrap();
-            let current_child = if let NodeType::Object { ref mut children, .. } = obj.cfg.nodes[obj.id].ty {
+            let current_child = if let NodeType::Object {
+                ref mut children, ..
+            } = obj.cfg.nodes[obj.id].ty
+            {
                 children.get(&key).map(|&child| child)
             } else {
                 unreachable!();
@@ -782,7 +831,7 @@ impl<'a> Object<'a> {
 struct List<'a> {
     cfg: &'a mut Parser,
     id: usize,
-    root: usize
+    root: usize,
 }
 
 impl<'a> List<'a> {
@@ -790,7 +839,7 @@ impl<'a> List<'a> {
         Object {
             cfg: self.cfg,
             id: self.root,
-            root: self.root
+            root: self.root,
         }
     }
 
@@ -801,11 +850,13 @@ impl<'a> List<'a> {
                 for (path, value) in values {
                     try!(obj.assign(path.path, value));
                 }
-            },
+            }
             ast::Value::Object(ast::Object::Extension(base, Some(values))) => {
                 let base_id = match base.path_type {
-                    ast::PathType::Local => return Err(Error::LocalPathInList(self.trace(), base.path)),
-                    ast::PathType::Global => try!(self.root().id_of(base.path))
+                    ast::PathType::Local => {
+                        return Err(Error::LocalPathInList(self.trace(), base.path))
+                    }
+                    ast::PathType::Global => try!(self.root().id_of(base.path)),
                 };
 
                 let mut obj = self.object();
@@ -816,7 +867,7 @@ impl<'a> List<'a> {
                         for (path, value) in values {
                             try!(obj.assign(path.path, value));
                         }
-                    },
+                    }
                     ast::ExtensionChanges::FunctionStyle(values) => {
                         if let Some(arguments) = obj.arguments() {
                             if arguments.len() < values.len() {
@@ -829,14 +880,16 @@ impl<'a> List<'a> {
                         }
                     }
                 }
-            },
+            }
             ast::Value::Object(ast::Object::Extension(base, None)) => {
                 let base_id = match base.path_type {
-                    ast::PathType::Local => return Err(Error::LocalPathInList(self.trace(), base.path)),
-                    ast::PathType::Global => try!(self.root().id_of(base.path))
+                    ast::PathType::Local => {
+                        return Err(Error::LocalPathInList(self.trace(), base.path))
+                    }
+                    ast::PathType::Global => try!(self.root().id_of(base.path)),
                 };
                 self.link(base_id);
-            },
+            }
             ast::Value::Number(number) => self.value(Value::Number(number)),
             ast::Value::String(string) => self.value(Value::String(string)),
             ast::Value::List(values) => {
@@ -853,12 +906,12 @@ impl<'a> List<'a> {
         let id = self.add_item(NodeType::Object {
             base: None,
             children: HashMap::new(),
-            arguments: vec![]
+            arguments: vec![],
         });
         Object {
             cfg: self.cfg,
             id: id,
-            root: self.root
+            root: self.root,
         }
     }
 
@@ -875,7 +928,7 @@ impl<'a> List<'a> {
         List {
             cfg: self.cfg,
             id: id,
-            root: self.root
+            root: self.root,
         }
     }
 
@@ -896,23 +949,24 @@ impl<'a> List<'a> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use anymap::any::Any;
-    use Parser;
-    use Prelude;
+    use entry::{Entry, FromEntry};
+    use std::collections::HashMap;
     use Node;
     use NodeType;
     use Object;
-    use entry::{Entry, FromEntry};
+    use Parser;
+    use Prelude;
 
     macro_rules! assert_ok {
-        ($e: expr) => (if let Err(e) = $e {
-            const EXPR: &'static str = stringify!($e);
-            panic!("{} failed with error: {}", EXPR, e);
-        })
+        ($e: expr) => {
+            if let Err(e) = $e {
+                const EXPR: &'static str = stringify!($e);
+                panic!("{} failed with error: {}", EXPR, e);
+            }
+        };
     }
 
     #[derive(PartialEq, Debug)]
@@ -923,7 +977,9 @@ mod tests {
 
     impl<'a, T: FromEntry<'a>> FromEntry<'a> for SingleItem<T> {
         fn from_entry(entry: Entry<'a>) -> Result<SingleItem<T>, String> {
-            entry.as_object().ok_or("expected an object".into())
+            entry
+                .as_object()
+                .ok_or("expected an object".into())
                 .and_then(|o| o.get("a").ok_or("missing field a".into()))
                 .and_then(|e| T::from_entry(e))
                 .map(|item| SingleItem(item))
@@ -932,7 +988,9 @@ mod tests {
 
     impl<'a, T: FromEntry<'a>> FromEntry<'a> for SingleItem2<T> {
         fn from_entry(entry: Entry<'a>) -> Result<SingleItem2<T>, String> {
-            entry.as_object().ok_or("expected an object".into())
+            entry
+                .as_object()
+                .ok_or("expected an object".into())
                 .and_then(|o| o.get("a").ok_or("missing field a".into()))
                 .and_then(|e| T::from_entry(e))
                 .map(|item| SingleItem2(item))
@@ -965,201 +1023,218 @@ mod tests {
     fn assign_object() {
         let mut cfg = Parser::new();
         cfg.parse_string("a = {}").unwrap();
-        assert_eq!(cfg.nodes, vec![
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("a".into(), 1)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: HashMap::new(),
-                    arguments: vec![]
-                },
-                0
-            )
-        ]);
+        assert_eq!(
+            cfg.nodes,
+            vec![
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("a".into(), 1)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: HashMap::new(),
+                        arguments: vec![]
+                    },
+                    0
+                )
+            ]
+        );
     }
 
     #[test]
     fn assign_deep_object() {
         let mut cfg = Parser::new();
         cfg.parse_string("a.b = {}").unwrap();
-        assert_eq!(cfg.nodes, vec![
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("a".into(), 1)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("b".into(), 2)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: HashMap::new(),
-                    arguments: vec![]
-                },
-                1
-            )
-        ]);
+        assert_eq!(
+            cfg.nodes,
+            vec![
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("a".into(), 1)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("b".into(), 2)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: HashMap::new(),
+                        arguments: vec![]
+                    },
+                    1
+                )
+            ]
+        );
     }
 
     #[test]
     fn assign_in_object() {
         let mut cfg = Parser::new();
         cfg.parse_string("a = { b = {} }").unwrap();
-        assert_eq!(cfg.nodes, vec![
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("a".into(), 1)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("b".into(), 2)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: HashMap::new(),
-                    arguments: vec![]
-                },
-                1
-            )
-        ]);
+        assert_eq!(
+            cfg.nodes,
+            vec![
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("a".into(), 1)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("b".into(), 2)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: HashMap::new(),
+                        arguments: vec![]
+                    },
+                    1
+                )
+            ]
+        );
     }
 
     #[test]
     fn assign_to_object() {
         let mut cfg = Parser::new();
         cfg.parse_string("a = {}").unwrap();
-        assert_eq!(cfg.nodes, vec![
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("a".into(), 1)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: HashMap::new(),
-                    arguments: vec![]
-                },
-                0
-            )
-        ]);
+        assert_eq!(
+            cfg.nodes,
+            vec![
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("a".into(), 1)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: HashMap::new(),
+                        arguments: vec![]
+                    },
+                    0
+                )
+            ]
+        );
 
         cfg.parse_string("a.b = {}").unwrap();
-        assert_eq!(cfg.nodes, vec![
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("a".into(), 1)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("b".into(), 2)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: HashMap::new(),
-                    arguments: vec![]
-                },
-                1
-            )
-        ]);
+        assert_eq!(
+            cfg.nodes,
+            vec![
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("a".into(), 1)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("b".into(), 2)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: HashMap::new(),
+                        arguments: vec![]
+                    },
+                    1
+                )
+            ]
+        );
     }
 
     #[test]
     fn extend_block_style() {
         let mut cfg = Parser::new();
         cfg.parse_string("a = {} b = a { c = {} }").unwrap();
-        assert_eq!(cfg.nodes, vec![
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("a".into(), 1),
-                    ("b".into(), 2)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: HashMap::new(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: Some(1),
-                    children: vec![("c".into(), 3)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: HashMap::new(),
-                    arguments: vec![]
-                },
-                2
-            ),
-        ]);
+        assert_eq!(
+            cfg.nodes,
+            vec![
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("a".into(), 1), ("b".into(), 2)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: HashMap::new(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: Some(1),
+                        children: vec![("c".into(), 3)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: HashMap::new(),
+                        arguments: vec![]
+                    },
+                    2
+                ),
+            ]
+        );
     }
 
     #[test]
     fn insert_list() {
         let mut cfg = Parser::new();
         cfg.parse_string("a = []").unwrap();
-        assert_eq!(cfg.nodes, vec![
-            Node::new(
-                NodeType::Object {
-                    base: None,
-                    children: vec![("a".into(), 1)].into_iter().collect(),
-                    arguments: vec![]
-                },
-                0
-            ),
-            Node::new(
-                NodeType::List(vec![]),
-                0
-            )
-        ])
+        assert_eq!(
+            cfg.nodes,
+            vec![
+                Node::new(
+                    NodeType::Object {
+                        base: None,
+                        children: vec![("a".into(), 1)].into_iter().collect(),
+                        arguments: vec![]
+                    },
+                    0
+                ),
+                Node::new(NodeType::List(vec![]), 0)
+            ]
+        )
     }
 
     #[test]
@@ -1213,11 +1288,14 @@ mod tests {
             let root = Object {
                 cfg: &mut cfg,
                 id: root_id,
-                root: root_id
+                root: root_id,
             };
             assert_ok!(super::parse(".", "d = 1", root));
         }
-        assert_eq!(Ok(1), cfg.root().get("a").get("b").get("c").get("d").decode());
+        assert_eq!(
+            Ok(1),
+            cfg.root().get("a").get("b").get("c").get("d").decode()
+        );
     }
 
     #[test]
@@ -1229,7 +1307,7 @@ mod tests {
             let root = Object {
                 cfg: &mut cfg,
                 id: root_id,
-                root: root_id
+                root: root_id,
             };
             assert_ok!(super::parse(".", "d = f{}", root));
         }
