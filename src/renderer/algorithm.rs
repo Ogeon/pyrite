@@ -13,16 +13,9 @@ use lamp;
 
 use renderer::Renderer;
 use film::{Tile, Sample};
+use utils::pairs;
 
-pub enum Algorithm {
-    Simple {tile_size: usize},
-    Bidirectional {
-        tile_size: usize,
-        params: BidirParams
-    },
-}
-
-impl Algorithm {
+/*impl Algorithm {
     pub fn render_tile(&self, tile: &mut Tile, camera: &cameras::Camera, world: &World, renderer: &Renderer) {
         let rng: XorShiftRng = rand::thread_rng().gen();
 
@@ -31,9 +24,9 @@ impl Algorithm {
             Algorithm::Bidirectional { ref params, .. } => bidirectional(rng, tile, camera, world, renderer, params)
         }
     }
-}
+}*/
 
-fn contribute(bounce: &Bounce, sample: &mut Sample, reflectance: &mut f64, require_white: bool) -> bool {
+pub fn contribute(bounce: &Bounce, sample: &mut Sample, reflectance: &mut f64, require_white: bool) -> bool {
     let &Bounce {
         ref ty,
         ref light,
@@ -286,17 +279,6 @@ pub fn bidirectional<R: Rng>(mut rng: R, tile: &mut Tile, camera: &cameras::Came
                     }
                 }
             }
-        }
-    }
-}
-
-fn pairs<T, F>(v: &mut [T], mut f: F) where F: FnMut(&mut T, &mut T) {
-    use std::mem::transmute;
-    let ptr = v.as_mut_ptr();
-    if v.len() >= 2 {
-        for pos in 0..v.len() - 2 {
-            let (a, b) = unsafe  { (transmute(ptr.offset(pos as isize)), transmute(ptr.offset(pos as isize + 1))) };
-            f(a, b);
         }
     }
 }

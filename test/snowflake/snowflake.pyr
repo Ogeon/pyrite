@@ -7,7 +7,7 @@ image = {
 	rgb_curves = response_curves
 }
 
-renderer = Renderer.Simple {
+renderer = Renderer.Bidirectional {
 	pixel_samples = 100
 	spectrum.samples = 5
 	spectrum.bins = 50

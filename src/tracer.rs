@@ -16,7 +16,7 @@ pub use self::Reflection::{Reflect, Emit};
 pub type Brdf = fn(ray_in: &Vector3<f64>, ray_out: &Vector3<f64>, normal: &Vector3<f64>) -> f64;
 pub type Color = ParametricValue<RenderContext, f64>;
 
-pub trait Material {
+pub trait Material: Sync {
     fn reflect<'a>(&'a self, light: &mut Light, ray_in: &Ray3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Reflection<'a>;
     fn get_emission<'a>(&'a self, light: &mut Light, ray_in: &Vector3<f64>, normal: &Ray3<f64>, rng: &mut Rng) -> Option<&'a Color>;
 }
@@ -64,6 +64,14 @@ impl BounceType {
             brdf(incident, normal, out)
         } else {
             1.0
+        }
+    }
+
+    pub fn is_emission(&self) -> bool {
+        if let BounceType::Emission = *self {
+            true
+        } else {
+            false
         }
     }
 }

@@ -74,8 +74,16 @@ impl Film {
         }
     }
 
-    fn merge_pixels<'a, I>(&self, pixels: I)  where
-        I: IntoIterator<Item = (&'a Point2<usize>, &'a Pixel)>
+    pub fn merge_pixels<'a, I>(&self, pixels: I) where
+        I: IntoIterator<Item = (Point2<f64>, Pixel)>
+    {
+        self.merge_pixels_internal(pixels.into_iter().filter_map(|(pos, pixel)| {
+            self.aspect.to_pixel(&pos).map(|p| (p, pixel))
+        }));
+    }
+
+    fn merge_pixels_internal<'a, I>(&self, pixels: I)  where
+        I: IntoIterator<Item = (Point2<usize>, Pixel)>
     {
         let mut pixels: Vec<_> = pixels.into_iter().map(|(pos, pixel)| {
             let x = pos.x / self.tile_size;
@@ -97,7 +105,7 @@ impl Film {
 
             while let Some((index, position, pixel)) = sample.as_ref().cloned() {
                 if index == current_index {
-                    tile_pixels[position.x + position.y * tile_w].merge(pixel);
+                    tile_pixels[position.x + position.y * tile_w].merge(&pixel);
                     sample = pixels.next();
                 } else {
                     break;
@@ -140,6 +148,18 @@ impl Film {
 
     pub fn sample_wavelength<R: Rng>(&self, rng: &mut R) -> f64 {
         self.wavelength_start + self.wavelength_width * rng.next_f64()
+    }
+
+    pub fn new_pixel(&self) -> Pixel {
+        Pixel::new(self.bins)
+    }
+
+    pub fn to_pixel_sample(&self, sample: &Sample) -> PixelSample {
+        PixelSample {
+            value: sample.brightness,
+            weight: sample.weight,
+            bin: self.wavelength_to_bin(sample.wavelength)
+        }
     }
 
     fn expose_tile(&self, tile: &OrderTile, pixels: Vec<Pixel>) {
@@ -390,9 +410,21 @@ impl<'a> Tile<'a> {
                 });
 
                 if self.extra_buffer.is_full() {
-                    self.film.merge_pixels(self.extra_buffer.iter());
-                    self.extra_buffer.clear();
+                    self.film.merge_pixels_internal(self.extra_buffer.drain());
                 }
+            }
+        }
+    }
+
+    pub fn merge_pixel(&mut self, position: &Point2<f64>, pixel: &Pixel) {
+        if self.tile.area.contains(position) {
+            let position = position
+                .sub_p(&self.tile.area.from)
+                .div_v(&self.tile.area.size)
+                .mul_v(&Vector2::new(self.tile.width as f64, self.tile.height as f64));
+
+            if let Some(p) = self.pixels.get_mut(position.x as usize + position.y as usize * self.tile.width) {
+                p.merge(pixel);
             }
         }
     }
@@ -413,8 +445,7 @@ impl<'a> Drop for Tile<'a> {
             ::std::mem::swap(&mut pixels, &mut self.pixels);
             self.film.expose_tile(self.tile, pixels);
 
-            self.film.merge_pixels(self.extra_buffer.iter());
-            self.extra_buffer.clear();
+            self.film.merge_pixels_internal(self.extra_buffer.drain());
         }
     }
 }
@@ -464,12 +495,11 @@ impl LimitedMap {
         }
     }
 
-    fn iter(&self) -> hash_map::Iter<Point2<usize>, Pixel> {
-        self.map.iter()
-    }
-
-    fn clear(&mut self) {
-        self.map.clear()
+    fn drain(&mut self) -> hash_map::IntoIter<Point2<usize>, Pixel> {
+        //TODO: Make this real
+        let mut map = HashMap::with_capacity(self.map.len());
+        ::std::mem::swap(&mut self.map, &mut map);
+        map.into_iter()
     }
 
     fn is_full(&self) -> bool {

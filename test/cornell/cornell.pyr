@@ -9,13 +9,19 @@ image = {
 	rgb_curves = response_curves
 }
 
-renderer = Renderer.Simple {
-	pixel_samples = 50
-	spectrum.samples = 5
+renderer = Renderer.PhotonMapping {
+	pixel_samples = 300
+	spectrum.samples = 10
 	spectrum.bins = 50
 	spectrum.span = [400, 700]
 	tile_size = 32
-	light_samples = 5
+	light_samples = 0
+	bounces = 4
+	light_bounces = 8
+	photons = 100000
+	photon_bounces = 16
+	photon_passes = 2
+	radius = 0.1
 }
 
 camera = Camera.Perspective {
@@ -53,6 +59,8 @@ red = Material.Diffuse {
 		points = colors.red
 	}
 }
+			min = Vector(-5, 0, 0)
+			max = Vector(-3, 2, 2)
 
 world.sky = Sky.Color(0)
 world.objects = [
@@ -67,5 +75,25 @@ world.objects = [
 		materials.back = white
 		materials.ceiling = white
 		materials.floor = white
+	},
+	Shape.RayMarched {
+		shape = RayMarched.QuaternionJulia {
+			iterations = 50
+			threshold = 4
+			constant = Vector(-0.2,0.8,0,0)
+			slice_plane = 0
+			type = QuaternionJulia.Cubic
+		}
+
+		bounds = Bounds.Box {
+			min = Vector(-7, -1, 0)
+			max = Vector(-1, 2, 2)
+		}
+
+		material = Material.FresnelMix {
+			refract = Material.Diffuse(0.8)
+			reflect = Material.Mirror(1)
+			ior = 1.5
+		}
 	}
 ]

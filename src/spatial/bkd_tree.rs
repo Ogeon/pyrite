@@ -1,56 +1,61 @@
 use std::cmp::PartialOrd;
 use std::cmp::Ordering::Equal;
-use std::marker::PhantomData;
 
 use self::BkdTree::{Node, Leaf};
+use spatial::Dimensions;
 
-pub trait Element<R: Ray> {
+pub trait Element {
     type Item;
-    fn get_bounds_interval(&self, axis: usize) -> (f64, f64);
-    fn intersect(&self, ray: &R) -> Option<(f64, Self::Item)>;
+    type Ray: Ray;
+    fn get_bounds_interval(&self, axis: <Self::Ray as Ray>::Dim) -> (f64, f64);
+    fn intersect(&self, ray: &Self::Ray) -> Option<(f64, Self::Item)>;
 }
 
-impl<R: Ray, E: Element<R>> Element<R> for Option<E> {
+impl<E: Element> Element for Option<E> {
     type Item = E::Item;
-    fn get_bounds_interval(&self, axis: usize) -> (f64, f64) {
+    type Ray = E::Ray;
+
+    fn get_bounds_interval(&self, axis: <Self::Ray as Ray>::Dim) -> (f64, f64) {
         self.as_ref().map(|e| e.get_bounds_interval(axis)).unwrap()
     }
 
-    fn intersect(&self, ray: &R) -> Option<(f64, Self::Item)> {
+    fn intersect(&self, ray: &Self::Ray) -> Option<(f64, Self::Item)> {
         self.as_ref().and_then(|e| e.intersect(ray))
     }
 }
 
 pub trait Ray {
-    fn plane_intersections(&self, min: f64, max: f64, axis: usize) -> Option<(f64, f64)>;
-    fn plane_distance(&self, min: f64, max: f64, axis: usize) -> (f64, f64);
+    type Dim: Dimensions;
+    fn plane_intersections(&self, min: f64, max: f64, axis: Self::Dim) -> Option<(f64, f64)>;
+    fn plane_distance(&self, min: f64, max: f64, axis: Self::Dim) -> (f64, f64);
 }
 
-pub enum BkdTree<R: Ray, E: Element<R>> {
+pub enum BkdTree<E: Element> {
     Node {
         beginning: f64,
         end: f64,
-        axis: usize,
-        left: Box<BkdTree<R, E>>,
-        right: Box<BkdTree<R, E>>
+        axis: <E::Ray as Ray>::Dim,
+        left: Box<BkdTree<E>>,
+        right: Box<BkdTree<E>>
     },
 
     Leaf {
         beginning: f64,
         end: f64,
-        axis: usize,
-        elements: Vec<E>,
-        _phantom_ray: PhantomData<R>
+        axis: <E::Ray as Ray>::Dim,
+        elements: Vec<E>
     }
 }
 
-impl<R: Ray, E: Element<R>> BkdTree<R, E> {
-    pub fn new(elements: Vec<E>, dimensions: usize, arrity: usize) -> BkdTree<R, E> {
+impl<E: Element> BkdTree<E> {
+    pub fn new<I>(elements: I, arrity: usize) -> BkdTree<E> where
+        I: IntoIterator<Item = E>
+    {
         let mut elements: Vec<_> = elements.into_iter().map(|e| Some(e)).collect();
-        construct_tree(&mut elements, dimensions, arrity, 0)
+        construct_tree(&mut elements, <E::Ray as Ray>::Dim::first(), arrity, 0)
     }
 
-    pub fn find(&self, ray: &R) -> Option<(E::Item, &E)> {
+    pub fn find(&self, ray: &E::Ray) -> Option<(E::Item, &E)> {
         let epsilon = 0.000001;
         let mut result = None;
 
@@ -99,7 +104,7 @@ impl<R: Ray, E: Element<R>> BkdTree<R, E> {
         result
     }
 
-    pub fn distance(&self, ray: &R) -> (f64, f64) {
+    pub fn distance(&self, ray: &E::Ray) -> (f64, f64) {
         match *self {
             Node {beginning, end, axis, ..} => ray.plane_distance(beginning, end, axis),
             Leaf {beginning, end, axis, ..} => ray.plane_distance(beginning, end, axis)
@@ -107,9 +112,7 @@ impl<R: Ray, E: Element<R>> BkdTree<R, E> {
     }
 }
 
-fn construct_tree<R: Ray, E: Element<R>>(elements: &mut [Option<E>], dimensions: usize, arrity: usize, depth: usize) -> BkdTree<R, E> {
-    let axis = depth % dimensions;
-
+fn construct_tree<E: Element>(elements: &mut [Option<E>], axis: <E::Ray as Ray>::Dim, arrity: usize, depth: usize) -> BkdTree<E> {
     if elements.len() <= arrity {
         let elements: Vec<_> = elements.iter_mut().filter_map(|mut e| e.take()).collect();
         let (beginning, end) = get_total_bounds(&elements, axis);
@@ -118,8 +121,7 @@ fn construct_tree<R: Ray, E: Element<R>>(elements: &mut [Option<E>], dimensions:
             beginning: beginning,
             end: end,
             axis: axis,
-            elements: elements,
-            _phantom_ray: PhantomData
+            elements: elements
         }
     } else {
         elements.sort_by(|a, b| {
@@ -147,13 +149,13 @@ fn construct_tree<R: Ray, E: Element<R>>(elements: &mut [Option<E>], dimensions:
             beginning: beginning,
             end: end,
             axis: axis,
-            left: Box::new(construct_tree(left, dimensions, arrity, depth + 1)),
-            right: Box::new(construct_tree(right, dimensions, arrity, depth + 1))
+            left: Box::new(construct_tree(left, axis.next(), arrity, depth + 1)),
+            right: Box::new(construct_tree(right, axis.next(), arrity, depth + 1))
         }
     }
 }
 
-fn get_total_bounds<R: Ray, E: Element<R>>(elements: &[E], axis: usize) -> (f64, f64) {
+fn get_total_bounds<E: Element>(elements: &[E], axis: <E::Ray as Ray>::Dim) -> (f64, f64) {
     elements.iter().fold((1.0f64/0.0, -1.0f64/0.0), |(begin, end), element| {
         let (e_begin, e_end) = element.get_bounds_interval(axis);
         (begin.min(e_begin), end.max(e_end))
@@ -161,7 +163,7 @@ fn get_total_bounds<R: Ray, E: Element<R>>(elements: &[E], axis: usize) -> (f64,
 }
 
 #[inline]
-fn order<'a, R: Ray, E: Element<R>>(a: &'a BkdTree<R, E>, b: &'a BkdTree<R, E>, ray: &R) -> (&'a BkdTree<R, E>, f64, f64, &'a BkdTree<R, E>, f64, f64) {
+fn order<'a, E: Element>(a: &'a BkdTree<E>, b: &'a BkdTree<E>, ray: &E::Ray) -> (&'a BkdTree<E>, f64, f64, &'a BkdTree<E>, f64, f64) {
     let (a_near, a_far) = a.distance(ray);
     let (b_near, b_far) = b.distance(ray);
 

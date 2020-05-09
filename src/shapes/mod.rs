@@ -16,7 +16,7 @@ use tracer::{Material, ParametricValue};
 use config::Prelude;
 use config::entry::Entry;
 
-use bkdtree;
+use spatial::{bkd_tree, Dim3};
 use materials;
 use world;
 use math;
@@ -251,22 +251,23 @@ impl Shape {
     }
 }
 
-impl<'a> bkdtree::Element<world::BkdRay<'a>> for Arc<Shape> {
+impl bkd_tree::Element for Arc<Shape> {
     type Item = Ray3<f64>;
+    type Ray = world::BkdRay;
 
-    fn get_bounds_interval(&self, axis: usize) -> (f64, f64) {
+    fn get_bounds_interval(&self, axis: Dim3) -> (f64, f64) {
         match *self.deref() {
             Sphere { ref position, radius, .. } => match axis {
-                0 => (position.x - radius, position.x + radius),
-                1 => (position.y - radius, position.y + radius),
-                _ => (position.z - radius, position.z + radius)
+                Dim3::X => (position.x - radius, position.x + radius),
+                Dim3::Y => (position.y - radius, position.y + radius),
+                Dim3::Z => (position.z - radius, position.z + radius)
             },
             Plane {shape, ..} => {
                 let point = shape.n.mul_s(shape.d);
                 match axis {
-                    0 if shape.n.x.abs() == 1.0 => (point.x, point.x),
-                    1 if shape.n.x.abs() == 1.0 => (point.y, point.y),
-                    2 if shape.n.x.abs() == 1.0 => (point.z, point.z),
+                    Dim3::X if shape.n.x.abs() == 1.0 => (point.x, point.x),
+                    Dim3::Y if shape.n.x.abs() == 1.0 => (point.y, point.y),
+                    Dim3::Z if shape.n.x.abs() == 1.0 => (point.z, point.z),
                     _ => (NEG_INFINITY, INFINITY)
                 }
             },
@@ -275,21 +276,21 @@ impl<'a> bkdtree::Element<world::BkdRay<'a>> for Arc<Shape> {
                 let max = v1.position.max(&v2.position).max(&v3.position);
 
                 match axis {
-                    0 => (min.x, max.x),
-                    1 => (min.y, max.y),
-                    _ => (min.z, max.z)
+                    Dim3::X => (min.x, max.x),
+                    Dim3::Y => (min.y, max.y),
+                    Dim3::Z => (min.z, max.z)
                 }
             },
             RayMarched { ref bounds, .. } => match axis {
-                0 => bounds.x_interval(),
-                1 => bounds.y_interval(),
-                _ => bounds.z_interval(),
+                Dim3::X => bounds.x_interval(),
+                Dim3::Y => bounds.y_interval(),
+                Dim3::Z => bounds.z_interval(),
             }
         }
     }
 
     fn intersect(&self, ray: &world::BkdRay) -> Option<(f64, Ray3<f64>)> {
-        let &world::BkdRay(ray) = ray;
+        let &world::BkdRay(ref ray) = ray;
         self.ray_intersect(ray)
     }
 }

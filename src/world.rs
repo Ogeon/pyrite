@@ -14,7 +14,7 @@ use cgmath::{EuclideanVector, Vector3, Point, Point3, Ray3, AffineMatrix3};
 use config::Prelude;
 use config::entry::Entry;
 
-use bkdtree;
+use spatial::{bkd_tree, Dim3};
 
 use tracer::{self, Material, ParametricValue, Color};
 use lamp::Lamp;
@@ -64,23 +64,25 @@ pub trait ObjectContainer {
     fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)>;
 }
 
-impl<'a> ObjectContainer for bkdtree::BkdTree<BkdRay<'a>, Arc<shapes::Shape>> {
+impl ObjectContainer for bkd_tree::BkdTree<Arc<shapes::Shape>> {
     fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material)> {
-        let ray = BkdRay(ray);
+        let ray = BkdRay(*ray);
         self.find(&ray).map(|(normal, object)| (normal, object.get_material()))
     }
 }
 
-pub struct BkdRay<'a>(pub &'a Ray3<f64>);
+pub struct BkdRay(pub Ray3<f64>);
 
-impl<'a> bkdtree::Ray for BkdRay<'a> {
-    fn plane_intersections(&self, min: f64, max: f64, axis: usize) -> Option<(f64, f64)> {
+impl bkd_tree::Ray for BkdRay {
+    type Dim = Dim3;
+
+    fn plane_intersections(&self, min: f64, max: f64, axis: Dim3) -> Option<(f64, f64)> {
         let &BkdRay(ray) = self;
 
         let (origin, direction) = match axis {
-            0 => (ray.origin.x, ray.direction.x),
-            1 => (ray.origin.y, ray.direction.y),
-            _ => (ray.origin.z, ray.direction.z)
+            Dim3::X => (ray.origin.x, ray.direction.x),
+            Dim3::Y => (ray.origin.y, ray.direction.y),
+            Dim3::Z => (ray.origin.z, ray.direction.z)
         };
 
         let min = (min - origin) / direction;
@@ -96,13 +98,13 @@ impl<'a> bkdtree::Ray for BkdRay<'a> {
     }
 
     #[inline]
-    fn plane_distance(&self, min: f64, max: f64, axis: usize) -> (f64, f64) {
+    fn plane_distance(&self, min: f64, max: f64, axis: Dim3) -> (f64, f64) {
         let &BkdRay(ray) = self;
 
         let (origin, direction) = match axis {
-            0 => (ray.origin.x, ray.direction.x),
-            1 => (ray.origin.y, ray.direction.y),
-            _ => (ray.origin.z, ray.direction.z)
+            Dim3::X => (ray.origin.x, ray.direction.x),
+            Dim3::Y => (ray.origin.y, ray.direction.y),
+            Dim3::Z => (ray.origin.z, ray.direction.z)
         };
         let min = (min - origin) / direction;
         let max = (max - origin) / direction;
@@ -204,7 +206,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(entry: Entry, make_path:
 
     println!("the scene contains {} objects", objects.len());
     println!("building BKD-Tree... ");
-    let tree = bkdtree::BkdTree::new(objects, 3, 10); //TODO: make arrity configurable
+    let tree = bkd_tree::BkdTree::new(objects, 10); //TODO: make arrity configurable
     println!("done building BKD-Tree");
     Ok(World {
         sky: sky,

@@ -8,12 +8,15 @@ image = {
 	rgb_curves = response_curves
 }
 
-renderer = Renderer.Simple {
-	pixel_samples = 300
+renderer = Renderer.Bidirectional {
+	pixel_samples = 1000
 	spectrum.samples = 10
 	spectrum.bins = 50
 	spectrum.span = [370, 770]
 	tile_size = 32
+	bounces = 4
+	light_samples = 0
+	light_bounces = 4
 }
 
 camera = Camera.Perspective {

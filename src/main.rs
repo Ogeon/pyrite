@@ -42,7 +42,7 @@ macro_rules! try {
 }
 
 mod tracer;
-mod bkdtree;
+mod spatial;
 mod cameras;
 mod shapes;
 mod materials;
@@ -54,6 +54,7 @@ mod values;
 mod lamp;
 mod world;
 mod film;
+mod utils;
 
 fn main() {
     let mut args = std::env::args();
@@ -100,19 +101,54 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
     let project_path = project_path.as_ref();
     let render_path = project_path.parent().unwrap_or(project_path).join("render.png");
 
-    let f = |mut tile: Tile| {
+    /*let f = |mut tile: Tile| {
         config.renderer.render_tile(&mut tile, &config.camera, &config.world);
-    };
+    };*/
 
     let film = Film::new(
         image_size.x, image_size.y,
-        config.renderer.tile_size(),
+        config.renderer.tile_size,
         config.renderer.spectrum_span,
         config.renderer.spectrum_bins,
         &config.camera
     );
 
-    crossbeam::scope(|scope| {
+    let mut last_print = PreciseTime::now();
+
+    config.renderer.render(&film, &mut pool, |status| {
+        if last_print.to(PreciseTime::now()).num_milliseconds() >= 500 {
+            print!("\r{}... {:2}%", status.message, status.progress);
+            stdout().flush().unwrap();
+
+            if last_print.to(PreciseTime::now()).num_seconds() >= 4 {
+                let begin_iter = PreciseTime::now();
+                film.with_changed_pixels(|position, spectrum| {
+                    let r = clamp_channel(calculate_channel(&spectrum, &red));
+                    let g = clamp_channel(calculate_channel(&spectrum, &green));
+                    let b = clamp_channel(calculate_channel(&spectrum, &blue));
+                    
+                    unsafe {
+                        pixels.unsafe_put_pixel(position.x as u32, position.y as u32, image::Rgb {
+                            data: [r, g, b]
+                        })
+                    }
+                });
+                let diff = begin_iter.to(PreciseTime::now()).num_milliseconds() as f64 / 1000.0;
+
+                print!("\r{}... {:2}% - updated iamge in {} seconds", status.message, status.progress, diff);
+                stdout().flush().unwrap();
+                match File::create(&render_path) {
+                    Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
+                        println!("\rerror while writing image: {}", e);
+                    },
+                    Err(e) => println!("\rfailed to open/create file for writing: {}", e)
+                }
+                last_print = PreciseTime::now();
+            }
+        }
+    }, &config.camera, &config.world);
+
+    /*crossbeam::scope(|scope| {
         print!(" 0%");
         stdout().flush().unwrap();
 
@@ -148,7 +184,7 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
                 last_print = PreciseTime::now();
             }
         }
-    });
+    });*/
 
     film.with_changed_pixels(|position, spectrum| {
         let r = clamp_channel(calculate_channel(&spectrum, &red));
