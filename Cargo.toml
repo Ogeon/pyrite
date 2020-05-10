@@ -3,3 +3,6 @@ members = [
     "pyrite",
     "config"
 ]
+
+[profile.release]
+lto = true
