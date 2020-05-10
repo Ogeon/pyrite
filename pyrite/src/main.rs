@@ -7,6 +7,7 @@ extern crate genmesh;
 extern crate image;
 extern crate num_cpus;
 extern crate obj;
+extern crate palette;
 extern crate pyrite_config as config;
 extern crate rand;
 extern crate rand_xorshift;
@@ -24,8 +25,9 @@ use image::GenericImage;
 use time::PreciseTime;
 
 use rand::Rng;
-
 use rand_xorshift::XorShiftRng;
+
+use palette::{LinSrgb, Pixel, Srgb};
 
 use film::{Film, Spectrum, Tile};
 
@@ -132,15 +134,17 @@ fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: 
                 if last_print.to(PreciseTime::now()).num_seconds() >= 4 {
                     let begin_iter = PreciseTime::now();
                     film.with_changed_pixels(|position, spectrum| {
-                        let r = clamp_channel(calculate_channel(&spectrum, &red));
-                        let g = clamp_channel(calculate_channel(&spectrum, &green));
-                        let b = clamp_channel(calculate_channel(&spectrum, &blue));
+                        let r = calculate_channel(&spectrum, &red);
+                        let g = calculate_channel(&spectrum, &green);
+                        let b = calculate_channel(&spectrum, &blue);
+
+                        let rgb: Srgb<u8> = Srgb::from_linear(LinSrgb::new(r, g, b)).into_format();
 
                         unsafe {
                             pixels.unsafe_put_pixel(
                                 position.x as u32,
                                 position.y as u32,
-                                image::Rgb([r, g, b]),
+                                image::Rgb(rgb.into_raw()),
                             )
                         }
                     });
@@ -201,12 +205,18 @@ fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: 
     });*/
 
     film.with_changed_pixels(|position, spectrum| {
-        let r = clamp_channel(calculate_channel(&spectrum, &red));
-        let g = clamp_channel(calculate_channel(&spectrum, &green));
-        let b = clamp_channel(calculate_channel(&spectrum, &blue));
+        let r = calculate_channel(&spectrum, &red);
+        let g = calculate_channel(&spectrum, &green);
+        let b = calculate_channel(&spectrum, &blue);
+
+        let rgb = Srgb::from_linear(LinSrgb::new(r, g, b)).into_format();
 
         unsafe {
-            pixels.unsafe_put_pixel(position.x as u32, position.y as u32, image::Rgb([r, g, b]))
+            pixels.unsafe_put_pixel(
+                position.x as u32,
+                position.y as u32,
+                image::Rgb(rgb.into_raw()),
+            )
         }
     });
 
@@ -238,21 +248,11 @@ fn calculate_channel(spectrum: &Spectrum, response: &math::utils::Interpolated) 
         }
     }
 
-    (sum / weight).powf(0.45)
+    sum / weight
 }
 
 struct RenderContext<R: Rng> {
     camera: cameras::Camera,
     world: world::World<R>,
     renderer: renderer::Renderer,
-}
-
-fn clamp_channel(value: f64) -> u8 {
-    if value >= 1.0 {
-        255
-    } else if value <= 0.0 {
-        0
-    } else {
-        (value * 255.0) as u8
-    }
 }
