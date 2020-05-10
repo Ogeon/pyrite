@@ -11,6 +11,7 @@ use crate::world;
 use crate::film::Film;
 
 mod algorithm;
+mod bidirectional;
 mod photon_mapping;
 mod simple;
 
@@ -52,7 +53,9 @@ impl Renderer {
     ) {
         match self.algorithm {
             Algorithm::Simple => simple::render(film, workers, on_status, self, world, camera),
-            Algorithm::Bidirectional(ref _config) => {}
+            Algorithm::Bidirectional(ref config) => {
+                bidirectional::render(film, workers, on_status, self, config, world, camera)
+            }
             Algorithm::PhotonMapping(ref config) => {
                 photon_mapping::render(film, workers, on_status, self, config, world, camera)
             }
@@ -62,7 +65,7 @@ impl Renderer {
 
 pub enum Algorithm {
     Simple,
-    Bidirectional(algorithm::BidirParams),
+    Bidirectional(bidirectional::BidirParams),
     PhotonMapping(photon_mapping::Config),
 }
 
@@ -212,7 +215,7 @@ fn decode_bidirectional(entry: Entry<'_>) -> Result<Renderer, String> {
         None => 8,
     };
 
-    let algorithm = Algorithm::Bidirectional(algorithm::BidirParams {
+    let algorithm = Algorithm::Bidirectional(bidirectional::BidirParams {
         bounces: light_bounces,
     });
 
