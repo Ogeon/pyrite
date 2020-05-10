@@ -1,5 +1,7 @@
 #![cfg_attr(test, allow(dead_code))]
 
+use std::time::Instant;
+
 use image;
 use pyrite_config as config;
 use rand;
@@ -10,8 +12,6 @@ use std::path::Path;
 use cgmath::Vector2;
 
 use image::GenericImage;
-
-use time::PreciseTime;
 
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
@@ -103,18 +103,18 @@ fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: 
         &config.camera,
     );
 
-    let mut last_print = PreciseTime::now();
+    let mut last_print = Instant::now();
 
     config.renderer.render(
         &film,
         &mut pool,
         |status| {
-            if last_print.to(PreciseTime::now()).num_milliseconds() >= 500 {
+            if (Instant::now() - last_print).as_millis() >= 500 {
                 print!("\r{}... {:2}%", status.message, status.progress);
                 stdout().flush().unwrap();
 
-                if last_print.to(PreciseTime::now()).num_seconds() >= 4 {
-                    let begin_iter = PreciseTime::now();
+                if (Instant::now() - last_print).as_secs() >= 4 {
+                    let begin_iter = Instant::now();
                     film.with_changed_pixels(|position, spectrum| {
                         let r = calculate_channel(&spectrum, &red);
                         let g = calculate_channel(&spectrum, &green);
@@ -130,7 +130,7 @@ fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: 
                             )
                         }
                     });
-                    let diff = begin_iter.to(PreciseTime::now()).num_milliseconds() as f64 / 1000.0;
+                    let diff = (Instant::now() - begin_iter).as_millis() as f64 / 1000.0;
 
                     print!(
                         "\r{}... {:2}% - updated image in {} seconds",
@@ -140,7 +140,7 @@ fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: 
                     if let Err(e) = pixels.save(&render_path) {
                         println!("\rerror while writing image: {}", e);
                     }
-                    last_print = PreciseTime::now();
+                    last_print = Instant::now();
                 }
             }
         },
