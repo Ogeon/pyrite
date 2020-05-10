@@ -5,17 +5,17 @@ use rand::Rng;
 use cgmath::{InnerSpace, Vector3};
 use collision::Ray3;
 
-use cameras;
-use lamp;
-use tracer::{self, Bounce, BounceType, RenderContext};
-use world::World;
+use crate::cameras;
+use crate::lamp;
+use crate::tracer::{self, Bounce, BounceType, RenderContext};
+use crate::world::World;
 
-use film::{Sample, Tile};
-use renderer::Renderer;
-use utils::pairs;
+use crate::film::{Sample, Tile};
+use crate::renderer::Renderer;
+use crate::utils::pairs;
 
 pub fn contribute(
-    bounce: &Bounce,
+    bounce: &Bounce<'_>,
     sample: &mut Sample,
     reflectance: &mut f64,
     require_white: bool,
@@ -80,7 +80,7 @@ pub struct BidirParams {
 
 pub fn bidirectional<R: Rng>(
     mut rng: R,
-    tile: &mut Tile,
+    tile: &mut Tile<'_>,
     camera: &cameras::Camera,
     world: &World<R>,
     renderer: &Renderer,
@@ -279,10 +279,10 @@ pub fn bidirectional<R: Rng>(
 }
 
 fn connect_paths<R: Rng>(
-    bounce: &Bounce,
+    bounce: &Bounce<'_>,
     main: &(Sample, f64),
     additional: &[(Sample, f64)],
-    path: &[Bounce],
+    path: &[Bounce<'_>],
     world: &World<R>,
     use_additional: bool,
 ) -> Vec<Sample> {

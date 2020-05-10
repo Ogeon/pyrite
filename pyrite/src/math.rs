@@ -1,7 +1,7 @@
-use tracer;
+use crate::tracer;
 
-use config::entry::Entry;
-use config::{Decode, Prelude};
+use crate::config::entry::Entry;
+use crate::config::{Decode, Prelude};
 
 macro_rules! make_operators {
     ($($fn_name:ident : $struct_name:ident { $($arg:ident),+ } => $operation:expr),*) => (
@@ -32,12 +32,12 @@ macro_rules! make_operators {
                 }
             }
 
-            fn $fn_name<From: Decode + 'static>(entry: Entry) -> Result<Box<dyn tracer::ParametricValue<From, f64>>, String> {
-                let fields = try!(entry.as_object().ok_or("not an object".into()));
+            fn $fn_name<From: Decode + 'static>(entry: Entry<'_>) -> Result<Box<dyn tracer::ParametricValue<From, f64>>, String> {
+                let fields = entry.as_object().ok_or("not an object")?;
 
                 $(
                     let $arg = match fields.get(stringify!($arg)) {
-                        Some(v) => try!(tracer::decode_parametric_number(v), stringify!($arg)),
+                        Some(v) => try_for!(tracer::decode_parametric_number(v), stringify!($arg)),
                         None => return Err(format!("missing field '{}'", stringify!($arg)))
                     };
                 )+
@@ -236,17 +236,17 @@ impl<From> tracer::ParametricValue<From, f64> for Curve<From> {
 }
 
 fn decode_curve<From: Decode + 'static>(
-    entry: Entry,
+    entry: Entry<'_>,
 ) -> Result<Box<dyn tracer::ParametricValue<From, f64>>, String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let input = match fields.get("input") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "input"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "input"),
         None => return Err("missing field 'input'".into()),
     };
 
     let points = match fields.get("points") {
-        Some(v) => try!(v.decode(), "points"),
+        Some(v) => try_for!(v.decode(), "points"),
         None => return Err("missing field 'points'".into()),
     };
 
@@ -277,17 +277,17 @@ impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
 }
 
 fn decode_fresnel(
-    entry: Entry,
+    entry: Entry<'_>,
 ) -> Result<Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>, String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "ior"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "ior"),
         None => return Err("missing field 'ior'".into()),
     };
 
     let env_ior = match fields.get("env_ior") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "env_ior"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "env_ior"),
         None => Box::new(1.0f64) as Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>,
     };
 

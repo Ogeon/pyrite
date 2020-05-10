@@ -2,22 +2,25 @@ use std;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use std::f64::{INFINITY, NEG_INFINITY};
+use std::{
+    collections::HashMap,
+    f64::{INFINITY, NEG_INFINITY},
+};
 
 use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use collision::{Continuous, Ray3};
 
 use rand::Rng;
 
-use tracer::{Material, ParametricValue};
+use crate::tracer::{Material, ParametricValue};
 
-use config::entry::Entry;
-use config::Prelude;
+use crate::config::entry::Entry;
+use crate::config::Prelude;
 
-use materials;
-use math;
-use spatial::{bkd_tree, Dim3};
-use world;
+use crate::materials;
+use crate::math;
+use crate::spatial::{bkd_tree, Dim3};
+use crate::world;
 
 const EPSILON: f64 = 0.000000001;
 
@@ -524,21 +527,21 @@ pub fn register_types<R: Rng + 'static>(context: &mut Prelude) {
     distance_estimators::register_types(context);
 }
 
-fn decode_sphere<R: Rng + 'static>(entry: Entry) -> Result<world::Object<R>, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_sphere<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let position = match items.get("position") {
-        Some(v) => try!(v.dynamic_decode(), "position"),
+        Some(v) => try_for!(v.dynamic_decode(), "position"),
         None => return Err("missing field 'position'".into()),
     };
 
     let radius = match items.get("radius") {
-        Some(v) => try!(v.decode(), "radius"),
+        Some(v) => try_for!(v.decode(), "radius"),
         None => return Err("missing field 'radius'".into()),
     };
 
     let (material, emissive): (materials::MaterialBox<R>, bool) = match items.get("material") {
-        Some(v) => try!(v.dynamic_decode(), "material"),
+        Some(v) => try_for!(v.dynamic_decode(), "material"),
         None => return Err("missing field 'material'".into()),
     };
 
@@ -552,21 +555,21 @@ fn decode_sphere<R: Rng + 'static>(entry: Entry) -> Result<world::Object<R>, Str
     })
 }
 
-fn decode_plane<R: Rng + 'static>(entry: Entry) -> Result<world::Object<R>, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_plane<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let origin = match items.get("origin") {
-        Some(v) => try!(v.dynamic_decode(), "origin"),
+        Some(v) => try_for!(v.dynamic_decode(), "origin"),
         None => return Err("missing field 'origin'".into()),
     };
 
     let normal = match items.get("normal") {
-        Some(v) => try!(v.dynamic_decode(), "normal"),
+        Some(v) => try_for!(v.dynamic_decode(), "normal"),
         None => return Err("missing field 'normal'".into()),
     };
 
     let (material, emissive): (materials::MaterialBox<R>, bool) = match items.get("material") {
-        Some(v) => try!(v.dynamic_decode(), "material"),
+        Some(v) => try_for!(v.dynamic_decode(), "material"),
         None => return Err("missing field 'material'".into()),
     };
 
@@ -579,32 +582,32 @@ fn decode_plane<R: Rng + 'static>(entry: Entry) -> Result<world::Object<R>, Stri
     })
 }
 
-fn decode_mesh<R: Rng + 'static>(entry: Entry) -> Result<world::Object<R>, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_mesh<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let file_name: String = match items.get("file") {
-        Some(v) => try!(v.decode(), "file"),
+        Some(v) => try_for!(v.decode(), "file"),
         None => return Err("missing field 'file'".into()),
     };
 
     let scale = match items.get("scale") {
-        Some(v) => try!(v.decode(), "scale"),
+        Some(v) => try_for!(v.decode(), "scale"),
         None => 1.0,
     };
 
     let transform = match items.get("transform") {
-        Some(v) => try!(v.dynamic_decode(), "transform"),
+        Some(v) => try_for!(v.dynamic_decode(), "transform"),
         None => Matrix4::identity(),
     };
 
     let materials = match items.get("materials").map(|e| e.as_object()) {
-        Some(Some(fields)) => try!(fields
+        Some(Some(fields)) => fields
             .into_iter()
             .map(|(k, v)| {
-                let i = try!(v.dynamic_decode());
+                let i = v.dynamic_decode()?;
                 Ok((k.into(), i))
             })
-            .collect()),
+            .collect::<Result<HashMap<_, _>, String>>()?,
         Some(None) => {
             return Err(format!(
                 "materials: expected a structure, but found something else"
@@ -621,21 +624,21 @@ fn decode_mesh<R: Rng + 'static>(entry: Entry) -> Result<world::Object<R>, Strin
     })
 }
 
-fn decode_ray_marched<R: Rng + 'static>(entry: Entry) -> Result<world::Object<R>, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_ray_marched<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let bounds = match items.get("bounds") {
-        Some(v) => try!(v.dynamic_decode(), "bounds"),
+        Some(v) => try_for!(v.dynamic_decode(), "bounds"),
         None => return Err("missing field 'bounds'".into()),
     };
 
     let estimator = match items.get("shape") {
-        Some(v) => try!(v.dynamic_decode(), "shape"),
+        Some(v) => try_for!(v.dynamic_decode(), "shape"),
         None => return Err("missing field 'shape'".into()),
     };
 
     let (material, emissive): (materials::MaterialBox<R>, bool) = match items.get("material") {
-        Some(v) => try!(v.dynamic_decode(), "material"),
+        Some(v) => try_for!(v.dynamic_decode(), "material"),
         None => return Err("missing field 'material'".into()),
     };
 
@@ -649,32 +652,32 @@ fn decode_ray_marched<R: Rng + 'static>(entry: Entry) -> Result<world::Object<R>
     })
 }
 
-fn decode_bounding_sphere(entry: Entry) -> Result<BoundingVolume, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_bounding_sphere(entry: Entry<'_>) -> Result<BoundingVolume, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let position = match items.get("position") {
-        Some(v) => try!(v.dynamic_decode(), "position"),
+        Some(v) => try_for!(v.dynamic_decode(), "position"),
         None => return Err("missing field 'position'".into()),
     };
 
     let radius = match items.get("radius") {
-        Some(v) => try!(v.decode(), "radius"),
+        Some(v) => try_for!(v.decode(), "radius"),
         None => return Err("missing field 'radius'".into()),
     };
 
     Ok(BoundingVolume::Sphere(position, radius))
 }
 
-fn decode_bounding_box(entry: Entry) -> Result<BoundingVolume, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_bounding_box(entry: Entry<'_>) -> Result<BoundingVolume, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let min = match items.get("min") {
-        Some(v) => try!(v.dynamic_decode(), "min"),
+        Some(v) => try_for!(v.dynamic_decode(), "min"),
         None => return Err("missing field 'min'".into()),
     };
 
     let max = match items.get("max") {
-        Some(v) => try!(v.dynamic_decode(), "max"),
+        Some(v) => try_for!(v.dynamic_decode(), "max"),
         None => return Err("missing field 'max'".into()),
     };
 

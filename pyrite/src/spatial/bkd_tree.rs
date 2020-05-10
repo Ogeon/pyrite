@@ -2,7 +2,7 @@ use std::cmp::PartialOrd;
 use std::cmp::Ordering::Equal;
 
 use self::BkdTree::{Node, Leaf};
-use spatial::Dimensions;
+use crate::spatial::Dimensions;
 
 pub trait Element {
     type Item;

@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::slice;
-use spatial::Dimensions;
+use crate::spatial::Dimensions;
 
 pub trait Element {
     type Point: Point;
@@ -33,7 +33,7 @@ impl<E: Element> KdTree<E> {
         construct_tree(&mut elements, <E::Point as Point>::Dim::first(), arrity)
     }
 
-    pub fn neighbors<'a>(&'a self, point: &'a E::Point, radius: f64) -> Neighbors<E> {
+    pub fn neighbors<'a>(&'a self, point: &'a E::Point, radius: f64) -> Neighbors<'_, E> {
         Neighbors {
             stack: vec![self],
             current: None,
@@ -43,7 +43,7 @@ impl<E: Element> KdTree<E> {
     }
 }
 
-pub struct Neighbors<'a, E: Element + 'a>{
+pub struct Neighbors<'a, E: Element>{
     stack: Vec<&'a KdTree<E>>,
     current: Option<slice::Iter<'a, E>>,
     radius: f64,

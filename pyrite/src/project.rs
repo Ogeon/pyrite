@@ -2,20 +2,20 @@ use std::path::Path;
 
 use rand::Rng;
 
-use config;
-use config::entry::Entry;
-use config::Prelude;
+use crate::config;
+use crate::config::entry::Entry;
+use crate::config::Prelude;
 
-use cameras;
-use lamp;
-use materials;
-use math;
-use renderer;
-use shapes;
-use tracer;
-use types3d;
-use values;
-use world;
+use crate::cameras;
+use crate::lamp;
+use crate::materials;
+use crate::math;
+use crate::renderer;
+use crate::shapes;
+use crate::tracer;
+use crate::types3d;
+use crate::values;
+use crate::world;
 
 macro_rules! try_parse {
     ($e:expr) => {
@@ -116,26 +116,26 @@ pub struct ImageSpec {
     pub rgb_curves: (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>),
 }
 
-fn decode_image_spec(entry: Entry) -> Result<ImageSpec, String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_image_spec(entry: Entry<'_>) -> Result<ImageSpec, String> {
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let width = match fields.get("width") {
-        Some(v) => try!(v.decode(), "width"),
+        Some(v) => try_for!(v.decode(), "width"),
         None => return Err("missing field 'width'".into()),
     };
 
     let height = match fields.get("height") {
-        Some(v) => try!(v.decode(), "height"),
+        Some(v) => try_for!(v.decode(), "height"),
         None => return Err("missing field 'height'".into()),
     };
 
     let format = match fields.get("format") {
-        Some(v) => try!(v.dynamic_decode(), "format"),
+        Some(v) => try_for!(v.dynamic_decode(), "format"),
         None => return Err("missing field 'format'".into()),
     };
 
     let rgb_curves = match fields.get("rgb_curves") {
-        Some(v) => try!(decode_rgb_curves(v), "rgb_curves"),
+        Some(v) => try_for!(decode_rgb_curves(v), "rgb_curves"),
         None => return Err("missing field 'rgb_curves'".into()),
     };
 
@@ -148,22 +148,22 @@ fn decode_image_spec(entry: Entry) -> Result<ImageSpec, String> {
 }
 
 fn decode_rgb_curves(
-    entry: Entry,
+    entry: Entry<'_>,
 ) -> Result<(Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>), String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let red = match fields.get("red") {
-        Some(v) => try!(v.decode(), "red"),
+        Some(v) => try_for!(v.decode(), "red"),
         None => return Err("missing field 'red'".into()),
     };
 
     let green = match fields.get("green") {
-        Some(v) => try!(v.decode(), "green"),
+        Some(v) => try_for!(v.decode(), "green"),
         None => return Err("missing field 'green'".into()),
     };
 
     let blue = match fields.get("blue") {
-        Some(v) => try!(v.decode(), "blue"),
+        Some(v) => try_for!(v.decode(), "blue"),
         None => return Err("missing field 'blue'".into()),
     };
 
@@ -181,6 +181,6 @@ pub enum ImageFormat {
     Png,
 }
 
-fn decode_png(_: Entry) -> Result<ImageFormat, String> {
+fn decode_png(_: Entry<'_>) -> Result<ImageFormat, String> {
     Ok(ImageFormat::Png)
 }

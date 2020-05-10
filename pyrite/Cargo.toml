@@ -2,7 +2,8 @@
 
 name = "pyrite"
 version = "0.0.0"
-authors = []
+authors = ["Erik Hedvall <hello@erikhedvall.nu>"]
+edition = "2018"
 
 [[bin]]
 

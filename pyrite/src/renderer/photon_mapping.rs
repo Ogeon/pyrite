@@ -5,18 +5,18 @@ use rand_xorshift::XorShiftRng;
 
 use cgmath::{InnerSpace, Point2, Point3, Vector3};
 
-use cameras::Camera;
-use film::{Film, Pixel, Sample};
-use lamp::Surface;
-use renderer::algorithm::contribute;
-use renderer::{Renderer, Status, WorkPool};
-use spatial::kd_tree::{self, KdTree};
-use spatial::Dim3;
-use tracer::{trace, Bounce, BounceType, Light, RenderContext};
-use utils::{pairs, BatchRange};
-use world::World;
+use crate::cameras::Camera;
+use crate::film::{Film, Pixel, Sample};
+use crate::lamp::Surface;
+use crate::renderer::algorithm::contribute;
+use crate::renderer::{Renderer, Status, WorkPool};
+use crate::spatial::kd_tree::{self, KdTree};
+use crate::spatial::Dim3;
+use crate::tracer::{trace, Bounce, BounceType, Light, RenderContext};
+use crate::utils::{pairs, BatchRange};
+use crate::world::World;
 
-pub fn render<W: WorkPool, F: FnMut(Status)>(
+pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     film: &Film,
     workers: &mut W,
     mut on_status: F,

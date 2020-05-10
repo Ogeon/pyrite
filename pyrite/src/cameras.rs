@@ -3,17 +3,17 @@ use std::f64::consts;
 use rand::Rng;
 
 use cgmath::{
-    Angle, EuclideanSpace, InnerSpace, Matrix4, Point2, Point3, Rad, SquareMatrix,
-    Transform, Vector2,
+    Angle, EuclideanSpace, InnerSpace, Matrix4, Point2, Point3, Rad, SquareMatrix, Transform,
+    Vector2,
 };
 use collision::{Ray, Ray3};
 
-use film::Area;
+use crate::film::Area;
 
-use config::entry::Entry;
-use config::Prelude;
+use crate::config::entry::Entry;
+use crate::config::Prelude;
 
-use world::World;
+use crate::world::World;
 
 pub fn register_types(context: &mut Prelude) {
     context
@@ -137,26 +137,26 @@ impl Camera {
     }
 }
 
-fn decode_perspective(entry: Entry) -> Result<Camera, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_perspective(entry: Entry<'_>) -> Result<Camera, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let transform = match items.get("transform") {
-        Some(v) => try!(v.dynamic_decode(), "transform"),
+        Some(v) => try_for!(v.dynamic_decode(), "transform"),
         None => Matrix4::identity(),
     };
 
     let fov: f64 = match items.get("fov") {
-        Some(v) => try!(v.decode(), "fov"),
+        Some(v) => try_for!(v.decode(), "fov"),
         None => return Err("missing field of view ('fov')".into()),
     };
 
     let focus_distance: f64 = match items.get("focus_distance") {
-        Some(v) => try!(v.decode(), "focus_distance"),
+        Some(v) => try_for!(v.decode(), "focus_distance"),
         None => 1.0,
     };
 
     let aperture: f64 = match items.get("aperture") {
-        Some(v) => try!(v.decode(), "aperture"),
+        Some(v) => try_for!(v.decode(), "aperture"),
         None => 0.0,
     };
 

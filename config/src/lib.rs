@@ -1,8 +1,5 @@
 //!A parser and decoder for a human friendly configuration language.
 
-extern crate anymap;
-extern crate lalrpop_util;
-
 mod ast;
 pub mod entry;
 mod parser;
@@ -21,10 +18,10 @@ use anymap::AnyMap;
 
 use lalrpop_util::lalrpop_mod;
 
-use entry::Entry;
+use crate::entry::Entry;
 
-pub use ast::Number;
-pub use prelude::Prelude;
+pub use crate::ast::Number;
+pub use crate::prelude::Prelude;
 
 ///A collective parsing and interpretation error.
 #[derive(Debug)]
@@ -46,7 +43,7 @@ pub enum Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Error::Parse(ref e) => write!(f, "error while parsing: {:?}", e),
             Error::Io(ref e) => write!(f, "IO error: {:?}", e),
@@ -110,7 +107,7 @@ impl Parser {
     }
 
     ///Get a reference to the root entry.
-    pub fn root(&self) -> Entry {
+    pub fn root(&self) -> Entry<'_> {
         Entry::root_of(self)
     }
 
@@ -295,15 +292,15 @@ impl Parser {
 
 fn parse_file_in<P: AsRef<Path>>(
     path: P,
-    mut root: Object,
+    mut root: Object<'_>,
     new_root: Option<ast::Path>,
 ) -> Result<(), Error> {
     let mut source = String::new();
-    let mut file = try!(File::open(&path));
-    try!(file.read_to_string(&mut source));
+    let mut file = File::open(&path)?;
+    file.read_to_string(&mut source)?;
 
     let new_root = if let Some(new_root) = new_root {
-        try!(root.object(new_root.path)).into_root()
+        root.object(new_root.path)?.into_root()
     } else {
         root
     };
@@ -311,8 +308,8 @@ fn parse_file_in<P: AsRef<Path>>(
     parse(path.as_ref().parent().unwrap(), &source, new_root)
 }
 
-fn parse<P: AsRef<Path>>(path: P, source: &str, mut root: Object) -> Result<(), Error> {
-    let statements = try!(parser::parse(source));
+fn parse<P: AsRef<Path>>(path: P, source: &str, mut root: Object<'_>) -> Result<(), Error> {
+    let statements = parser::parse(source)?;
 
     for statement in statements {
         /*let parser::Span {
@@ -323,9 +320,9 @@ fn parse<P: AsRef<Path>>(path: P, source: &str, mut root: Object) -> Result<(), 
         match statement {
             ast::Statement::Include(file, new_root) => {
                 let path = path.as_ref().join(file);
-                try!(parse_file_in(path, root.borrow(), new_root))
+                parse_file_in(path, root.borrow(), new_root)?
             }
-            ast::Statement::Assign(path, value) => try!(root.assign(path.path, value)),
+            ast::Statement::Assign(path, value) => root.assign(path.path, value)?,
         }
     }
 
@@ -337,12 +334,12 @@ pub trait Decode: Any {}
 
 impl<T: Any> Decode for T {}
 
-struct Decoder<T: Decode>(Box<dyn Fn(Entry) -> Result<T, String>>);
+struct Decoder<T: Decode>(Box<dyn Fn(Entry<'_>) -> Result<T, String>>);
 
 impl<T: Decode> Decoder<T> {
     fn new<F>(decode_fn: F) -> Decoder<T>
     where
-        F: Fn(Entry) -> Result<T, String>,
+        F: Fn(Entry<'_>) -> Result<T, String>,
         F: 'static,
     {
         Decoder(Box::new(decode_fn))
@@ -436,18 +433,18 @@ enum Selection {
 pub struct StackTrace(Vec<Selection>);
 
 impl fmt::Display for StackTrace {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut path = self.0.iter();
         match path.next() {
-            Some(&Selection::Ident(ref ident)) => try!(ident.fmt(f)),
-            Some(&Selection::Index(index)) => try!(write!(f, "{{root}}[{}]", index)),
-            None => try!("{root}".fmt(f)),
+            Some(&Selection::Ident(ref ident)) => ident.fmt(f)?,
+            Some(&Selection::Index(index)) => write!(f, "{{root}}[{}]", index)?,
+            None => "{root}".fmt(f)?,
         }
 
         for s in path {
             match *s {
-                Selection::Ident(ref ident) => try!(write!(f, ".{}", ident)),
-                Selection::Index(index) => try!(write!(f, "[{}]", index)),
+                Selection::Ident(ref ident) => write!(f, ".{}", ident)?,
+                Selection::Index(index) => write!(f, "[{}]", index)?,
             }
         }
 
@@ -462,7 +459,7 @@ struct Object<'a> {
 }
 
 impl<'a> Object<'a> {
-    fn root_of(cfg: &mut Parser) -> Object {
+    fn root_of(cfg: &mut Parser) -> Object<'_> {
         Object {
             cfg: cfg,
             id: 0,
@@ -470,7 +467,7 @@ impl<'a> Object<'a> {
         }
     }
 
-    fn root(&mut self) -> Object {
+    fn root(&mut self) -> Object<'_> {
         Object {
             cfg: self.cfg,
             id: self.root,
@@ -486,7 +483,7 @@ impl<'a> Object<'a> {
         }
     }
 
-    fn borrow(&mut self) -> Object {
+    fn borrow(&mut self) -> Object<'_> {
         Object {
             cfg: self.cfg,
             id: self.id,
@@ -515,24 +512,24 @@ impl<'a> Object<'a> {
     {
         match value {
             ast::Value::Object(ast::Object::New(values)) => {
-                let mut obj = try!(self.object(path));
+                let mut obj = self.object(path)?;
                 for (path, value) in values {
-                    try!(obj.assign(path.path, value));
+                    obj.assign(path.path, value)?;
                 }
             }
             ast::Value::Object(ast::Object::Extension(base, Some(values))) => {
                 let base_id = match base.path_type {
-                    ast::PathType::Local => try!(self.id_of(base.path)),
-                    ast::PathType::Global => try!(self.root().id_of(base.path)),
+                    ast::PathType::Local => self.id_of(base.path)?,
+                    ast::PathType::Global => self.root().id_of(base.path)?,
                 };
 
-                let mut obj = try!(self.object(path));
-                try!(obj.set_base(base_id));
+                let mut obj = self.object(path)?;
+                obj.set_base(base_id)?;
 
                 match values {
                     ast::ExtensionChanges::BlockStyle(values) => {
                         for (path, value) in values {
-                            try!(obj.assign(path.path, value));
+                            obj.assign(path.path, value)?;
                         }
                     }
                     ast::ExtensionChanges::FunctionStyle(values) => {
@@ -541,7 +538,7 @@ impl<'a> Object<'a> {
                                 return Err(Error::TooManyArguments(obj.trace(), arguments.len()));
                             } else {
                                 for (field, value) in arguments.into_iter().zip(values) {
-                                    try!(obj.assign(Some(field), value));
+                                    obj.assign(Some(field), value)?;
                                 }
                             }
                         }
@@ -550,24 +547,24 @@ impl<'a> Object<'a> {
             }
             ast::Value::Object(ast::Object::Extension(base, None)) => {
                 let base_id = match base.path_type {
-                    ast::PathType::Local => try!(self.id_of(base.path)),
-                    ast::PathType::Global => try!(self.root().id_of(base.path)),
+                    ast::PathType::Local => self.id_of(base.path)?,
+                    ast::PathType::Global => self.root().id_of(base.path)?,
                 };
-                try!(self.link(path, base_id));
+                self.link(path, base_id)?;
             }
-            ast::Value::Number(number) => try!(self.value(path, Value::Number(number))),
-            ast::Value::String(string) => try!(self.value(path, Value::String(string))),
+            ast::Value::Number(number) => self.value(path, Value::Number(number))?,
+            ast::Value::String(string) => self.value(path, Value::String(string))?,
             ast::Value::List(values) => {
-                let mut list = try!(self.list(path));
+                let mut list = self.list(path)?;
                 for value in values {
-                    try!(list.insert(value));
+                    list.insert(value)?;
                 }
             }
         }
         Ok(())
     }
 
-    fn object<P>(&mut self, path: P) -> Result<Object, Error>
+    fn object<P>(&mut self, path: P) -> Result<Object<'_>, Error>
     where
         P: IntoIterator<Item = String>,
         P::IntoIter: Iterator,
@@ -630,14 +627,14 @@ impl<'a> Object<'a> {
                         root: self.root,
                     };
 
-                    obj = try!(o.add_child(
+                    obj = o.add_child(
                         ident,
                         NodeType::Object {
                             base: child_base,
                             children: HashMap::new(),
-                            arguments: vec![]
-                        }
-                    ));
+                            arguments: vec![],
+                        },
+                    )?;
                 }
                 Action::Create(base) => {
                     if let Some(base) = base {
@@ -652,19 +649,19 @@ impl<'a> Object<'a> {
                         root: self.root,
                     };
 
-                    obj = try!(o.add_child(
+                    obj = o.add_child(
                         ident,
                         NodeType::Object {
                             base: base,
                             children: HashMap::new(),
-                            arguments: vec![]
-                        }
-                    ));
+                            arguments: vec![],
+                        },
+                    )?;
                 }
             }
         }
 
-        try!(self.cfg.make_object(obj));
+        self.cfg.make_object(obj)?;
 
         Ok(Object {
             cfg: self.cfg,
@@ -684,7 +681,7 @@ impl<'a> Object<'a> {
         assert!(len > 0);
 
         let mut obj = if len > 1 {
-            try!(self.object(path.by_ref().take(len - 1)))
+            self.object(path.by_ref().take(len - 1))?
         } else {
             self.borrow()
         };
@@ -703,7 +700,7 @@ impl<'a> Object<'a> {
         assert!(len > 0);
 
         let mut obj = if len > 1 {
-            try!(self.object(path.by_ref().take(len - 1)))
+            self.object(path.by_ref().take(len - 1))?
         } else {
             self.borrow()
         };
@@ -711,7 +708,7 @@ impl<'a> Object<'a> {
         obj.add_child(key, NodeType::Value(value)).map(|_| ())
     }
 
-    fn list<P>(&mut self, path: P) -> Result<List, Error>
+    fn list<P>(&mut self, path: P) -> Result<List<'_>, Error>
     where
         P: IntoIterator<Item = String>,
         P::IntoIter: Iterator,
@@ -723,12 +720,12 @@ impl<'a> Object<'a> {
 
         let id = {
             let mut obj = if len > 1 {
-                try!(self.object(path.by_ref().take(len - 1)))
+                self.object(path.by_ref().take(len - 1))?
             } else {
                 self.borrow()
             };
             let key = path.next().unwrap();
-            try!(obj.add_child(key, NodeType::List(vec![])))
+            obj.add_child(key, NodeType::List(vec![]))?
         };
         Ok(List {
             cfg: self.cfg,
@@ -796,7 +793,7 @@ impl<'a> Object<'a> {
             assert!(len > 0);
 
             let mut obj = if len > 1 {
-                try!(self.object(path.by_ref().take(len - 1)))
+                self.object(path.by_ref().take(len - 1))?
             } else {
                 self.borrow()
             };
@@ -835,7 +832,7 @@ struct List<'a> {
 }
 
 impl<'a> List<'a> {
-    fn root(&mut self) -> Object {
+    fn root(&mut self) -> Object<'_> {
         Object {
             cfg: self.cfg,
             id: self.root,
@@ -848,7 +845,7 @@ impl<'a> List<'a> {
             ast::Value::Object(ast::Object::New(values)) => {
                 let mut obj = self.object();
                 for (path, value) in values {
-                    try!(obj.assign(path.path, value));
+                    obj.assign(path.path, value)?;
                 }
             }
             ast::Value::Object(ast::Object::Extension(base, Some(values))) => {
@@ -856,16 +853,16 @@ impl<'a> List<'a> {
                     ast::PathType::Local => {
                         return Err(Error::LocalPathInList(self.trace(), base.path))
                     }
-                    ast::PathType::Global => try!(self.root().id_of(base.path)),
+                    ast::PathType::Global => self.root().id_of(base.path)?,
                 };
 
                 let mut obj = self.object();
-                try!(obj.set_base(base_id));
+                obj.set_base(base_id)?;
 
                 match values {
                     ast::ExtensionChanges::BlockStyle(values) => {
                         for (path, value) in values {
-                            try!(obj.assign(path.path, value));
+                            obj.assign(path.path, value)?;
                         }
                     }
                     ast::ExtensionChanges::FunctionStyle(values) => {
@@ -874,7 +871,7 @@ impl<'a> List<'a> {
                                 return Err(Error::TooManyArguments(obj.trace(), arguments.len()));
                             } else {
                                 for (field, value) in arguments.into_iter().zip(values) {
-                                    try!(obj.assign(Some(field), value));
+                                    obj.assign(Some(field), value)?;
                                 }
                             }
                         }
@@ -886,7 +883,7 @@ impl<'a> List<'a> {
                     ast::PathType::Local => {
                         return Err(Error::LocalPathInList(self.trace(), base.path))
                     }
-                    ast::PathType::Global => try!(self.root().id_of(base.path)),
+                    ast::PathType::Global => self.root().id_of(base.path)?,
                 };
                 self.link(base_id);
             }
@@ -895,14 +892,14 @@ impl<'a> List<'a> {
             ast::Value::List(values) => {
                 let mut list = self.list();
                 for value in values {
-                    try!(list.insert(value));
+                    list.insert(value)?;
                 }
             }
         }
         Ok(())
     }
 
-    fn object(&mut self) -> Object {
+    fn object(&mut self) -> Object<'_> {
         let id = self.add_item(NodeType::Object {
             base: None,
             children: HashMap::new(),
@@ -923,7 +920,7 @@ impl<'a> List<'a> {
         self.add_item(NodeType::Value(value));
     }
 
-    fn list(&mut self) -> List {
+    fn list(&mut self) -> List<'_> {
         let id = self.add_item(NodeType::List(vec![]));
         List {
             cfg: self.cfg,
@@ -951,14 +948,14 @@ impl<'a> List<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::entry::{Entry, FromEntry};
+    use crate::Node;
+    use crate::NodeType;
+    use crate::Object;
+    use crate::Parser;
+    use crate::Prelude;
     use anymap::any::Any;
-    use entry::{Entry, FromEntry};
     use std::collections::HashMap;
-    use Node;
-    use NodeType;
-    use Object;
-    use Parser;
-    use Prelude;
 
     macro_rules! assert_ok {
         ($e: expr) => {

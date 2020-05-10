@@ -1,18 +1,8 @@
 #![cfg_attr(test, allow(dead_code))]
 
-extern crate cgmath;
-extern crate collision;
-extern crate crossbeam;
-extern crate genmesh;
-extern crate image;
-extern crate num_cpus;
-extern crate obj;
-extern crate palette;
-extern crate pyrite_config as config;
-extern crate rand;
-extern crate rand_xorshift;
-extern crate rayon;
-extern crate time;
+use image;
+use pyrite_config as config;
+use rand;
 
 use std::io::{stdout, Write};
 use std::path::Path;
@@ -28,16 +18,9 @@ use rand_xorshift::XorShiftRng;
 
 use palette::{LinSrgb, Pixel, Srgb};
 
-use film::{Film, Spectrum};
+use crate::film::{Film, Spectrum};
 
-macro_rules! try {
-    ($e:expr) => {
-        match $e {
-            Ok(v) => v,
-            Err(e) => return Err(e),
-        }
-    };
-
+macro_rules! try_for {
     ($e:expr, $under:expr) => {
         match $e {
             Ok(v) => v,

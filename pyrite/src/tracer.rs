@@ -5,10 +5,10 @@ use rand::Rng;
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
 use collision::Ray3;
 
-use config::entry::Entry;
-use config::{Decode, Value};
-use lamp::{self, Lamp};
-use world::World;
+use crate::config::entry::Entry;
+use crate::config::{Decode, Value};
+use crate::lamp::{self, Lamp};
+use crate::world::World;
 
 pub use self::Reflection::{Emit, Reflect};
 
@@ -318,7 +318,7 @@ fn trace_directional<'w, R: Rng>(ray: Vector3<f64>, world: &'w World<R>) -> Opti
 }
 
 pub fn decode_parametric_number<From: Decode + 'static>(
-    item: Entry,
+    item: Entry<'_>,
 ) -> Result<Box<dyn ParametricValue<From, f64>>, String> {
     if let Some(&Value::Number(num)) = item.as_value() {
         Ok(Box::new(num.as_float()) as Box<dyn ParametricValue<From, f64>>)

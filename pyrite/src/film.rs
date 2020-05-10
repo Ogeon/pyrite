@@ -10,7 +10,7 @@ use rand::Rng;
 
 use cgmath::{BaseNum, EuclideanSpace, InnerSpace, Point2, Vector2};
 
-use cameras::Camera;
+use crate::cameras::Camera;
 
 pub struct Film {
     width: usize,
@@ -222,7 +222,7 @@ impl FilmTile {
         }
     }
 
-    fn pixels_mut(&self) -> RwLockWriteGuard<Vec<Pixel>> {
+    fn pixels_mut(&self) -> RwLockWriteGuard<'_, Vec<Pixel>> {
         self.changed.store(true, atomic::Ordering::Release);
         self.pixels
             .write()
@@ -230,7 +230,7 @@ impl FilmTile {
             .expect("could not lock pixels for writing")
     }
 
-    fn read_if_changed(&self) -> Option<RwLockReadGuard<Vec<Pixel>>> {
+    fn read_if_changed(&self) -> Option<RwLockReadGuard<'_, Vec<Pixel>>> {
         if self.changed.swap(false, atomic::Ordering::AcqRel) {
             Some(
                 self.pixels
@@ -571,7 +571,7 @@ pub struct Spectrum {
 }
 
 impl Spectrum {
-    pub fn segments(&self) -> SpectrumSegments {
+    pub fn segments(&self) -> SpectrumSegments<'_> {
         SpectrumSegments {
             start: self.min,
             segment_width: self.width / self.values.len() as f64,

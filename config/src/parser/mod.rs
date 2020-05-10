@@ -1,11 +1,11 @@
-use ast;
+use crate::ast;
 use lalrpop_util::{lexer::Token, ParseError};
 
-use grammar;
+use crate::grammar;
 
 pub type Error<'s> = ParseError<usize, Token<'s>, &'s str>;
 
-pub fn parse(src: &str) -> Result<Vec<ast::Statement>, Error> {
+pub fn parse(src: &str) -> Result<Vec<ast::Statement>, Error<'_>> {
     grammar::StatementsParser::new()
         .parse(src)
         .map_err(|e| e.into())
@@ -13,8 +13,8 @@ pub fn parse(src: &str) -> Result<Vec<ast::Statement>, Error> {
 
 #[cfg(test)]
 mod tests {
-    use ast::{Path, PathType, Statement, Value};
-    use parser::parse;
+    use crate::ast::{Path, PathType, Statement, Value};
+    use crate::parser::parse;
 
     #[test]
     fn statement() {

@@ -2,13 +2,13 @@ use num_cpus;
 
 use rand_xorshift::XorShiftRng;
 
-use config::entry::{Entry, Object};
-use config::Prelude;
+use crate::config::entry::{Entry, Object};
+use crate::config::Prelude;
 
-use cameras;
-use world;
+use crate::cameras;
+use crate::world;
 
-use film::Film;
+use crate::film::Film;
 
 mod algorithm;
 mod photon_mapping;
@@ -42,7 +42,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn render<W: WorkPool, F: FnMut(Status)>(
+    pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
         &self,
         film: &Film,
         workers: &mut W,
@@ -123,35 +123,35 @@ pub struct Status<'a> {
     pub message: &'a str,
 }
 
-fn decode_renderer(items: Object, algorithm: Algorithm) -> Result<Renderer, String> {
+fn decode_renderer(items: Object<'_>, algorithm: Algorithm) -> Result<Renderer, String> {
     let threads = match items.get("threads") {
-        Some(v) => try!(v.decode(), "threads"),
+        Some(v) => try_for!(v.decode(), "threads"),
         None => num_cpus::get(),
     };
 
     let bounces = match items.get("bounces") {
-        Some(v) => try!(v.decode(), "bounces"),
+        Some(v) => try_for!(v.decode(), "bounces"),
         None => 8,
     };
 
     let pixel_samples = match items.get("pixel_samples") {
-        Some(v) => try!(v.decode(), "pixel_samples"),
+        Some(v) => try_for!(v.decode(), "pixel_samples"),
         None => 10,
     };
 
     let light_samples = match items.get("light_samples") {
-        Some(v) => try!(v.decode(), "light_samples"),
+        Some(v) => try_for!(v.decode(), "light_samples"),
         None => 4,
     };
 
     let tile_size = match items.get("tile_size") {
-        Some(v) => try!(v.decode(), "tile_size"),
+        Some(v) => try_for!(v.decode(), "tile_size"),
         None => 64,
     };
 
     let (spectrum_samples, spectrum_bins, spectrum_span) =
         match items.get("spectrum").map(|e| e.as_object()) {
-            Some(Some(v)) => try!(decode_spectrum(v), "spectrum"),
+            Some(Some(v)) => try_for!(decode_spectrum(v), "spectrum"),
             Some(None) => {
                 return Err(format!(
                     "spectrum: expected a structure, but found something else"
@@ -177,38 +177,38 @@ fn decode_renderer(items: Object, algorithm: Algorithm) -> Result<Renderer, Stri
     })
 }
 
-fn decode_spectrum(items: Object) -> Result<(u32, usize, (f64, f64)), String> {
+fn decode_spectrum(items: Object<'_>) -> Result<(u32, usize, (f64, f64)), String> {
     let samples = match items.get("samples") {
-        Some(v) => try!(v.decode(), "samples"),
+        Some(v) => try_for!(v.decode(), "samples"),
         None => DEFAULT_SPECTRUM_SAMPLES,
     };
 
     let bins = match items.get("bins") {
-        Some(v) => try!(v.decode(), "bins"),
+        Some(v) => try_for!(v.decode(), "bins"),
         None => DEFAULT_SPECTRUM_BINS,
     };
 
     let span = match items.get("span") {
-        Some(v) => try!(v.decode(), "span"),
+        Some(v) => try_for!(v.decode(), "span"),
         None => DEFAULT_SPECTRUM_SPAN,
     };
 
     Ok((samples, bins, span))
 }
 
-fn decode_simple(entry: Entry) -> Result<Renderer, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_simple(entry: Entry<'_>) -> Result<Renderer, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let algorithm = Algorithm::Simple;
 
     decode_renderer(items, algorithm)
 }
 
-fn decode_bidirectional(entry: Entry) -> Result<Renderer, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_bidirectional(entry: Entry<'_>) -> Result<Renderer, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let light_bounces = match items.get("light_bounces") {
-        Some(v) => try!(v.decode(), "light_bounces"),
+        Some(v) => try_for!(v.decode(), "light_bounces"),
         None => 8,
     };
 
@@ -219,26 +219,26 @@ fn decode_bidirectional(entry: Entry) -> Result<Renderer, String> {
     decode_renderer(items, algorithm)
 }
 
-fn decode_photon_mapping(entry: Entry) -> Result<Renderer, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_photon_mapping(entry: Entry<'_>) -> Result<Renderer, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let photons = match items.get("photons") {
-        Some(v) => try!(v.decode(), "photons"),
+        Some(v) => try_for!(v.decode(), "photons"),
         None => 10000,
     };
 
     let photon_bounces = match items.get("photon_bounces") {
-        Some(v) => try!(v.decode(), "photon_bounces"),
+        Some(v) => try_for!(v.decode(), "photon_bounces"),
         None => 8,
     };
 
     let photon_passes = match items.get("photon_passes") {
-        Some(v) => try!(v.decode(), "photon_passes"),
+        Some(v) => try_for!(v.decode(), "photon_passes"),
         None => 1,
     };
 
     let radius = match items.get("radius") {
-        Some(v) => try!(v.decode(), "radius"),
+        Some(v) => try_for!(v.decode(), "radius"),
         None => 0.1,
     };
 

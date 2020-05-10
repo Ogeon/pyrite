@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 
-use Decode;
-use Decoder;
-use NodeType;
-use Number;
-use Parser;
-use Value;
+use crate::Decode;
+use crate::Decoder;
+use crate::NodeType;
+use crate::Number;
+use crate::Parser;
+use crate::Value;
 
 ///An entry in a parsed configuration.
 #[derive(Clone)]
@@ -18,7 +18,7 @@ pub struct Entry<'a> {
 
 impl<'a> Entry<'a> {
     ///Get the root entry from a particular parser.
-    pub fn root_of(cfg: &Parser) -> Entry {
+    pub fn root_of(cfg: &Parser) -> Entry<'_> {
         Entry { cfg: cfg, id: 0 }
     }
 
@@ -174,11 +174,11 @@ macro_rules! tuple_from_entry {
                     let mut iter = list.into_iter();
                     let result = ({
                             let i = iter.next().ok_or("too few items".into()).and_then(|e| $first::from_entry(e));
-                            try!(i)
+                            i?
                         }
                         $(, {
                             let i = iter.next().ok_or("too few items".into()).and_then(|e| $types::from_entry(e));
-                            try!(i)
+                            i?
                         })*
                     );
 
@@ -201,7 +201,7 @@ macro_rules! tuple_from_entry {
                 entry.as_list().ok_or("expected a list".into()).and_then(|list| {
                     if list.len() == 1 {
                         Ok(({
-                                try!($ty::from_entry(list.get(0).unwrap()))
+                                $ty::from_entry(list.get(0).unwrap())?
                             },
                         ))
                     } else {
@@ -234,7 +234,7 @@ impl<'a> List<'a> {
     }
 
     ///Iterate over the elements of the list.
-    pub fn iter(&self) -> Items {
+    pub fn iter(&self) -> Items<'_> {
         Items {
             cfg: self.cfg,
             iter: self.list.iter(),
@@ -326,7 +326,7 @@ impl<'a> Object<'a> {
     }
 
     ///Iterate over the entries in the object.
-    pub fn iter(&self) -> Entries {
+    pub fn iter(&self) -> Entries<'_> {
         Entries {
             cfg: self.cfg,
             iter: self.children.iter(),

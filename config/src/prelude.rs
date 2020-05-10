@@ -2,14 +2,14 @@
 
 use std::collections::HashMap;
 
-use Parser;
-use Node;
-use NodeType;
-use Value;
-use Decode;
-use Decoder;
+use crate::Parser;
+use crate::Node;
+use crate::NodeType;
+use crate::Value;
+use crate::Decode;
+use crate::Decoder;
 
-use entry::Entry;
+use crate::entry::Entry;
 
 pub struct Prelude(Parser);
 
@@ -168,7 +168,7 @@ impl<'a> Object<'a> {
     ///as they decodes to different types.
     pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
         T: Decode,
-        F: Fn(Entry) -> Result<T, String>,
+        F: Fn(Entry<'_>) -> Result<T, String>,
         F: 'static
     {
         self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
@@ -242,7 +242,7 @@ impl<'a> List<'a> {
     ///as they decodes to different types.
     pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
         T: Decode,
-        F: Fn(Entry) -> Result<T, String>,
+        F: Fn(Entry<'_>) -> Result<T, String>,
         F: 'static
     {
         self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));

@@ -1,14 +1,14 @@
 use rand::{Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
-use cameras::Camera;
-use film::{Film, Sample, Tile};
-use renderer::algorithm::contribute;
-use renderer::{Renderer, Status, WorkPool};
-use tracer::{trace, Light};
-use world::World;
+use crate::cameras::Camera;
+use crate::film::{Film, Sample, Tile};
+use crate::renderer::algorithm::contribute;
+use crate::renderer::{Renderer, Status, WorkPool};
+use crate::tracer::{trace, Light};
+use crate::world::World;
 
-pub fn render<W: WorkPool, F: FnMut(Status)>(
+pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     film: &Film,
     workers: &mut W,
     mut on_status: F,
@@ -46,7 +46,7 @@ pub fn render<W: WorkPool, F: FnMut(Status)>(
 
 fn render_tile<R: Rng>(
     mut rng: R,
-    tile: &mut Tile,
+    tile: &mut Tile<'_>,
     camera: &Camera,
     world: &World<R>,
     renderer: &Renderer,

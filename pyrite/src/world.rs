@@ -10,15 +10,15 @@ use obj;
 use cgmath::{InnerSpace, Matrix4, Point3, Vector3};
 use collision::Ray3;
 
-use config::entry::Entry;
-use config::Prelude;
+use crate::config::entry::Entry;
+use crate::config::Prelude;
 
-use spatial::{bkd_tree, Dim3};
+use crate::spatial::{bkd_tree, Dim3};
 
-use lamp::Lamp;
-use materials;
-use shapes::{self, Shape};
-use tracer::{self, Color, Material};
+use crate::lamp::Lamp;
+use crate::materials;
+use crate::shapes::{self, Shape};
+use crate::tracer::{self, Color, Material};
 
 pub enum Sky {
     Color(Box<Color>),
@@ -129,11 +129,11 @@ pub fn register_types(context: &mut Prelude) {
     object.arguments(vec!["color".into()]);
 }
 
-fn decode_sky_color(entry: Entry) -> Result<Sky, String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_sky_color(entry: Entry<'_>) -> Result<Sky, String> {
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
@@ -141,18 +141,18 @@ fn decode_sky_color(entry: Entry) -> Result<Sky, String> {
 }
 
 pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
-    entry: Entry,
+    entry: Entry<'_>,
     make_path: F,
 ) -> Result<World<R>, String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let sky = match fields.get("sky") {
-        Some(v) => try!(v.dynamic_decode(), "sky"),
+        Some(v) => try_for!(v.dynamic_decode(), "sky"),
         None => return Err("missing field 'sky'".into()),
     };
 
     let object_protos = match fields.get("objects") {
-        Some(v) => try!(
+        Some(v) => try_for!(
             v.as_list().ok_or(String::from("expected a list")),
             "objects"
         ),
@@ -163,7 +163,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
     let mut lights = Vec::new();
 
     for (i, object) in object_protos.into_iter().enumerate() {
-        let shape = try!(object.dynamic_decode(), format!("objects: [{}]", i));
+        let shape = try_for!(object.dynamic_decode(), format!("objects: [{}]", i));
         match shape {
             Object::Shape { shape, emissive } => {
                 let shape = Arc::new(shape);
@@ -244,7 +244,7 @@ fn vertex_to_vector(v: &[f32; 3]) -> Vector3<f64> {
 }
 
 fn make_triangle<M: obj::GenPolygon, R: Rng>(
-    obj: &obj::Obj<M>,
+    obj: &obj::Obj<'_, M>,
     obj::IndexTuple(v1, _t1, n1): obj::IndexTuple,
     obj::IndexTuple(v2, _t2, n2): obj::IndexTuple,
     obj::IndexTuple(v3, _t3, n3): obj::IndexTuple,

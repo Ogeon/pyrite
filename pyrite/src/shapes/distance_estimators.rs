@@ -1,11 +1,11 @@
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Quaternion, Vector3};
 
-use config::entry::Entry;
-use config::Prelude;
+use crate::config::entry::Entry;
+use crate::config::Prelude;
 
-use tracer::ParametricValue;
+use crate::tracer::ParametricValue;
 
-use shapes::DistanceEstimator;
+use crate::shapes::DistanceEstimator;
 
 struct Mandelbulb {
     iterations: u16,
@@ -136,26 +136,26 @@ pub fn register_types(context: &mut Prelude) {
     }
 }
 
-fn decode_mandelbulb(entry: Entry) -> Result<DistanceEstimator, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_mandelbulb(entry: Entry<'_>) -> Result<DistanceEstimator, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let iterations = match items.get("iterations") {
-        Some(v) => try!(v.decode(), "iterations"),
+        Some(v) => try_for!(v.decode(), "iterations"),
         None => return Err("missing field 'iterations'".into()),
     };
 
     let threshold = match items.get("threshold") {
-        Some(v) => try!(v.decode(), "threshold"),
+        Some(v) => try_for!(v.decode(), "threshold"),
         None => return Err("missing field 'threshold'".into()),
     };
 
     let power = match items.get("power") {
-        Some(v) => try!(v.decode(), "power"),
+        Some(v) => try_for!(v.decode(), "power"),
         None => return Err("missing field 'power'".into()),
     };
 
     let constant = match items.get("constant") {
-        Some(v) => Some(try!(v.dynamic_decode(), "constant")),
+        Some(v) => Some(try_for!(v.dynamic_decode(), "constant")),
         None => None,
     };
 
@@ -167,31 +167,31 @@ fn decode_mandelbulb(entry: Entry) -> Result<DistanceEstimator, String> {
     }))
 }
 
-fn decode_quaternion_julia(entry: Entry) -> Result<DistanceEstimator, String> {
-    let items = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_quaternion_julia(entry: Entry<'_>) -> Result<DistanceEstimator, String> {
+    let items = entry.as_object().ok_or("not an object")?;
 
     let iterations = match items.get("iterations") {
-        Some(v) => try!(v.decode(), "iterations"),
+        Some(v) => try_for!(v.decode(), "iterations"),
         None => return Err("missing field 'iterations'".into()),
     };
 
     let threshold = match items.get("threshold") {
-        Some(v) => try!(v.decode(), "threshold"),
+        Some(v) => try_for!(v.decode(), "threshold"),
         None => return Err("missing field 'threshold'".into()),
     };
 
     let constant = match items.get("constant") {
-        Some(v) => try!(v.dynamic_decode(), "constant"),
+        Some(v) => try_for!(v.dynamic_decode(), "constant"),
         None => return Err("missing field 'constant'".into()),
     };
 
     let slice_plane = match items.get("slice_plane") {
-        Some(v) => try!(v.decode(), "slice_plane"),
+        Some(v) => try_for!(v.decode(), "slice_plane"),
         None => return Err("missing field 'slice_plane'".into()),
     };
 
     let ty = match items.get("type") {
-        Some(v) => try!(v.dynamic_decode(), "type"),
+        Some(v) => try_for!(v.dynamic_decode(), "type"),
         None => QuatMul::Regular,
     };
 
@@ -204,14 +204,14 @@ fn decode_quaternion_julia(entry: Entry) -> Result<DistanceEstimator, String> {
     }))
 }
 
-fn decode_quat_mul_regular(_entry: Entry) -> Result<QuatMul, String> {
+fn decode_quat_mul_regular(_entry: Entry<'_>) -> Result<QuatMul, String> {
     Ok(QuatMul::Regular)
 }
 
-fn decode_quat_mul_cubic(_entry: Entry) -> Result<QuatMul, String> {
+fn decode_quat_mul_cubic(_entry: Entry<'_>) -> Result<QuatMul, String> {
     Ok(QuatMul::Cubic)
 }
 
-fn decode_quat_mul_bicomplex(_entry: Entry) -> Result<QuatMul, String> {
+fn decode_quat_mul_bicomplex(_entry: Entry<'_>) -> Result<QuatMul, String> {
     Ok(QuatMul::Bicomplex)
 }

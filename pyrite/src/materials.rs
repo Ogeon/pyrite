@@ -3,13 +3,12 @@ use rand::Rng;
 use cgmath::{InnerSpace, Vector3};
 use collision::Ray3;
 
-use tracer;
-use tracer::{Color, Emit, Light, Material, Reflect, Reflection};
+use crate::tracer::{self, Color, Emit, Light, Material, Reflect, Reflection};
 
-use config::entry::Entry;
-use config::Prelude;
+use crate::config::entry::Entry;
+use crate::config::Prelude;
 
-use math;
+use crate::math;
 
 pub type MaterialBox<R> = Box<dyn Material<R> + 'static + Send + Sync>;
 
@@ -24,7 +23,7 @@ impl<R: Rng> Material<R> for Diffuse {
         ray_in: Ray3<f64>,
         normal: Ray3<f64>,
         rng: &mut R,
-    ) -> Reflection {
+    ) -> Reflection<'_> {
         let n = if ray_in.direction.dot(normal.direction) < 0.0 {
             normal.direction
         } else {
@@ -66,7 +65,7 @@ impl<R: Rng> Material<R> for Emission {
         _ray_in: Ray3<f64>,
         _normal: Ray3<f64>,
         _rng: &mut R,
-    ) -> Reflection {
+    ) -> Reflection<'_> {
         Emit(&*self.color)
     }
 
@@ -92,7 +91,7 @@ impl<R: Rng> Material<R> for Mirror {
         ray_in: Ray3<f64>,
         normal: Ray3<f64>,
         _rng: &mut R,
-    ) -> Reflection {
+    ) -> Reflection<'_> {
         let mut n = if ray_in.direction.dot(normal.direction) < 0.0 {
             normal.direction
         } else {
@@ -133,7 +132,7 @@ impl<R: Rng> Material<R> for Mix<R> {
         ray_in: Ray3<f64>,
         normal: Ray3<f64>,
         rng: &mut R,
-    ) -> Reflection {
+    ) -> Reflection<'_> {
         if self.factor < rng.gen() {
             self.a.reflect(light, ray_in, normal, rng)
         } else {
@@ -172,7 +171,7 @@ impl<R: Rng> Material<R> for FresnelMix<R> {
         ray_in: Ray3<f64>,
         normal: Ray3<f64>,
         rng: &mut R,
-    ) -> Reflection {
+    ) -> Reflection<'_> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
@@ -274,7 +273,7 @@ impl<R: Rng> Material<R> for Refractive {
         ray_in: Ray3<f64>,
         normal: Ray3<f64>,
         rng: &mut R,
-    ) -> Reflection {
+    ) -> Reflection<'_> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
@@ -380,54 +379,54 @@ pub fn register_types<R: Rng + 'static>(context: &mut Prelude) {
         .add_decoder(decode_refractive::<R>);
 }
 
-pub fn decode_diffuse<R: Rng>(entry: Entry) -> Result<(MaterialBox<R>, bool), String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+pub fn decode_diffuse<R: Rng>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
     Ok((Box::new(Diffuse { color: color }) as MaterialBox<R>, false))
 }
 
-pub fn decode_emission<R: Rng>(entry: Entry) -> Result<(MaterialBox<R>, bool), String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+pub fn decode_emission<R: Rng>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
     Ok((Box::new(Emission { color: color }) as MaterialBox<R>, true))
 }
 
-pub fn decode_mirror<R: Rng>(entry: Entry) -> Result<(MaterialBox<R>, bool), String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+pub fn decode_mirror<R: Rng>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
     Ok((Box::new(Mirror { color: color }) as MaterialBox<R>, false))
 }
 
-pub fn decode_mix<R: Rng + 'static>(entry: Entry) -> Result<(MaterialBox<R>, bool), String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+pub fn decode_mix<R: Rng + 'static>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let factor = match fields.get("factor") {
-        Some(v) => try!(v.decode(), "factor"),
+        Some(v) => try_for!(v.decode(), "factor"),
         None => return Err("missing field 'factor'".into()),
     };
 
     let (a, a_emissive): (MaterialBox<R>, bool) = match fields.get("a") {
-        Some(v) => try!(v.dynamic_decode(), "a"),
+        Some(v) => try_for!(v.dynamic_decode(), "a"),
         None => return Err("missing field 'a'".into()),
     };
 
     let (b, b_emissive): (MaterialBox<R>, bool) = match fields.get("b") {
-        Some(v) => try!(v.dynamic_decode(), "b"),
+        Some(v) => try_for!(v.dynamic_decode(), "b"),
         None => return Err("missing field 'b'".into()),
     };
 
@@ -442,37 +441,37 @@ pub fn decode_mix<R: Rng + 'static>(entry: Entry) -> Result<(MaterialBox<R>, boo
 }
 
 pub fn decode_fresnel_mix<R: Rng + 'static>(
-    entry: Entry,
+    entry: Entry<'_>,
 ) -> Result<(MaterialBox<R>, bool), String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
-        Some(v) => try!(v.decode(), "ior"),
+        Some(v) => try_for!(v.decode(), "ior"),
         None => return Err("missing field 'ior'".into()),
     };
 
     let env_ior = match fields.get("env_ior") {
-        Some(v) => try!(v.decode(), "env_ior"),
+        Some(v) => try_for!(v.decode(), "env_ior"),
         None => 1.0,
     };
 
     let dispersion = match fields.get("dispersion") {
-        Some(v) => try!(v.decode(), "dispersion"),
+        Some(v) => try_for!(v.decode(), "dispersion"),
         None => 0.0,
     };
 
     let env_dispersion = match fields.get("env_dispersion") {
-        Some(v) => try!(v.decode(), "env_dispersion"),
+        Some(v) => try_for!(v.decode(), "env_dispersion"),
         None => 0.0,
     };
 
     let (reflect, reflect_emissive): (MaterialBox<R>, bool) = match fields.get("reflect") {
-        Some(v) => try!(v.dynamic_decode(), "reflect"),
+        Some(v) => try_for!(v.dynamic_decode(), "reflect"),
         None => return Err("missing field 'reflect'".into()),
     };
 
     let (refract, refract_emissive): (MaterialBox<R>, bool) = match fields.get("refract") {
-        Some(v) => try!(v.dynamic_decode(), "refract"),
+        Some(v) => try_for!(v.dynamic_decode(), "refract"),
         None => return Err("missing field 'refract'".into()),
     };
 
@@ -489,31 +488,31 @@ pub fn decode_fresnel_mix<R: Rng + 'static>(
     ))
 }
 
-pub fn decode_refractive<R: Rng>(entry: Entry) -> Result<(MaterialBox<R>, bool), String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+pub fn decode_refractive<R: Rng>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
-        Some(v) => try!(v.decode(), "ior"),
+        Some(v) => try_for!(v.decode(), "ior"),
         None => return Err("missing field 'ior'".into()),
     };
 
     let env_ior = match fields.get("env_ior") {
-        Some(v) => try!(v.decode(), "env_ior"),
+        Some(v) => try_for!(v.decode(), "env_ior"),
         None => 1.0,
     };
 
     let dispersion = match fields.get("dispersion") {
-        Some(v) => try!(v.decode(), "dispersion"),
+        Some(v) => try_for!(v.decode(), "dispersion"),
         None => 0.0,
     };
 
     let env_dispersion = match fields.get("env_dispersion") {
-        Some(v) => try!(v.decode(), "env_dispersion"),
+        Some(v) => try_for!(v.decode(), "env_dispersion"),
         None => 0.0,
     };
 
     let color = match fields.get("color") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 

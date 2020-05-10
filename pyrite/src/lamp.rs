@@ -6,13 +6,13 @@ use collision::Ray3;
 
 use rand::Rng;
 
-use config::entry::Entry;
-use config::Prelude;
+use crate::config::entry::Entry;
+use crate::config::Prelude;
 
-use math::utils::{sample_cone, sample_hemisphere, sample_sphere};
-use shapes::Shape;
-use tracer::{self, Color, Material};
-use world;
+use crate::math::utils::{sample_cone, sample_hemisphere, sample_sphere};
+use crate::shapes::Shape;
+use crate::tracer::{self, Color, Material};
+use crate::world;
 
 pub enum Lamp<R: Rng> {
     Directional {
@@ -25,7 +25,7 @@ pub enum Lamp<R: Rng> {
 }
 
 impl<R: Rng> Lamp<R> {
-    pub fn sample(&self, rng: &mut R, target: Point3<f64>) -> Sample<R> {
+    pub fn sample(&self, rng: &mut R, target: Point3<f64>) -> Sample<'_, R> {
         match *self {
             Lamp::Directional {
                 direction,
@@ -79,7 +79,7 @@ impl<R: Rng> Lamp<R> {
         }
     }
 
-    pub fn sample_ray(&self, rng: &mut R) -> Option<RaySample<R>> {
+    pub fn sample_ray(&self, rng: &mut R) -> Option<RaySample<'_, R>> {
         match *self {
             Lamp::Directional { .. } => None,
             Lamp::Point(center, ref color) => {
@@ -137,21 +137,21 @@ pub fn register_types<R: Rng + 'static>(context: &mut Prelude) {
     group.object("Point".into()).add_decoder(decode_point::<R>);
 }
 
-fn decode_directional<R: Rng>(entry: Entry) -> Result<world::Object<R>, String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_directional<R: Rng>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let direction: Vector3<_> = match fields.get("direction") {
-        Some(v) => try!(v.dynamic_decode(), "direction"),
+        Some(v) => try_for!(v.dynamic_decode(), "direction"),
         None => return Err("missing field 'direction'".into()),
     };
 
     let width: f64 = match fields.get("width") {
-        Some(v) => try!(v.decode(), "width"),
+        Some(v) => try_for!(v.decode(), "width"),
         None => 0.0,
     };
 
     let color = match fields.get("color") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
@@ -162,16 +162,16 @@ fn decode_directional<R: Rng>(entry: Entry) -> Result<world::Object<R>, String> 
     }))
 }
 
-fn decode_point<R: Rng>(entry: Entry) -> Result<world::Object<R>, String> {
-    let fields = try!(entry.as_object().ok_or("not an object".into()));
+fn decode_point<R: Rng>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+    let fields = entry.as_object().ok_or("not an object")?;
 
     let position = match fields.get("position") {
-        Some(v) => try!(v.dynamic_decode(), "position"),
+        Some(v) => try_for!(v.dynamic_decode(), "position"),
         None => return Err("missing field 'position'".into()),
     };
 
     let color = match fields.get("color") {
-        Some(v) => try!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
