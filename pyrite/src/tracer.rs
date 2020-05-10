@@ -13,7 +13,7 @@ use world::World;
 pub use self::Reflection::{Emit, Reflect};
 
 pub type Brdf = fn(ray_in: Vector3<f64>, ray_out: Vector3<f64>, normal: Vector3<f64>) -> f64;
-pub type Color = ParametricValue<RenderContext, f64>;
+pub type Color = dyn ParametricValue<RenderContext, f64>;
 
 pub trait Material<R: Rng>: Sync {
     fn reflect<'a>(
@@ -319,9 +319,9 @@ fn trace_directional<'w, R: Rng>(ray: Vector3<f64>, world: &'w World<R>) -> Opti
 
 pub fn decode_parametric_number<From: Decode + 'static>(
     item: Entry,
-) -> Result<Box<ParametricValue<From, f64>>, String> {
+) -> Result<Box<dyn ParametricValue<From, f64>>, String> {
     if let Some(&Value::Number(num)) = item.as_value() {
-        Ok(Box::new(num.as_float()) as Box<ParametricValue<From, f64>>)
+        Ok(Box::new(num.as_float()) as Box<dyn ParametricValue<From, f64>>)
     } else {
         item.dynamic_decode()
     }

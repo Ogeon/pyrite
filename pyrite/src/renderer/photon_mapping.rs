@@ -133,7 +133,7 @@ pub fn render<W: WorkPool, F: FnMut(Status)>(
                 }
                 all_bounces
             },
-            |i, bounces| {
+            |_i, bounces| {
                 camera_bounces.extend(bounces);
                 progress += 1;
                 on_status(Status {
@@ -157,7 +157,7 @@ pub fn render<W: WorkPool, F: FnMut(Status)>(
             progress = 0;
             workers.do_work(
                 BatchRange::new(0..config.photons, 5000).map(|batch| {
-                    let mut rng: XorShiftRng = gen_rng();
+                    let rng: XorShiftRng = gen_rng();
                     (batch, rng)
                 }),
                 |(num_rays, mut rng)| {
@@ -168,7 +168,7 @@ pub fn render<W: WorkPool, F: FnMut(Status)>(
                             .pick_lamp(&mut rng)
                             .and_then(|(lamp, p)| lamp.sample_ray(&mut rng).map(|s| (lamp, p, s)));
 
-                        if let Some((lamp, probability, mut ray_sample)) = res {
+                        if let Some((_lamp, probability, mut ray_sample)) = res {
                             let mut light = Light::new(film.sample_wavelength(&mut rng));
 
                             let (color, normal) = match ray_sample.surface {
@@ -283,7 +283,7 @@ pub fn render<W: WorkPool, F: FnMut(Status)>(
             workers.do_work(
                 camera_bounces.chunks(5000).map(|b| (b, gen_rng())),
                 |(bounces, mut rng)| {
-                    for mut hit in bounces {
+                    for hit in bounces {
                         let mut pixel = hit.pixel.write().expect("failed to write to sample point");
                         let point = KdPoint(hit.bounce.normal.origin);
                         let neighbors: Vec<_> =
@@ -294,7 +294,7 @@ pub fn render<W: WorkPool, F: FnMut(Status)>(
                             let mut neighbor_light = neighbor.bounce.light.clone();
 
                             if bounce_light.is_white() || neighbor_light.is_white() {
-                                let (mut use_additional, wavelength) =
+                                let (use_additional, wavelength) =
                                     if bounce_light.is_white() && neighbor_light.is_white() {
                                         (true, neighbor_light.colored())
                                     } else if bounce_light.is_white() {
@@ -407,7 +407,7 @@ impl<'a> CameraBounce<'a> {
         while let Some(hit) = current {
             let &Bounce {
                 ref ty,
-                ref light,
+                light: _,
                 color,
                 incident,
                 normal,
@@ -468,14 +468,14 @@ impl<'a> LightBounce<'a> {
     fn accumulate_light(&self, samples: &mut [(Sample, f64)]) {
         let mut current = self.parent.as_ref().map(|p| &**p);
 
-        for &mut (ref sample, ref mut reflectance) in &mut *samples {
+        for &mut (ref _sample, ref mut reflectance) in &mut *samples {
             *reflectance *= self.bounce.probability
         }
 
         while let Some(hit) = current {
             let &Bounce {
                 ref ty,
-                ref light,
+                light: _,
                 color,
                 incident,
                 normal,

@@ -11,7 +11,7 @@ use config::Prelude;
 
 use math::utils::{sample_cone, sample_hemisphere, sample_sphere};
 use shapes::Shape;
-use tracer::{self, Color, Material, ParametricValue};
+use tracer::{self, Color, Material};
 use world;
 
 pub enum Lamp<R: Rng> {
@@ -118,7 +118,7 @@ pub struct Sample<'a, R: Rng> {
 pub enum Surface<'a, R: Rng> {
     Physical {
         normal: Ray3<f64>,
-        material: &'a Material<R>,
+        material: &'a dyn Material<R>,
     },
     Color(&'a Color),
 }

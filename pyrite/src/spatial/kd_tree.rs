@@ -105,7 +105,7 @@ fn construct_tree<E: Element>(elements: &mut [Option<E>], axis: <E::Point as Poi
 
     while let Some((axis, elements)) = stack.pop() {
         if elements.len() <= arrity {
-            let elements: Vec<_> = elements.iter_mut().filter_map(|mut e| e.take()).collect();
+            let elements: Vec<_> = elements.iter_mut().filter_map(|e| e.take()).collect();
             if let Some((plane, axis, left, right)) = parents.pop() {
                 if left.is_none() {
                     parents.push((plane, axis, Some(KdTree::Leaf(elements)), right));

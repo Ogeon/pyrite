@@ -14,7 +14,6 @@ extern crate rand_xorshift;
 extern crate rayon;
 extern crate time;
 
-use std::fs::File;
 use std::io::{stdout, Write};
 use std::path::Path;
 
@@ -29,7 +28,7 @@ use rand_xorshift::XorShiftRng;
 
 use palette::{LinSrgb, Pixel, Srgb};
 
-use film::{Film, Spectrum, Tile};
+use film::{Film, Spectrum};
 
 macro_rules! try {
     ($e:expr) => {

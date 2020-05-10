@@ -35,11 +35,11 @@ impl Sky {
 pub struct World<R: Rng> {
     pub sky: Sky,
     pub lights: Vec<Lamp<R>>,
-    pub objects: Box<ObjectContainer<R> + 'static + Send + Sync>,
+    pub objects: Box<dyn ObjectContainer<R> + 'static + Send + Sync>,
 }
 
 impl<R: Rng> World<R> {
-    pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material<R>)> {
+    pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &dyn Material<R>)> {
         self.objects.intersect(ray)
     }
 
@@ -65,11 +65,11 @@ pub enum Object<R: Rng> {
 }
 
 pub trait ObjectContainer<R: Rng> {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material<R>)>;
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &dyn Material<R>)>;
 }
 
 impl<R: Rng> ObjectContainer<R> for bkd_tree::BkdTree<Arc<shapes::Shape<R>>> {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &Material<R>)> {
+    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &dyn Material<R>)> {
         let ray = BkdRay(*ray);
         self.find(&ray)
             .map(|(normal, object)| (normal, object.get_material()))
@@ -186,7 +186,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
                     let (object_material, emissive) = match materials.remove(&object.name) {
                         Some(m) => {
                             let (material, emissive): (
-                                Box<Material<R> + 'static + Send + Sync>,
+                                Box<dyn Material<R> + 'static + Send + Sync>,
                                 bool,
                             ) = m;
                             (Arc::new(material), emissive)
@@ -231,7 +231,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
     Ok(World {
         sky: sky,
         lights: lights,
-        objects: Box::new(tree) as Box<ObjectContainer<R> + 'static + Send + Sync>,
+        objects: Box::new(tree) as Box<dyn ObjectContainer<R> + 'static + Send + Sync>,
     })
 }
 
@@ -248,7 +248,7 @@ fn make_triangle<M: obj::GenPolygon, R: Rng>(
     obj::IndexTuple(v1, _t1, n1): obj::IndexTuple,
     obj::IndexTuple(v2, _t2, n2): obj::IndexTuple,
     obj::IndexTuple(v3, _t3, n3): obj::IndexTuple,
-    material: Arc<Box<Material<R> + 'static + Send + Sync>>,
+    material: Arc<Box<dyn Material<R> + 'static + Send + Sync>>,
 ) -> shapes::Shape<R> {
     let v1 = vertex_to_point(&obj.position[v1]);
     let v2 = vertex_to_point(&obj.position[v2]);

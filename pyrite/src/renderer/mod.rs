@@ -52,7 +52,7 @@ impl Renderer {
     ) {
         match self.algorithm {
             Algorithm::Simple => simple::render(film, workers, on_status, self, world, camera),
-            Algorithm::Bidirectional(ref config) => {}
+            Algorithm::Bidirectional(ref _config) => {}
             Algorithm::PhotonMapping(ref config) => {
                 photon_mapping::render(film, workers, on_status, self, config, world, camera)
             }

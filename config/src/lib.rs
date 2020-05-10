@@ -337,7 +337,7 @@ pub trait Decode: Any {}
 
 impl<T: Any> Decode for T {}
 
-struct Decoder<T: Decode>(Box<Fn(Entry) -> Result<T, String>>);
+struct Decoder<T: Decode>(Box<dyn Fn(Entry) -> Result<T, String>>);
 
 impl<T: Decode> Decoder<T> {
     fn new<F>(decode_fn: F) -> Decoder<T>

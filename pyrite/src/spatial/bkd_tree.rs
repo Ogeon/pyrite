@@ -114,7 +114,7 @@ impl<E: Element> BkdTree<E> {
 
 fn construct_tree<E: Element>(elements: &mut [Option<E>], axis: <E::Ray as Ray>::Dim, arrity: usize, depth: usize) -> BkdTree<E> {
     if elements.len() <= arrity {
-        let elements: Vec<_> = elements.iter_mut().filter_map(|mut e| e.take()).collect();
+        let elements: Vec<_> = elements.iter_mut().filter_map(|e| e.take()).collect();
         let (beginning, end) = get_total_bounds(&elements, axis);
 
         Leaf {

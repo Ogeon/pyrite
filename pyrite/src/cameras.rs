@@ -3,7 +3,7 @@ use std::f64::consts;
 use rand::Rng;
 
 use cgmath::{
-    Angle, EuclideanSpace, InnerSpace, Matrix3, Matrix4, Point2, Point3, Rad, SquareMatrix,
+    Angle, EuclideanSpace, InnerSpace, Matrix4, Point2, Point3, Rad, SquareMatrix,
     Transform, Vector2,
 };
 use collision::{Ray, Ray3};
@@ -58,7 +58,7 @@ impl Camera {
 
                 let target = Point3::new(focus_x, -focus_y, -focus_distance);
 
-                let (origin, mut direction) = if aperture > 0.0 {
+                let (origin, direction) = if aperture > 0.0 {
                     let sqrt_r = (aperture * rng.gen::<f64>()).sqrt();
                     let psi = consts::PI * 2.0 * rng.gen::<f64>();
                     let lens_x = sqrt_r * psi.cos();

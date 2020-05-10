@@ -27,8 +27,8 @@ macro_rules! make_values {
         }
 
         $(
-            fn $fn_name(_entry: Entry) -> Result<Box<tracer::ParametricValue<$context_name, $result_name>>, String> {
-                Ok(Box::new($type_name::$variant_name) as Box<tracer::ParametricValue<$context_name, $result_name>>)
+            fn $fn_name(_entry: Entry) -> Result<Box<dyn tracer::ParametricValue<$context_name, $result_name>>, String> {
+                Ok(Box::new($type_name::$variant_name) as Box<dyn tracer::ParametricValue<$context_name, $result_name>>)
             }
         )*
     )

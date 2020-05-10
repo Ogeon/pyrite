@@ -4,14 +4,14 @@ use cgmath::{InnerSpace, Vector3};
 use collision::Ray3;
 
 use tracer;
-use tracer::{Color, Emit, Light, Material, ParametricValue, Reflect, Reflection};
+use tracer::{Color, Emit, Light, Material, Reflect, Reflection};
 
 use config::entry::Entry;
 use config::Prelude;
 
 use math;
 
-pub type MaterialBox<R: Rng> = Box<Material<R> + 'static + Send + Sync>;
+pub type MaterialBox<R> = Box<dyn Material<R> + 'static + Send + Sync>;
 
 pub struct Diffuse {
     pub color: Box<Color>,

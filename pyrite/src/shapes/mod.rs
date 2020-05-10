@@ -25,7 +25,7 @@ mod distance_estimators;
 
 pub use self::Shape::{Plane, RayMarched, Sphere, Triangle};
 
-type DistanceEstimator = Box<ParametricValue<Point3<f64>, f64>>;
+type DistanceEstimator = Box<dyn ParametricValue<Point3<f64>, f64>>;
 
 pub struct Vertex<S> {
     pub position: Point3<S>,
@@ -161,7 +161,7 @@ impl<R: Rng> Shape<R> {
         }
     }
 
-    pub fn get_material(&self) -> &Material<R> {
+    pub fn get_material(&self) -> &dyn Material<R> {
         match *self {
             Sphere { ref material, .. } => &**material,
             Plane { ref material, .. } => &**material,

@@ -2,14 +2,10 @@ use rand::{Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
 use cameras::Camera;
-use film::{Film, Pixel, Sample, Tile};
-use lamp::Surface;
+use film::{Film, Sample, Tile};
 use renderer::algorithm::contribute;
 use renderer::{Renderer, Status, WorkPool};
-use spatial::kd_tree::{self, KdTree};
-use spatial::Dim3;
-use tracer::{trace, Bounce, BounceType, Color, Light, RenderContext};
-use utils::{pairs, BatchRange};
+use tracer::{trace, Light};
 use world::World;
 
 pub fn render<W: WorkPool, F: FnMut(Status)>(

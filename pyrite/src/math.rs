@@ -19,7 +19,7 @@ macro_rules! make_operators {
 
             struct $struct_name<From> {
                 $(
-                    $arg: Box<tracer::ParametricValue<From, f64>>
+                    $arg: Box<dyn tracer::ParametricValue<From, f64>>
                 ),+
             }
 
@@ -32,7 +32,7 @@ macro_rules! make_operators {
                 }
             }
 
-            fn $fn_name<From: Decode + 'static>(entry: Entry) -> Result<Box<tracer::ParametricValue<From, f64>>, String> {
+            fn $fn_name<From: Decode + 'static>(entry: Entry) -> Result<Box<dyn tracer::ParametricValue<From, f64>>, String> {
                 let fields = try!(entry.as_object().ok_or("not an object".into()));
 
                 $(
@@ -47,7 +47,7 @@ macro_rules! make_operators {
                         $(
                             $arg: $arg
                         ),+
-                    }) as Box<tracer::ParametricValue<From, f64>>
+                    }) as Box<dyn tracer::ParametricValue<From, f64>>
                 )
             }
 
@@ -225,7 +225,7 @@ make_operators! {
 }
 
 struct Curve<From> {
-    input: Box<tracer::ParametricValue<From, f64>>,
+    input: Box<dyn tracer::ParametricValue<From, f64>>,
     points: utils::Interpolated,
 }
 
@@ -237,7 +237,7 @@ impl<From> tracer::ParametricValue<From, f64> for Curve<From> {
 
 fn decode_curve<From: Decode + 'static>(
     entry: Entry,
-) -> Result<Box<tracer::ParametricValue<From, f64>>, String> {
+) -> Result<Box<dyn tracer::ParametricValue<From, f64>>, String> {
     let fields = try!(entry.as_object().ok_or("not an object".into()));
 
     let input = match fields.get("input") {
@@ -253,12 +253,12 @@ fn decode_curve<From: Decode + 'static>(
     Ok(Box::new(Curve::<From> {
         input: input,
         points: utils::Interpolated { points: points },
-    }) as Box<tracer::ParametricValue<From, f64>>)
+    }) as Box<dyn tracer::ParametricValue<From, f64>>)
 }
 
 struct Fresnel {
-    ior: Box<tracer::ParametricValue<tracer::RenderContext, f64>>,
-    env_ior: Box<tracer::ParametricValue<tracer::RenderContext, f64>>,
+    ior: Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>,
+    env_ior: Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>,
 }
 
 impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
@@ -278,7 +278,7 @@ impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
 
 fn decode_fresnel(
     entry: Entry,
-) -> Result<Box<tracer::ParametricValue<tracer::RenderContext, f64>>, String> {
+) -> Result<Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>, String> {
     let fields = try!(entry.as_object().ok_or("not an object".into()));
 
     let ior = match fields.get("ior") {
@@ -288,7 +288,7 @@ fn decode_fresnel(
 
     let env_ior = match fields.get("env_ior") {
         Some(v) => try!(tracer::decode_parametric_number(v), "env_ior"),
-        None => Box::new(1.0f64) as Box<tracer::ParametricValue<tracer::RenderContext, f64>>,
+        None => Box::new(1.0f64) as Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>,
     };
 
     Ok(Box::new(Fresnel {
