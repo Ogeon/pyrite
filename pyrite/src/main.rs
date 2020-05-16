@@ -11,14 +11,13 @@ use std::path::Path;
 
 use cgmath::Vector2;
 
-use image::GenericImage;
-
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
 
 use palette::{LinSrgb, Pixel, Srgb};
 
 use crate::film::{Film, Spectrum};
+use crate::math::utils::Interpolated;
 
 macro_rules! try_for {
     ($e:expr, $under:expr) => {
@@ -97,10 +96,8 @@ fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: 
     let film = Film::new(
         image_size.x,
         image_size.y,
-        config.renderer.tile_size,
-        config.renderer.spectrum_span,
         config.renderer.spectrum_bins,
-        &config.camera,
+        config.renderer.spectrum_span,
     );
 
     let mut last_print = Instant::now();
@@ -113,23 +110,14 @@ fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: 
                 print!("\r{}... {:2}%", status.message, status.progress);
                 stdout().flush().unwrap();
 
-                if (Instant::now() - last_print).as_secs() >= 4 {
+                if (Instant::now() - last_print).as_secs() >= 20 {
                     let begin_iter = Instant::now();
-                    film.with_changed_pixels(|position, spectrum| {
-                        let r = calculate_channel(&spectrum, &red);
-                        let g = calculate_channel(&spectrum, &green);
-                        let b = calculate_channel(&spectrum, &blue);
+                    for (spectrum, pixel) in film.developed_pixels().zip(pixels.pixels_mut()) {
+                        let color = spectrum_to_rgb(spectrum, &red, &green, &blue);
+                        let rgb: Srgb<u8> = Srgb::from_linear(color).into_format();
 
-                        let rgb: Srgb<u8> = Srgb::from_linear(LinSrgb::new(r, g, b)).into_format();
-
-                        unsafe {
-                            pixels.unsafe_put_pixel(
-                                position.x as u32,
-                                position.y as u32,
-                                image::Rgb(rgb.into_raw()),
-                            )
-                        }
-                    });
+                        *pixel = image::Rgb(rgb.into_raw());
+                    }
                     let diff = (Instant::now() - begin_iter).as_millis() as f64 / 1000.0;
 
                     print!(
@@ -186,21 +174,12 @@ fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: 
         }
     });*/
 
-    film.with_changed_pixels(|position, spectrum| {
-        let r = calculate_channel(&spectrum, &red);
-        let g = calculate_channel(&spectrum, &green);
-        let b = calculate_channel(&spectrum, &blue);
+    for (spectrum, pixel) in film.developed_pixels().zip(pixels.pixels_mut()) {
+        let color = spectrum_to_rgb(spectrum, &red, &green, &blue);
+        let rgb = Srgb::from_linear(color).into_format();
 
-        let rgb = Srgb::from_linear(LinSrgb::new(r, g, b)).into_format();
-
-        unsafe {
-            pixels.unsafe_put_pixel(
-                position.x as u32,
-                position.y as u32,
-                image::Rgb(rgb.into_raw()),
-            )
-        }
-    });
+        *pixel = image::Rgb(rgb.into_raw());
+    }
 
     if let Err(e) = pixels.save(&render_path) {
         println!("\rerror while writing image: {}", e);
@@ -209,20 +188,30 @@ fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: 
     println!("\rDone!")
 }
 
-fn calculate_channel(spectrum: &Spectrum, response: &math::utils::Interpolated) -> f64 {
-    let mut sum = 0.0;
-    let mut weight = 0.0;
+fn spectrum_to_rgb(
+    spectrum: Spectrum,
+    red: &Interpolated,
+    green: &Interpolated,
+    blue: &Interpolated,
+) -> LinSrgb<f64> {
+    let mut sum = LinSrgb::new(0.0, 0.0, 0.0);
+    let mut weight = LinSrgb::new(0.0, 0.0, 0.0);
 
     for segment in spectrum.segments() {
         let mut offset = 0.0;
-        let mut start_resp = response.get(segment.start);
+        let mut start_resp = LinSrgb::new(
+            red.get(segment.start),
+            green.get(segment.start),
+            blue.get(segment.start),
+        );
 
         while offset < segment.width {
             let step = (segment.width - offset).min(5.0);
-            let end_resp = response.get(segment.start + offset + step);
+            let end = segment.start + offset + step;
+            let end_resp = LinSrgb::new(red.get(end), green.get(end), blue.get(end));
 
             let w = (start_resp + end_resp) * step;
-            sum += segment.value * w;
+            sum += w * segment.value;
             weight += w;
 
             start_resp = end_resp;

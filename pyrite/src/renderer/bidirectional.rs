@@ -4,8 +4,9 @@ use rand_xorshift::XorShiftRng;
 use cgmath::{InnerSpace, Vector3};
 use collision::Ray3;
 
+use super::algorithm::{make_tiles, Tile};
 use crate::cameras::Camera;
-use crate::film::{Film, Sample, Tile};
+use crate::film::{Film, Sample};
 use crate::lamp::{RaySample, Surface};
 use crate::renderer::algorithm::contribute;
 use crate::renderer::{Renderer, Status, WorkPool};
@@ -30,6 +31,8 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
         XorShiftRng::from_rng(rand::thread_rng()).expect("could not generate RNG")
     }
 
+    let tiles = make_tiles(film.width(), film.height(), renderer.tile_size, camera);
+
     let status_message = "rendering";
     on_status(Status {
         progress: 0,
@@ -37,12 +40,12 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     });
 
     let mut progress: usize = 0;
-    let num_tiles = film.num_tiles();
+    let num_tiles = tiles.len();
 
     workers.do_work(
-        film.into_iter().map(|f| (f, gen_rng())),
-        |(mut tile, rng)| {
-            render_tile(rng, &mut tile, camera, world, renderer, config);
+        tiles.into_iter().map(|f| (f, gen_rng())),
+        |(tile, rng)| {
+            render_tile(rng, tile, film, camera, world, renderer, config);
         },
         |_, _| {
             progress += 1;
@@ -56,22 +59,27 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
 
 fn render_tile<R: Rng>(
     mut rng: R,
-    tile: &mut Tile<'_>,
+    tile: Tile,
+    film: &Film,
     camera: &Camera,
     world: &World<R>,
     renderer: &Renderer,
     bidir_params: &BidirParams,
 ) {
+    let mut lamp_path = Vec::with_capacity(bidir_params.bounces as usize + 1);
+
     for _ in 0..(tile.area() * renderer.pixel_samples as usize) {
+        lamp_path.clear();
+
         let position = tile.sample_point(&mut rng);
-        let wavelength = tile.sample_wavelength(&mut rng);
+        let wavelength = film.sample_wavelength(&mut rng);
         let light = Light::new(wavelength);
 
         let camera_ray = camera.ray_towards(&position, &mut rng);
         let lamp_sample = world
             .pick_lamp(&mut rng)
             .and_then(|(l, p)| l.sample_ray(&mut rng).map(|r| (r, p)));
-        let lamp_path = if let Some((lamp_sample, probability)) = lamp_sample {
+        if let Some((lamp_sample, probability)) = lamp_sample {
             let RaySample {
                 mut ray,
                 surface,
@@ -89,8 +97,7 @@ fn render_tile<R: Rng>(
             ray.origin += normal.direction * 0.00001;
 
             if let Some(color) = color {
-                let mut path = Vec::with_capacity(bidir_params.bounces as usize + 1);
-                path.push(Bounce {
+                lamp_path.push(Bounce {
                     ty: BounceType::Emission,
                     light: light.clone(),
                     color: color,
@@ -100,31 +107,28 @@ fn render_tile<R: Rng>(
                     direct_light: vec![],
                 });
 
-                path.extend(trace(&mut rng, ray, light, world, bidir_params.bounces, 0));
+                lamp_path.extend(trace(&mut rng, ray, light, world, bidir_params.bounces, 0));
 
-                pairs(&mut path, |to, from| {
+                pairs(&mut lamp_path, |to, from| {
                     to.incident = -from.incident;
                     if let BounceType::Diffuse(_, ref mut o) = from.ty {
                         *o = from.incident
                     }
                 });
 
-                if path.len() > 1 {
-                    if let Some(last) = path.pop() {
+                if lamp_path.len() > 1 {
+                    if let Some(last) = lamp_path.pop() {
                         match last.ty {
-                            BounceType::Diffuse(_, _) | BounceType::Specular => path.push(last),
+                            BounceType::Diffuse(_, _) | BounceType::Specular => {
+                                lamp_path.push(last)
+                            }
                             BounceType::Emission => {}
                         }
                     }
                 }
-                path.reverse();
-                path
-            } else {
-                vec![]
+                lamp_path.reverse();
             }
-        } else {
-            vec![]
-        };
+        }
 
         let camera_path = trace(
             &mut rng,
@@ -152,7 +156,7 @@ fn render_tile<R: Rng>(
             .map(|_| {
                 (
                     Sample {
-                        wavelength: tile.sample_wavelength(&mut rng),
+                        wavelength: film.sample_wavelength(&mut rng),
                         brightness: 0.0,
                         weight: 1.0,
                     },
@@ -180,15 +184,15 @@ fn render_tile<R: Rng>(
                 used_additional,
             ) {
                 contribution.weight = weight;
-                tile.expose(position, contribution);
+                film.expose(position, contribution);
             }
         }
 
-        tile.expose(position, main_sample.0.clone());
+        film.expose(position, main_sample.0.clone());
 
         if used_additional {
             for &(ref sample, _) in &additional_samples {
-                tile.expose(position, sample.clone());
+                film.expose(position, sample.clone());
             }
         }
 
@@ -234,11 +238,11 @@ fn render_tile<R: Rng>(
                         }
                     }
 
-                    tile.expose(position, main_sample.0.clone());
+                    film.expose(position, main_sample.0.clone());
 
                     if used_additional {
                         for &(ref sample, _) in &additional_samples {
-                            tile.expose(position, sample.clone());
+                            film.expose(position, sample.clone());
                         }
                     }
                 }

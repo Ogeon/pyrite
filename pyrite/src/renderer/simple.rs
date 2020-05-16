@@ -1,8 +1,9 @@
 use rand::{Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
+use super::algorithm::{make_tiles, Tile};
 use crate::cameras::Camera;
-use crate::film::{Film, Sample, Tile};
+use crate::film::{Film, Sample};
 use crate::renderer::algorithm::contribute;
 use crate::renderer::{Renderer, Status, WorkPool};
 use crate::tracer::{trace, Light};
@@ -26,13 +27,15 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
         message: &status_message,
     });
 
+    let tiles = make_tiles(film.width(), film.height(), renderer.tile_size, camera);
+
     let mut progress: usize = 0;
-    let num_tiles = film.num_tiles();
+    let num_tiles = tiles.len();
 
     workers.do_work(
-        film.into_iter().map(|f| (f, gen_rng())),
-        |(mut tile, rng)| {
-            render_tile(rng, &mut tile, camera, world, renderer);
+        tiles.into_iter().map(|f| (f, gen_rng())),
+        |(tile, rng)| {
+            render_tile(rng, tile, film, camera, world, renderer);
         },
         |_, _| {
             progress += 1;
@@ -46,7 +49,8 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
 
 fn render_tile<R: Rng>(
     mut rng: R,
-    tile: &mut Tile<'_>,
+    tile: Tile,
+    film: &Film,
     camera: &Camera,
     world: &World<R>,
     renderer: &Renderer,
@@ -55,7 +59,7 @@ fn render_tile<R: Rng>(
         let position = tile.sample_point(&mut rng);
 
         let ray = camera.ray_towards(&position, &mut rng);
-        let wavelength = tile.sample_wavelength(&mut rng);
+        let wavelength = film.sample_wavelength(&mut rng);
         let light = Light::new(wavelength);
         let path = trace(
             &mut rng,
@@ -68,7 +72,7 @@ fn render_tile<R: Rng>(
 
         let mut main_sample = (
             Sample {
-                wavelength: wavelength,
+                wavelength,
                 brightness: 0.0,
                 weight: 1.0,
             },
@@ -80,7 +84,7 @@ fn render_tile<R: Rng>(
             .map(|_| {
                 (
                     Sample {
-                        wavelength: tile.sample_wavelength(&mut rng),
+                        wavelength: film.sample_wavelength(&mut rng),
                         brightness: 0.0,
                         weight: 1.0,
                     },
@@ -98,11 +102,11 @@ fn render_tile<R: Rng>(
             contribute(bounce, sample, reflectance, false);
         }
 
-        tile.expose(position, main_sample.0);
+        film.expose(position, main_sample.0);
 
         if used_additional {
             for (sample, _) in additional_samples {
-                tile.expose(position, sample);
+                film.expose(position, sample);
             }
         }
     }

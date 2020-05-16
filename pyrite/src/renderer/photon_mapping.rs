@@ -1,12 +1,13 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use rand::{self, Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
 use cgmath::{InnerSpace, Point2, Point3, Vector3};
 
+use super::algorithm::make_tiles;
 use crate::cameras::Camera;
-use crate::film::{Film, Pixel, Sample};
+use crate::film::{DetachedPixel, Film, Sample};
 use crate::lamp::Surface;
 use crate::renderer::algorithm::contribute;
 use crate::renderer::{Renderer, Status, WorkPool};
@@ -29,7 +30,9 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
         XorShiftRng::from_rng(rand::thread_rng()).expect("could not generate RNG")
     }
 
-    let num_tiles = film.num_tiles();
+    let tiles = make_tiles(film.width(), film.height(), renderer.tile_size, camera);
+
+    let num_tiles = tiles.len();
     let mut progress;
 
     let num_passes = renderer.pixel_samples as usize * config.photon_passes;
@@ -50,8 +53,8 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
         });
         progress = 0;
         workers.do_work(
-            film.into_iter().map(|f| (f, gen_rng())),
-            |(mut tile, mut rng)| {
+            tiles.iter().map(|f| (f, gen_rng())),
+            |(tile, mut rng)| {
                 let mut all_bounces = vec![];
                 for _ in 0..tile.area() as usize {
                     let position = tile.sample_point(&mut rng);
@@ -81,7 +84,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                         .map(|_| {
                             (
                                 Sample {
-                                    wavelength: tile.sample_wavelength(&mut rng),
+                                    wavelength: film.sample_wavelength(&mut rng),
                                     brightness: 0.0,
                                     weight: 1.0,
                                 },
@@ -103,8 +106,9 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                 let b = Arc::new(CameraBounce {
                                     parent: current,
                                     bounce: bounce,
-                                    pixel: RwLock::new(film.new_pixel()),
-                                    position: position,
+                                    pixel: film
+                                        .get_pixel_ref_f(position)
+                                        .expect("position out of bounds"),
                                     probability: p,
                                 });
                                 current = Parent::Bounce(b.clone());
@@ -114,8 +118,9 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                 let b = Arc::new(CameraBounce {
                                     parent: current,
                                     bounce: bounce,
-                                    pixel: RwLock::new(film.new_pixel()),
-                                    position: position,
+                                    pixel: film
+                                        .get_pixel_ref_f(position)
+                                        .expect("position out of bounds"),
                                     probability: p,
                                 });
                                 current = Parent::Bounce(b.clone());
@@ -124,10 +129,10 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                         }
                     }
 
-                    tile.expose(position, sample);
+                    film.expose(position, sample);
                     if used_additional {
                         for (sample, _) in additional_samples {
-                            tile.expose(position, sample);
+                            film.expose(position, sample);
                         }
                     }
                 }
@@ -284,7 +289,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                 camera_bounces.chunks(5000).map(|b| (b, gen_rng())),
                 |(bounces, mut rng)| {
                     for hit in bounces {
-                        let mut pixel = hit.pixel.write().expect("failed to write to sample point");
+                        let pixel = &hit.pixel;
                         let point = KdPoint(hit.bounce.normal.origin);
                         let neighbors: Vec<_> =
                             light_bounces.neighbors(&point, config.radius).collect();
@@ -340,7 +345,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
 
                                 for (mut sample, _) in samples {
                                     sample.brightness *= weight; // (::std::f64::consts::PI * config.radius * config.radius);
-                                    pixel.add_sample(film.to_pixel_sample(&sample));
+                                    pixel.expose(film.to_pixel_sample(&sample));
                                 }
                             }
                         }
@@ -354,7 +359,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                         / (renderer.bounces as f64 * config.photon_passes as f64),
                                 };
 
-                                pixel.add_sample(film.to_pixel_sample(&sample));
+                                pixel.expose(film.to_pixel_sample(&sample));
                             }
                         }
                     }
@@ -370,13 +375,6 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                 },
             );
         }
-
-        film.merge_pixels(camera_bounces.iter().map(|b| {
-            (
-                b.position,
-                b.pixel.read().expect("could not read pixel").clone(),
-            )
-        }));
     }
 }
 
@@ -390,8 +388,7 @@ pub struct Config {
 struct CameraBounce<'a> {
     parent: Parent<CameraBounce<'a>, Point2<f64>>,
     bounce: Bounce<'a>,
-    pixel: RwLock<Pixel>,
-    position: Point2<f64>,
+    pixel: DetachedPixel<'a>,
     probability: f64,
 }
 
