@@ -11,7 +11,7 @@ use crate::tracer::{self, Bounce, BounceType, RenderContext};
 pub fn contribute(
     bounce: &Bounce<'_>,
     sample: &mut Sample,
-    reflectance: &mut f64,
+    reflectance: &mut f32,
     require_white: bool,
 ) -> bool {
     let &Bounce {
@@ -69,7 +69,7 @@ pub fn contribute(
 }
 
 pub struct Tile {
-    pub area: Area<f64>,
+    pub area: Area<f32>,
     pub width: usize,
     pub height: usize,
 }
@@ -79,10 +79,10 @@ impl Tile {
         self.width * self.height
     }
 
-    pub fn sample_point<R: Rng>(&self, rng: &mut R) -> Point2<f64> {
+    pub fn sample_point<R: Rng>(&self, rng: &mut R) -> Point2<f32> {
         let offset = Vector2::new(
-            self.area.size.x * rng.gen::<f64>(),
-            self.area.size.y * rng.gen::<f64>(),
+            self.area.size.x * rng.gen::<f32>(),
+            self.area.size.y * rng.gen::<f32>(),
         );
         self.area.from + offset
     }

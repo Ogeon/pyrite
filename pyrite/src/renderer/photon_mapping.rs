@@ -15,7 +15,7 @@ use crate::spatial::kd_tree::{self, KdTree};
 use crate::spatial::Dim3;
 use crate::tracer::{trace, Bounce, BounceType, Light, RenderContext};
 use crate::utils::{pairs, BatchRange};
-use crate::world::World;
+use crate::{math::DIST_EPSILON, world::World};
 
 pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     film: &Film,
@@ -38,7 +38,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     let num_passes = renderer.pixel_samples as usize * config.photon_passes;
 
     let photon_probability = 1.0
-        / (renderer.bounces as f64 * config.photon_bounces as f64 * config.photon_passes as f64);
+        / (renderer.bounces as f32 * config.photon_bounces as f32 * config.photon_passes as f32);
 
     for pixel_pass in 0..renderer.pixel_samples {
         let status_message = format!(
@@ -70,7 +70,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                         renderer.bounces,
                         renderer.light_samples,
                     );
-                    let p = 1.0 / renderer.bounces as f64;
+                    let p = 1.0 / renderer.bounces as f32;
 
                     let mut sample = Sample {
                         wavelength: wavelength,
@@ -190,7 +190,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                             };
 
                             if let Some(color) = color {
-                                ray_sample.ray.origin += normal.direction * 0.00001;
+                                ray_sample.ray.origin += normal.direction * DIST_EPSILON;
 
                                 let mut bounces = trace(
                                     &mut rng,
@@ -200,7 +200,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                     config.photon_bounces,
                                     0,
                                 );
-                                let p = 1.0 / config.photon_bounces as f64;
+                                let p = 1.0 / config.photon_bounces as f32;
 
                                 let incident = bounces
                                     .get(0)
@@ -266,7 +266,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                     light_bounces.extend(bounces);
                     progress += n;
                     on_status(Status {
-                        progress: ((progress as f64 / config.photons as f64) * 100.0) as u8,
+                        progress: ((progress as f32 / config.photons as f32) * 100.0) as u8,
                         message: &status_message,
                     });
                 },
@@ -312,7 +312,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                     Sample {
                                         wavelength: wavelength,
                                         brightness: 0.0,
-                                        weight: photon_probability / num_neighbors as f64,
+                                        weight: photon_probability / num_neighbors as f32,
                                     },
                                     1.0,
                                 )];
@@ -322,7 +322,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                             Sample {
                                                 wavelength: film.sample_wavelength(&mut rng),
                                                 brightness: 0.0,
-                                                weight: photon_probability / num_neighbors as f64,
+                                                weight: photon_probability / num_neighbors as f32,
                                             },
                                             1.0,
                                         )
@@ -338,13 +338,13 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                         .incident
                                         .dot(-hit.bounce.normal.direction)
                                         .max(0.0);
-                                    weight /= ::std::f64::consts::PI;
+                                    weight /= ::std::f32::consts::PI;
                                     hit.accumulate_reflectance(&mut samples, incident);
                                     neighbor.accumulate_light(&mut samples);
                                 }
 
                                 for (mut sample, _) in samples {
-                                    sample.brightness *= weight; // (::std::f64::consts::PI * config.radius * config.radius);
+                                    sample.brightness *= weight; // (::std::f32::consts::PI * config.radius * config.radius);
                                     pixel.expose(film.to_pixel_sample(&sample));
                                 }
                             }
@@ -356,7 +356,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                     wavelength: film.sample_wavelength(&mut rng),
                                     brightness: 0.0,
                                     weight: 1.0
-                                        / (renderer.bounces as f64 * config.photon_passes as f64),
+                                        / (renderer.bounces as f32 * config.photon_passes as f32),
                                 };
 
                                 pixel.expose(film.to_pixel_sample(&sample));
@@ -369,7 +369,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                 |_, n| {
                     progress += n;
                     on_status(Status {
-                        progress: ((progress as f64 / camera_bounces.len() as f64) * 100.0) as u8,
+                        progress: ((progress as f32 / camera_bounces.len() as f32) * 100.0) as u8,
                         message: &status_message,
                     });
                 },
@@ -379,21 +379,21 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
 }
 
 pub struct Config {
-    pub radius: f64,
+    pub radius: f32,
     pub photons: usize,
     pub photon_bounces: u32,
     pub photon_passes: usize,
 }
 
 struct CameraBounce<'a> {
-    parent: Parent<CameraBounce<'a>, Point2<f64>>,
+    parent: Parent<CameraBounce<'a>, Point2<f32>>,
     bounce: Bounce<'a>,
     pixel: DetachedPixel<'a>,
-    probability: f64,
+    probability: f32,
 }
 
 impl<'a> CameraBounce<'a> {
-    fn accumulate_reflectance(&self, samples: &mut [(Sample, f64)], exit: Vector3<f64>) {
+    fn accumulate_reflectance(&self, samples: &mut [(Sample, f32)], exit: Vector3<f32>) {
         let mut current = Some(self);
         let mut first_brdf = if let BounceType::Diffuse(brdf, _) = self.bounce.ty {
             Some((brdf, exit))
@@ -441,12 +441,12 @@ enum Parent<B, S> {
     Source(S),
 }
 
-struct KdPoint(Point3<f64>);
+struct KdPoint(Point3<f32>);
 
 impl kd_tree::Point for KdPoint {
     type Dim = Dim3;
 
-    fn get(&self, axis: Dim3) -> f64 {
+    fn get(&self, axis: Dim3) -> f32 {
         match axis {
             Dim3::X => self.0.x,
             Dim3::Y => self.0.y,
@@ -458,11 +458,11 @@ impl kd_tree::Point for KdPoint {
 struct LightBounce<'a> {
     parent: Option<Arc<LightBounce<'a>>>,
     bounce: Bounce<'a>,
-    probability: f64,
+    probability: f32,
 }
 
 impl<'a> LightBounce<'a> {
-    fn accumulate_light(&self, samples: &mut [(Sample, f64)]) {
+    fn accumulate_light(&self, samples: &mut [(Sample, f32)]) {
         let mut current = self.parent.as_ref().map(|p| &**p);
 
         for &mut (ref _sample, ref mut reflectance) in &mut *samples {
@@ -503,7 +503,7 @@ impl<'a> LightBounce<'a> {
 
 struct LightSource<'a, R: Rng> {
     surface: Surface<'a, R>,
-    weight: f64,
+    weight: f32,
 }
 
 impl<'a> kd_tree::Element for Arc<LightBounce<'a>> {
@@ -513,7 +513,7 @@ impl<'a> kd_tree::Element for Arc<LightBounce<'a>> {
         KdPoint(self.bounce.normal.origin)
     }
 
-    fn sq_distance(&self, point: &KdPoint) -> f64 {
+    fn sq_distance(&self, point: &KdPoint) -> f32 {
         (self.bounce.normal.origin - point.0).magnitude2()
     }
 }

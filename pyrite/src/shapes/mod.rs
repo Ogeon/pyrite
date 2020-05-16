@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use std::{
     collections::HashMap,
-    f64::{INFINITY, NEG_INFINITY},
+    f32::{INFINITY, NEG_INFINITY},
 };
 
 use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point3, SquareMatrix, Transform, Vector3};
@@ -18,17 +18,17 @@ use crate::config::entry::Entry;
 use crate::config::Prelude;
 
 use crate::materials;
-use crate::math;
+use crate::math::{self, DIST_EPSILON};
 use crate::spatial::{bkd_tree, Dim3};
 use crate::world;
 
-const EPSILON: f64 = 0.000000001;
+const EPSILON: f32 = DIST_EPSILON;
 
 mod distance_estimators;
 
 pub use self::Shape::{Plane, RayMarched, Sphere, Triangle};
 
-type DistanceEstimator = Box<dyn ParametricValue<Point3<f64>, f64>>;
+type DistanceEstimator = Box<dyn ParametricValue<Point3<f32>, f32>>;
 
 pub struct Vertex<S> {
     pub position: Point3<S>,
@@ -37,18 +37,18 @@ pub struct Vertex<S> {
 
 pub enum Shape<R: Rng> {
     Sphere {
-        position: Point3<f64>,
-        radius: f64,
+        position: Point3<f32>,
+        radius: f32,
         material: materials::MaterialBox<R>,
     },
     Plane {
-        shape: collision::Plane<f64>,
+        shape: collision::Plane<f32>,
         material: materials::MaterialBox<R>,
     },
     Triangle {
-        v1: Vertex<f64>,
-        v2: Vertex<f64>,
-        v3: Vertex<f64>,
+        v1: Vertex<f32>,
+        v2: Vertex<f32>,
+        v3: Vertex<f32>,
         material: Arc<materials::MaterialBox<R>>,
     },
     RayMarched {
@@ -59,7 +59,7 @@ pub enum Shape<R: Rng> {
 }
 
 impl<R: Rng> Shape<R> {
-    pub fn ray_intersect(&self, ray: &Ray3<f64>) -> Option<(f64, Ray3<f64>)> {
+    pub fn ray_intersect(&self, ray: &Ray3<f32>) -> Option<(f32, Ray3<f32>)> {
         match *self {
             Sphere {
                 ref position,
@@ -173,7 +173,7 @@ impl<R: Rng> Shape<R> {
         }
     }
 
-    pub fn sample_point(&self, rng: &mut R) -> Option<Ray3<f64>> {
+    pub fn sample_point(&self, rng: &mut R) -> Option<Ray3<f32>> {
         match *self {
             Sphere {
                 ref position,
@@ -190,7 +190,7 @@ impl<R: Rng> Shape<R> {
                 ref v3,
                 ..
             } => {
-                let u: f64 = rng.gen();
+                let u: f32 = rng.gen();
                 let v = rng.gen();
 
                 let a = v2.position - v1.position;
@@ -211,13 +211,14 @@ impl<R: Rng> Shape<R> {
         }
     }
 
-    pub fn sample_towards(&self, rng: &mut R, target: &Point3<f64>) -> Option<Ray3<f64>> {
+    pub fn sample_towards(&self, rng: &mut R, target: &Point3<f32>) -> Option<Ray3<f32>> {
         match *self {
             Sphere {
                 ref position,
                 radius,
                 ..
             } => {
+                let radius = (radius - DIST_EPSILON).max(0.0);
                 let dir = position - target;
                 let dist2 = dir.magnitude2();
 
@@ -234,7 +235,7 @@ impl<R: Rng> Shape<R> {
         }
     }
 
-    pub fn solid_angle_towards(&self, target: &Point3<f64>) -> Option<f64> {
+    pub fn solid_angle_towards(&self, target: &Point3<f32>) -> Option<f32> {
         match *self {
             Sphere {
                 ref position,
@@ -254,9 +255,9 @@ impl<R: Rng> Shape<R> {
         }
     }
 
-    pub fn surface_area(&self) -> f64 {
+    pub fn surface_area(&self) -> f32 {
         match *self {
-            Sphere { radius, .. } => radius * radius * 4.0 * std::f64::consts::PI,
+            Sphere { radius, .. } => radius * radius * 4.0 * std::f32::consts::PI,
             Plane { .. } => INFINITY,
             Triangle {
                 ref v1,
@@ -272,7 +273,7 @@ impl<R: Rng> Shape<R> {
         }
     }
 
-    pub fn scale(&mut self, scale: f64) {
+    pub fn scale(&mut self, scale: f32) {
         match *self {
             Sphere {
                 ref mut radius,
@@ -297,7 +298,7 @@ impl<R: Rng> Shape<R> {
         }
     }
 
-    pub fn transform(&mut self, transform: Matrix4<f64>) {
+    pub fn transform(&mut self, transform: Matrix4<f32>) {
         match *self {
             Sphere {
                 ref mut position, ..
@@ -324,10 +325,10 @@ impl<R: Rng> Shape<R> {
 }
 
 impl<R: Rng> bkd_tree::Element for Arc<Shape<R>> {
-    type Item = Ray3<f64>;
+    type Item = Ray3<f32>;
     type Ray = world::BkdRay;
 
-    fn get_bounds_interval(&self, axis: Dim3) -> (f64, f64) {
+    fn get_bounds_interval(&self, axis: Dim3) -> (f32, f32) {
         match *self.deref() {
             Sphere {
                 ref position,
@@ -371,40 +372,40 @@ impl<R: Rng> bkd_tree::Element for Arc<Shape<R>> {
         }
     }
 
-    fn intersect(&self, ray: &world::BkdRay) -> Option<(f64, Ray3<f64>)> {
+    fn intersect(&self, ray: &world::BkdRay) -> Option<(f32, Ray3<f32>)> {
         let &world::BkdRay(ref ray) = ray;
         self.ray_intersect(ray)
     }
 }
 
 pub enum BoundingVolume {
-    Box(Point3<f64>, Point3<f64>),
-    Sphere(Point3<f64>, f64),
+    Box(Point3<f32>, Point3<f32>),
+    Sphere(Point3<f32>, f32),
 }
 
 impl BoundingVolume {
-    pub fn x_interval(&self) -> (f64, f64) {
+    pub fn x_interval(&self) -> (f32, f32) {
         match *self {
             BoundingVolume::Box(min, max) => (min.x, max.x),
             BoundingVolume::Sphere(center, radius) => (center.x - radius, center.x + radius),
         }
     }
 
-    pub fn y_interval(&self) -> (f64, f64) {
+    pub fn y_interval(&self) -> (f32, f32) {
         match *self {
             BoundingVolume::Box(min, max) => (min.y, max.y),
             BoundingVolume::Sphere(center, radius) => (center.y - radius, center.y + radius),
         }
     }
 
-    pub fn z_interval(&self) -> (f64, f64) {
+    pub fn z_interval(&self) -> (f32, f32) {
         match *self {
             BoundingVolume::Box(min, max) => (min.z, max.z),
             BoundingVolume::Sphere(center, radius) => (center.z - radius, center.z + radius),
         }
     }
 
-    pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(f64, f64)> {
+    pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(f32, f32)> {
         match *self {
             BoundingVolume::Box(min, max) => {
                 let inv_dir = Vector3::new(
@@ -496,7 +497,7 @@ impl BoundingVolume {
         }
     }
 
-    fn center(&self) -> Point3<f64> {
+    fn center(&self) -> Point3<f32> {
         match *self {
             BoundingVolume::Box(min, max) => (min + max.to_vec()) * 0.5,
             BoundingVolume::Sphere(center, _) => center,

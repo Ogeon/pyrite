@@ -19,7 +19,7 @@ pub fn register_types(context: &mut Prelude) {
         .add_decoder(decode_transform_look_at);
 }
 
-fn decode_vector_3d(entry: Entry<'_>) -> Result<Vector3<f64>, String> {
+fn decode_vector_3d(entry: Entry<'_>) -> Result<Vector3<f32>, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let x = match items.get("x") {
@@ -40,7 +40,7 @@ fn decode_vector_3d(entry: Entry<'_>) -> Result<Vector3<f64>, String> {
     Ok(Vector3::new(x, y, z))
 }
 
-fn decode_point_3d(entry: Entry<'_>) -> Result<Point3<f64>, String> {
+fn decode_point_3d(entry: Entry<'_>) -> Result<Point3<f32>, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let x = match items.get("x") {
@@ -61,7 +61,7 @@ fn decode_point_3d(entry: Entry<'_>) -> Result<Point3<f64>, String> {
     Ok(Point3::new(x, y, z))
 }
 
-fn decode_quaternion(entry: Entry<'_>) -> Result<Quaternion<f64>, String> {
+fn decode_quaternion(entry: Entry<'_>) -> Result<Quaternion<f32>, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let x = match items.get("x") {
@@ -87,7 +87,7 @@ fn decode_quaternion(entry: Entry<'_>) -> Result<Quaternion<f64>, String> {
     Ok(Quaternion::new(x, y, z, w))
 }
 
-fn decode_transform_look_at(entry: Entry<'_>) -> Result<Matrix4<f64>, String> {
+fn decode_transform_look_at(entry: Entry<'_>) -> Result<Matrix4<f32>, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let from = match items.get("from") {

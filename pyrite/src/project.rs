@@ -113,7 +113,7 @@ pub struct ImageSpec {
     pub width: usize,
     pub height: usize,
     pub format: ImageFormat,
-    pub rgb_curves: (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>),
+    pub rgb_curves: (Vec<(f32, f32)>, Vec<(f32, f32)>, Vec<(f32, f32)>),
 }
 
 fn decode_image_spec(entry: Entry<'_>) -> Result<ImageSpec, String> {
@@ -149,7 +149,7 @@ fn decode_image_spec(entry: Entry<'_>) -> Result<ImageSpec, String> {
 
 fn decode_rgb_curves(
     entry: Entry<'_>,
-) -> Result<(Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>), String> {
+) -> Result<(Vec<(f32, f32)>, Vec<(f32, f32)>, Vec<(f32, f32)>), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let red = match fields.get("red") {

@@ -3,6 +3,8 @@ use crate::tracer;
 use crate::config::entry::Entry;
 use crate::config::{Decode, Prelude};
 
+pub const DIST_EPSILON: f32 = 0.0001;
+
 macro_rules! make_operators {
     ($($fn_name:ident : $struct_name:ident { $($arg:ident),+ } => $operation:expr),*) => (
         fn insert_operators<From: Decode + 'static>(context: &mut Prelude) {
@@ -19,12 +21,12 @@ macro_rules! make_operators {
 
             struct $struct_name<From> {
                 $(
-                    $arg: Box<dyn tracer::ParametricValue<From, f64>>
+                    $arg: Box<dyn tracer::ParametricValue<From, f32>>
                 ),+
             }
 
-            impl<From> tracer::ParametricValue<From, f64> for $struct_name<From> {
-                fn get(&self, i: &From) -> f64 {
+            impl<From> tracer::ParametricValue<From, f32> for $struct_name<From> {
+                fn get(&self, i: &From) -> f32 {
                     $(
                         let $arg = self.$arg.get(i);
                     )+
@@ -32,7 +34,7 @@ macro_rules! make_operators {
                 }
             }
 
-            fn $fn_name<From: Decode + 'static>(entry: Entry<'_>) -> Result<Box<dyn tracer::ParametricValue<From, f64>>, String> {
+            fn $fn_name<From: Decode + 'static>(entry: Entry<'_>) -> Result<Box<dyn tracer::ParametricValue<From, f32>>, String> {
                 let fields = entry.as_object().ok_or("not an object")?;
 
                 $(
@@ -47,7 +49,7 @@ macro_rules! make_operators {
                         $(
                             $arg: $arg
                         ),+
-                    }) as Box<dyn tracer::ParametricValue<From, f64>>
+                    }) as Box<dyn tracer::ParametricValue<From, f32>>
                 )
             }
 
@@ -60,14 +62,15 @@ pub mod utils {
 
     use rand::Rng;
 
+    use super::DIST_EPSILON;
     use cgmath::{InnerSpace, Vector3};
 
     pub struct Interpolated {
-        pub points: Vec<(f64, f64)>,
+        pub points: Vec<(f32, f32)>,
     }
 
     impl Interpolated {
-        pub fn get(&self, input: f64) -> f64 {
+        pub fn get(&self, input: f32) -> f32 {
             if self.points.len() == 0 {
                 return 0.0;
             }
@@ -116,11 +119,11 @@ pub mod utils {
     }
 
     pub fn schlick(
-        ref_index1: f64,
-        ref_index2: f64,
-        normal: Vector3<f64>,
-        incident: Vector3<f64>,
-    ) -> f64 {
+        ref_index1: f32,
+        ref_index2: f32,
+        normal: Vector3<f32>,
+        incident: Vector3<f32>,
+    ) -> f32 {
         let mut cos_psi = -normal.dot(incident);
         let r0 = (ref_index1 - ref_index2) / (ref_index1 + ref_index2);
 
@@ -138,12 +141,12 @@ pub mod utils {
         return r0 * r0 + (1.0 - r0 * r0) * inv_cos * inv_cos * inv_cos * inv_cos * inv_cos;
     }
 
-    pub fn ortho(v: Vector3<f64>) -> Vector3<f64> {
-        let unit = if v.x.abs() < 0.00001 {
+    pub fn ortho(v: Vector3<f32>) -> Vector3<f32> {
+        let unit = if v.x.abs() < DIST_EPSILON {
             Vector3::unit_x()
-        } else if v.y.abs() < 0.00001 {
+        } else if v.y.abs() < DIST_EPSILON {
             Vector3::unit_y()
-        } else if v.z.abs() < 0.00001 {
+        } else if v.z.abs() < DIST_EPSILON {
             Vector3::unit_z()
         } else {
             Vector3 {
@@ -158,38 +161,38 @@ pub mod utils {
 
     pub fn sample_cone<R: ?Sized + Rng>(
         rng: &mut R,
-        direction: Vector3<f64>,
-        cos_half: f64,
-    ) -> Vector3<f64> {
+        direction: Vector3<f32>,
+        cos_half: f32,
+    ) -> Vector3<f32> {
         let o1 = ortho(direction).normalize();
         let o2 = direction.cross(o1).normalize();
-        let r1: f64 = std::f64::consts::PI * 2.0 * rng.gen::<f64>();
-        let r2: f64 = cos_half + (1.0 - cos_half) * rng.gen::<f64>();
+        let r1: f32 = std::f32::consts::PI * 2.0 * rng.gen::<f32>();
+        let r2: f32 = cos_half + (1.0 - cos_half) * rng.gen::<f32>();
         let oneminus = (1.0 - r2 * r2).sqrt();
 
         o1 * r1.cos() * oneminus + o2 * r1.sin() * oneminus + &direction * r2
     }
 
-    pub fn solid_angle(cos_half: f64) -> f64 {
+    pub fn solid_angle(cos_half: f32) -> f32 {
         if cos_half >= 1.0 {
             0.0
         } else {
-            2.0 * std::f64::consts::PI * (1.0 - cos_half)
+            2.0 * std::f32::consts::PI * (1.0 - cos_half)
         }
     }
 
-    pub fn sample_sphere<R: ?Sized + Rng>(rng: &mut R) -> Vector3<f64> {
-        let u = rng.gen::<f64>();
-        let v = rng.gen::<f64>();
-        let theta = 2.0 * std::f64::consts::PI * u;
+    pub fn sample_sphere<R: ?Sized + Rng>(rng: &mut R) -> Vector3<f32> {
+        let u = rng.gen::<f32>();
+        let v = rng.gen::<f32>();
+        let theta = 2.0 * std::f32::consts::PI * u;
         let phi = (2.0 * v - 1.0).acos();
         Vector3::new(phi.sin() * theta.cos(), phi.sin() * theta.sin(), phi.cos())
     }
 
     pub fn sample_hemisphere<R: ?Sized + Rng>(
         rng: &mut R,
-        direction: Vector3<f64>,
-    ) -> Vector3<f64> {
+        direction: Vector3<f32>,
+    ) -> Vector3<f32> {
         let s = sample_sphere(rng);
         let x = ortho(direction).normalize_to(s.x);
         let y = x.cross(direction).normalize_to(s.y);
@@ -225,19 +228,19 @@ make_operators! {
 }
 
 struct Curve<From> {
-    input: Box<dyn tracer::ParametricValue<From, f64>>,
+    input: Box<dyn tracer::ParametricValue<From, f32>>,
     points: utils::Interpolated,
 }
 
-impl<From> tracer::ParametricValue<From, f64> for Curve<From> {
-    fn get(&self, i: &From) -> f64 {
+impl<From> tracer::ParametricValue<From, f32> for Curve<From> {
+    fn get(&self, i: &From) -> f32 {
         self.points.get(self.input.get(i))
     }
 }
 
 fn decode_curve<From: Decode + 'static>(
     entry: Entry<'_>,
-) -> Result<Box<dyn tracer::ParametricValue<From, f64>>, String> {
+) -> Result<Box<dyn tracer::ParametricValue<From, f32>>, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let input = match fields.get("input") {
@@ -253,16 +256,16 @@ fn decode_curve<From: Decode + 'static>(
     Ok(Box::new(Curve::<From> {
         input: input,
         points: utils::Interpolated { points: points },
-    }) as Box<dyn tracer::ParametricValue<From, f64>>)
+    }) as Box<dyn tracer::ParametricValue<From, f32>>)
 }
 
 struct Fresnel {
-    ior: Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>,
-    env_ior: Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>,
+    ior: Box<dyn tracer::ParametricValue<tracer::RenderContext, f32>>,
+    env_ior: Box<dyn tracer::ParametricValue<tracer::RenderContext, f32>>,
 }
 
-impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
-    fn get(&self, i: &tracer::RenderContext) -> f64 {
+impl tracer::ParametricValue<tracer::RenderContext, f32> for Fresnel {
+    fn get(&self, i: &tracer::RenderContext) -> f32 {
         use cgmath::InnerSpace;
 
         let normal = i.normal;
@@ -278,7 +281,7 @@ impl tracer::ParametricValue<tracer::RenderContext, f64> for Fresnel {
 
 fn decode_fresnel(
     entry: Entry<'_>,
-) -> Result<Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>, String> {
+) -> Result<Box<dyn tracer::ParametricValue<tracer::RenderContext, f32>>, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
@@ -288,7 +291,7 @@ fn decode_fresnel(
 
     let env_ior = match fields.get("env_ior") {
         Some(v) => try_for!(tracer::decode_parametric_number(v), "env_ior"),
-        None => Box::new(1.0f64) as Box<dyn tracer::ParametricValue<tracer::RenderContext, f64>>,
+        None => Box::new(1.0f32) as Box<dyn tracer::ParametricValue<tracer::RenderContext, f32>>,
     };
 
     Ok(Box::new(Fresnel {

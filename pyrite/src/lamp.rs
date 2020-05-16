@@ -16,16 +16,16 @@ use crate::world;
 
 pub enum Lamp<R: Rng> {
     Directional {
-        direction: Vector3<f64>,
-        width: f64,
+        direction: Vector3<f32>,
+        width: f32,
         color: Box<Color>,
     },
-    Point(Point3<f64>, Box<Color>),
+    Point(Point3<f32>, Box<Color>),
     Shape(Arc<Shape<R>>),
 }
 
 impl<R: Rng> Lamp<R> {
-    pub fn sample(&self, rng: &mut R, target: Point3<f64>) -> Sample<'_, R> {
+    pub fn sample(&self, rng: &mut R, target: Point3<f32>) -> Sample<'_, R> {
         match *self {
             Lamp::Directional {
                 direction,
@@ -52,7 +52,7 @@ impl<R: Rng> Lamp<R> {
                     direction: v.normalize(),
                     sq_distance: Some(distance),
                     surface: Surface::Color(&**color),
-                    weight: 4.0 * std::f64::consts::PI / distance,
+                    weight: 4.0 * std::f32::consts::PI / distance,
                 }
             }
             Lamp::Shape(ref shape) => {
@@ -87,7 +87,7 @@ impl<R: Rng> Lamp<R> {
                 Some(RaySample {
                     ray: Ray3::new(center, direction),
                     surface: Surface::Color(&**color),
-                    weight: (4.0 * std::f64::consts::PI),
+                    weight: (4.0 * std::f32::consts::PI),
                 })
             }
             Lamp::Shape(ref shape) => {
@@ -109,24 +109,24 @@ impl<R: Rng> Lamp<R> {
 }
 
 pub struct Sample<'a, R: Rng> {
-    pub direction: Vector3<f64>,
-    pub sq_distance: Option<f64>,
+    pub direction: Vector3<f32>,
+    pub sq_distance: Option<f32>,
     pub surface: Surface<'a, R>,
-    pub weight: f64,
+    pub weight: f32,
 }
 
 pub enum Surface<'a, R: Rng> {
     Physical {
-        normal: Ray3<f64>,
+        normal: Ray3<f32>,
         material: &'a dyn Material<R>,
     },
     Color(&'a Color),
 }
 
 pub struct RaySample<'a, R: Rng> {
-    pub ray: Ray3<f64>,
+    pub ray: Ray3<f32>,
     pub surface: Surface<'a, R>,
-    pub weight: f64,
+    pub weight: f32,
 }
 
 pub fn register_types<R: Rng + 'static>(context: &mut Prelude) {
@@ -145,7 +145,7 @@ fn decode_directional<R: Rng>(entry: Entry<'_>) -> Result<world::Object<R>, Stri
         None => return Err("missing field 'direction'".into()),
     };
 
-    let width: f64 = match fields.get("width") {
+    let width: f32 = match fields.get("width") {
         Some(v) => try_for!(v.decode(), "width"),
         None => 0.0,
     };

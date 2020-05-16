@@ -386,7 +386,7 @@ macro_rules! impl_value_from_float {
     ($($ty: ty),+) => (
         $(impl From<$ty> for Value {
             fn from(v: $ty) -> Value {
-                Value::Number(Number::Float(v as f64))
+                Value::Number(Number::Float(v as f32))
             }
         })+
     )
@@ -396,7 +396,7 @@ macro_rules! impl_value_from_int {
     ($($ty: ty),+) => (
         $(impl From<$ty> for Value {
             fn from(v: $ty) -> Value {
-                Value::Number(Number::Integer(v as i64))
+                Value::Number(Number::Integer(v as i32))
             }
         })+
     )

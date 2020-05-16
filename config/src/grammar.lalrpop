@@ -75,6 +75,6 @@ Number: ast::Number = {
     <n:Int> => ast::Number::Integer(n),
 };
 
-Int: i64 = <s:r"-?[0-9]+"> => s.parse().unwrap();
-Float: f64 = <s:r"-?([0-9]+)\.([0-9]+)"> => s.parse().unwrap();
+Int: i32 = <s:r"-?[0-9]+"> => s.parse().unwrap();
+Float: f32 = <s:r"-?([0-9]+)\.([0-9]+)"> => s.parse().unwrap();
 Str: String = <s:r#""[^"]*""#> => s[1..s.len()-1].into();

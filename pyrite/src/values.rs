@@ -1,7 +1,7 @@
 use crate::tracer;
 
-use crate::config::Prelude;
 use crate::config::entry::Entry;
+use crate::config::Prelude;
 
 macro_rules! make_values {
     ($insert_fn:ident : $type_name:ident <$context_name:ty, $result_name:ty> { $($fn_name:ident : $variant_name:ident => $value_name:ident),* }) => (
@@ -39,7 +39,7 @@ pub fn register_types(context: &mut Prelude) {
 }
 
 make_values! {
-    insert_render_numbers: RenderNumber<tracer::RenderContext, f64> {
+    insert_render_numbers: RenderNumber<tracer::RenderContext, f32> {
         decode_wavelength: Wavelength => wavelength
     }
 }

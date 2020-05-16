@@ -1,4 +1,4 @@
-use std::f64::consts;
+use std::f32::consts;
 
 use rand::Rng;
 
@@ -13,7 +13,7 @@ use crate::film::Area;
 use crate::config::entry::Entry;
 use crate::config::Prelude;
 
-use crate::world::World;
+use crate::{math::DIST_EPSILON, world::World};
 
 pub fn register_types(context: &mut Prelude) {
     context
@@ -24,18 +24,18 @@ pub fn register_types(context: &mut Prelude) {
 
 pub enum Camera {
     Perspective {
-        transform: Matrix4<f64>,
-        view_plane: f64,
-        focus_distance: f64,
-        aperture: f64,
+        transform: Matrix4<f32>,
+        view_plane: f32,
+        focus_distance: f32,
+        aperture: f32,
     },
 }
 
 impl Camera {
-    pub fn to_view_area(&self, area: &Area<usize>, width: usize, height: usize) -> Area<f64> {
-        let float_image_size = Vector2::new(width as f64, height as f64);
-        let float_coord = Point2::new(area.from.x as f64, area.from.y as f64);
-        let float_size = Vector2::new(area.size.x as f64, area.size.y as f64);
+    pub fn to_view_area(&self, area: &Area<usize>, width: usize, height: usize) -> Area<f32> {
+        let float_image_size = Vector2::new(width as f32, height as f32);
+        let float_coord = Point2::new(area.from.x as f32, area.from.y as f32);
+        let float_size = Vector2::new(area.size.x as f32, area.size.y as f32);
 
         let max_dimension = float_image_size.x.max(float_image_size.y);
 
@@ -45,7 +45,7 @@ impl Camera {
         Area::new(from, size)
     }
 
-    pub fn ray_towards<R: Rng>(&self, target: &Point2<f64>, rng: &mut R) -> Ray3<f64> {
+    pub fn ray_towards<R: Rng>(&self, target: &Point2<f32>, rng: &mut R) -> Ray3<f32> {
         match *self {
             Camera::Perspective {
                 transform,
@@ -59,8 +59,8 @@ impl Camera {
                 let target = Point3::new(focus_x, -focus_y, -focus_distance);
 
                 let (origin, direction) = if aperture > 0.0 {
-                    let sqrt_r = (aperture * rng.gen::<f64>()).sqrt();
-                    let psi = consts::PI * 2.0 * rng.gen::<f64>();
+                    let sqrt_r = (aperture * rng.gen::<f32>()).sqrt();
+                    let psi = consts::PI * 2.0 * rng.gen::<f32>();
                     let lens_x = sqrt_r * psi.cos();
                     let lens_y = sqrt_r * psi.sin();
                     let origin = Point3::new(lens_x, lens_y, 0.0);
@@ -76,10 +76,10 @@ impl Camera {
 
     pub fn is_visible<R: Rng>(
         &self,
-        target: Point3<f64>,
+        target: Point3<f32>,
         world: &World<R>,
         rng: &mut R,
-    ) -> Option<(Point2<f64>, Ray3<f64>)> {
+    ) -> Option<(Point2<f32>, Ray3<f32>)> {
         match *self {
             Camera::Perspective {
                 ref transform,
@@ -100,8 +100,8 @@ impl Camera {
                 }
 
                 let origin = if aperture > 0.0 {
-                    let sqrt_r = (aperture * rng.gen::<f64>()).sqrt();
-                    let psi = consts::PI * 2.0 * rng.gen::<f64>();
+                    let sqrt_r = (aperture * rng.gen::<f32>()).sqrt();
+                    let psi = consts::PI * 2.0 * rng.gen::<f32>();
                     let lens_x = sqrt_r * psi.cos();
                     let lens_y = sqrt_r * psi.sin();
                     Point3::new(lens_x, lens_y, 0.0)
@@ -115,7 +115,7 @@ impl Camera {
                 let ray = Ray::new(world_origin, direction.normalize());
                 if let Some((hit, _)) = world.intersect(&ray) {
                     let hit_distance = (hit.origin - world_origin).magnitude2();
-                    if hit_distance < sq_distance - 0.000001 {
+                    if hit_distance < sq_distance - DIST_EPSILON {
                         return None;
                     }
                 }
@@ -145,17 +145,17 @@ fn decode_perspective(entry: Entry<'_>) -> Result<Camera, String> {
         None => Matrix4::identity(),
     };
 
-    let fov: f64 = match items.get("fov") {
+    let fov: f32 = match items.get("fov") {
         Some(v) => try_for!(v.decode(), "fov"),
         None => return Err("missing field of view ('fov')".into()),
     };
 
-    let focus_distance: f64 = match items.get("focus_distance") {
+    let focus_distance: f32 = match items.get("focus_distance") {
         Some(v) => try_for!(v.decode(), "focus_distance"),
         None => 1.0,
     };
 
-    let aperture: f64 = match items.get("aperture") {
+    let aperture: f32 = match items.get("aperture") {
         Some(v) => try_for!(v.decode(), "aperture"),
         None => 0.0,
     };

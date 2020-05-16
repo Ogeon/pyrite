@@ -17,7 +17,7 @@ mod simple;
 
 static DEFAULT_SPECTRUM_SAMPLES: u32 = 10;
 static DEFAULT_SPECTRUM_BINS: usize = 64;
-static DEFAULT_SPECTRUM_SPAN: (f64, f64) = (380.0, 780.0);
+static DEFAULT_SPECTRUM_SPAN: (f32, f32) = (380.0, 780.0);
 
 pub fn register_types(context: &mut Prelude) {
     let mut group = context.object("Renderer".into());
@@ -37,7 +37,7 @@ pub struct Renderer {
     light_samples: usize,
     spectrum_samples: u32,
     pub spectrum_bins: usize,
-    pub spectrum_span: (f64, f64),
+    pub spectrum_span: (f32, f32),
     pub tile_size: usize,
     algorithm: Algorithm,
 }
@@ -180,7 +180,7 @@ fn decode_renderer(items: Object<'_>, algorithm: Algorithm) -> Result<Renderer, 
     })
 }
 
-fn decode_spectrum(items: Object<'_>) -> Result<(u32, usize, (f64, f64)), String> {
+fn decode_spectrum(items: Object<'_>) -> Result<(u32, usize, (f32, f32)), String> {
     let samples = match items.get("samples") {
         Some(v) => try_for!(v.decode(), "samples"),
         None => DEFAULT_SPECTRUM_SAMPLES,

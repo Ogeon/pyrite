@@ -20,8 +20,8 @@ impl<R: Rng> Material<R> for Diffuse {
     fn reflect(
         &self,
         _light: &mut Light,
-        ray_in: Ray3<f64>,
-        normal: Ray3<f64>,
+        ray_in: Ray3<f32>,
+        normal: Ray3<f32>,
         rng: &mut R,
     ) -> Reflection<'_> {
         let n = if ray_in.direction.dot(normal.direction) < 0.0 {
@@ -42,15 +42,15 @@ impl<R: Rng> Material<R> for Diffuse {
     fn get_emission(
         &self,
         _light: &mut Light,
-        _ray_in: Vector3<f64>,
-        _normal: Ray3<f64>,
+        _ray_in: Vector3<f32>,
+        _normal: Ray3<f32>,
         _rng: &mut R,
     ) -> Option<&Color> {
         None
     }
 }
 
-fn lambertian(_ray_in: Vector3<f64>, ray_out: Vector3<f64>, normal: Vector3<f64>) -> f64 {
+fn lambertian(_ray_in: Vector3<f32>, ray_out: Vector3<f32>, normal: Vector3<f32>) -> f32 {
     2.0 * normal.dot(ray_out).abs()
 }
 
@@ -62,8 +62,8 @@ impl<R: Rng> Material<R> for Emission {
     fn reflect(
         &self,
         _light: &mut Light,
-        _ray_in: Ray3<f64>,
-        _normal: Ray3<f64>,
+        _ray_in: Ray3<f32>,
+        _normal: Ray3<f32>,
         _rng: &mut R,
     ) -> Reflection<'_> {
         Emit(&*self.color)
@@ -72,8 +72,8 @@ impl<R: Rng> Material<R> for Emission {
     fn get_emission(
         &self,
         _light: &mut Light,
-        _ray_in: Vector3<f64>,
-        _normal: Ray3<f64>,
+        _ray_in: Vector3<f32>,
+        _normal: Ray3<f32>,
         _rng: &mut R,
     ) -> Option<&Color> {
         Some(&*self.color)
@@ -88,8 +88,8 @@ impl<R: Rng> Material<R> for Mirror {
     fn reflect(
         &self,
         _light: &mut Light,
-        ray_in: Ray3<f64>,
-        normal: Ray3<f64>,
+        ray_in: Ray3<f32>,
+        normal: Ray3<f32>,
         _rng: &mut R,
     ) -> Reflection<'_> {
         let mut n = if ray_in.direction.dot(normal.direction) < 0.0 {
@@ -111,8 +111,8 @@ impl<R: Rng> Material<R> for Mirror {
     fn get_emission(
         &self,
         _light: &mut Light,
-        _ray_in: Vector3<f64>,
-        _normal: Ray3<f64>,
+        _ray_in: Vector3<f32>,
+        _normal: Ray3<f32>,
         _rng: &mut R,
     ) -> Option<&Color> {
         None
@@ -120,7 +120,7 @@ impl<R: Rng> Material<R> for Mirror {
 }
 
 pub struct Mix<R: Rng> {
-    factor: f64,
+    factor: f32,
     pub a: MaterialBox<R>,
     pub b: MaterialBox<R>,
 }
@@ -129,8 +129,8 @@ impl<R: Rng> Material<R> for Mix<R> {
     fn reflect(
         &self,
         light: &mut Light,
-        ray_in: Ray3<f64>,
-        normal: Ray3<f64>,
+        ray_in: Ray3<f32>,
+        normal: Ray3<f32>,
         rng: &mut R,
     ) -> Reflection<'_> {
         if self.factor < rng.gen() {
@@ -143,8 +143,8 @@ impl<R: Rng> Material<R> for Mix<R> {
     fn get_emission(
         &self,
         light: &mut Light,
-        ray_in: Vector3<f64>,
-        normal: Ray3<f64>,
+        ray_in: Vector3<f32>,
+        normal: Ray3<f32>,
         rng: &mut R,
     ) -> Option<&Color> {
         if self.factor < rng.gen() {
@@ -156,10 +156,10 @@ impl<R: Rng> Material<R> for Mix<R> {
 }
 
 struct FresnelMix<R: Rng> {
-    ior: f64,
-    dispersion: f64,
-    env_ior: f64,
-    env_dispersion: f64,
+    ior: f32,
+    dispersion: f32,
+    env_ior: f32,
+    env_dispersion: f32,
     pub reflect: MaterialBox<R>,
     pub refract: MaterialBox<R>,
 }
@@ -168,8 +168,8 @@ impl<R: Rng> Material<R> for FresnelMix<R> {
     fn reflect(
         &self,
         light: &mut Light,
-        ray_in: Ray3<f64>,
-        normal: Ray3<f64>,
+        ray_in: Ray3<f32>,
+        normal: Ray3<f32>,
         rng: &mut R,
     ) -> Reflection<'_> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
@@ -203,8 +203,8 @@ impl<R: Rng> Material<R> for FresnelMix<R> {
     fn get_emission(
         &self,
         light: &mut Light,
-        ray_in: Vector3<f64>,
-        normal: Ray3<f64>,
+        ray_in: Vector3<f32>,
+        normal: Ray3<f32>,
         rng: &mut R,
     ) -> Option<&Color> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
@@ -237,12 +237,12 @@ impl<R: Rng> Material<R> for FresnelMix<R> {
 }
 
 fn fresnel_mix<'a, R: Rng>(
-    ior: f64,
-    env_ior: f64,
+    ior: f32,
+    env_ior: f32,
     reflect: &'a MaterialBox<R>,
     refract: &'a MaterialBox<R>,
-    ray_in: Vector3<f64>,
-    normal: Ray3<f64>,
+    ray_in: Vector3<f32>,
+    normal: Ray3<f32>,
     rng: &mut R,
 ) -> &'a MaterialBox<R> {
     let factor = if ray_in.dot(normal.direction) < 0.0 {
@@ -260,18 +260,18 @@ fn fresnel_mix<'a, R: Rng>(
 
 struct Refractive {
     color: Box<Color>,
-    ior: f64,
-    dispersion: f64,
-    env_ior: f64,
-    env_dispersion: f64,
+    ior: f32,
+    dispersion: f32,
+    env_ior: f32,
+    env_dispersion: f32,
 }
 
 impl<R: Rng> Material<R> for Refractive {
     fn reflect(
         &self,
         light: &mut Light,
-        ray_in: Ray3<f64>,
-        normal: Ray3<f64>,
+        ray_in: Ray3<f32>,
+        normal: Ray3<f32>,
         rng: &mut R,
     ) -> Reflection<'_> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
@@ -287,8 +287,8 @@ impl<R: Rng> Material<R> for Refractive {
     fn get_emission(
         &self,
         _light: &mut Light,
-        _ray_in: Vector3<f64>,
-        _normal: Ray3<f64>,
+        _ray_in: Vector3<f32>,
+        _normal: Ray3<f32>,
         _rng: &mut R,
     ) -> Option<&Color> {
         None
@@ -296,11 +296,11 @@ impl<R: Rng> Material<R> for Refractive {
 }
 
 fn refract<'a, R: Rng>(
-    ior: f64,
-    env_ior: f64,
+    ior: f32,
+    env_ior: f32,
     color: &'a Box<Color>,
-    ray_in: Ray3<f64>,
-    normal: Ray3<f64>,
+    ray_in: Ray3<f32>,
+    normal: Ray3<f32>,
     rng: &mut R,
 ) -> Reflection<'a> {
     let nl = if normal.direction.dot(ray_in.direction) < 0.0 {
@@ -342,7 +342,7 @@ fn refract<'a, R: Rng>(
     let rp = re / p;
     let tp = tr / (1.0 - p);
 
-    if rng.gen::<f64>() < p {
+    if rng.gen::<f32>() < p {
         return Reflect(Ray3::new(normal.origin, reflected), &**color, rp, None);
     } else {
         return Reflect(Ray3::new(normal.origin, tdir), &**color, tp, None);

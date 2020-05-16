@@ -12,9 +12,9 @@ pub struct Film {
     height: usize,
     aspect_ratio: AspectRatio,
     grains_per_pixel: usize,
-    wavelength_start: f64,
-    wavelength_width: f64,
-    grains_per_wavelength: f64,
+    wavelength_start: f32,
+    wavelength_width: f32,
+    grains_per_wavelength: f32,
     grains: Vec<Grain>,
 }
 
@@ -23,7 +23,7 @@ impl Film {
         width: usize,
         height: usize,
         grains_per_pixel: usize,
-        wavelength_span: (f64, f64),
+        wavelength_span: (f32, f32),
     ) -> Self {
         let length = width * height * grains_per_pixel;
         let (wavelength_start, wavelength_end) = wavelength_span;
@@ -36,7 +36,7 @@ impl Film {
             grains_per_pixel,
             wavelength_start,
             wavelength_width,
-            grains_per_wavelength: grains_per_pixel as f64 / wavelength_width,
+            grains_per_wavelength: grains_per_pixel as f32 / wavelength_width,
             grains: std::iter::repeat_with(Grain::new).take(length).collect(),
         }
     }
@@ -58,22 +58,22 @@ impl Film {
         Some(&self.grains[index..index + self.grains_per_pixel])
     }
 
-    pub fn get_pixel_f(&self, position: Point2<f64>) -> Option<&[Grain]> {
+    pub fn get_pixel_f(&self, position: Point2<f32>) -> Option<&[Grain]> {
         self.get_pixel(self.aspect_ratio.to_pixel(position)?)
     }
 
-    pub fn sample_wavelength<R: Rng>(&self, rng: &mut R) -> f64 {
+    pub fn sample_wavelength<R: Rng>(&self, rng: &mut R) -> f32 {
         rng.gen_range(
             self.wavelength_start,
             self.wavelength_start + self.wavelength_width,
         )
     }
 
-    fn wavelength_to_grain(&self, wavelength: f64) -> usize {
+    fn wavelength_to_grain(&self, wavelength: f32) -> usize {
         ((wavelength - self.wavelength_start) * self.grains_per_wavelength) as usize
     }
 
-    pub fn expose(&self, position: Point2<f64>, sample: Sample) {
+    pub fn expose(&self, position: Point2<f32>, sample: Sample) {
         let grain_index = self.wavelength_to_grain(sample.wavelength);
 
         if let Some(pixel) = self.get_pixel_f(position) {
@@ -81,7 +81,7 @@ impl Film {
         }
     }
 
-    pub fn get_pixel_ref_f(&self, position: Point2<f64>) -> Option<DetachedPixel> {
+    pub fn get_pixel_ref_f(&self, position: Point2<f32>) -> Option<DetachedPixel> {
         Some(DetachedPixel {
             grains: self.get_pixel_f(position)?,
         })
@@ -100,26 +100,27 @@ impl Film {
     }
 }
 
+#[repr(transparent)]
 pub struct Grain {
-    weight: AtomicCell<N64>,
-    accumulator: AtomicCell<N64>,
+    data: AtomicCell<GrainData>,
 }
 
 impl Grain {
     fn new() -> Self {
         Self {
-            weight: AtomicCell::new(n64(0.0)),
-            accumulator: AtomicCell::new(n64(0.0)),
+            data: AtomicCell::new(GrainData::new()),
         }
     }
 
-    pub fn expose(&self, value: f64, weight: f64) {
+    pub fn expose(&self, value: f32, weight: f32) {
         self.increment(value * weight, weight);
     }
 
-    pub fn develop(&self) -> f64 {
-        let weight = self.weight.load();
-        let accumulator = self.accumulator.load();
+    pub fn develop(&self) -> f32 {
+        let GrainData {
+            weight,
+            accumulator,
+        } = self.data.load();
 
         if weight > 0.0 {
             (accumulator / weight).into()
@@ -128,31 +129,40 @@ impl Grain {
         }
     }
 
-    fn increment(&self, increment: f64, weight: f64) {
-        let mut current_weight = self.weight.load();
+    fn increment(&self, increment: f32, weight: f32) {
+        let mut currant_data = self.data.load();
         loop {
             let result = self
-                .weight
-                .compare_exchange(current_weight, current_weight + weight);
+                .data
+                .compare_exchange(currant_data, currant_data.add(increment, weight));
 
             if let Err(current) = result {
-                current_weight = current;
+                currant_data = current;
             } else {
                 break;
             }
         }
+    }
+}
 
-        let mut current_accumulator = self.accumulator.load();
-        loop {
-            let result = self
-                .accumulator
-                .compare_exchange(current_accumulator, current_accumulator + increment);
+#[derive(Copy, Clone, Eq, PartialEq)]
+struct GrainData {
+    accumulator: N32,
+    weight: N32,
+}
 
-            if let Err(current) = result {
-                current_accumulator = current;
-            } else {
-                break;
-            }
+impl GrainData {
+    fn new() -> Self {
+        Self {
+            weight: n32(0.0),
+            accumulator: n32(0.0),
+        }
+    }
+
+    fn add(&self, increment: f32, weight: f32) -> Self {
+        Self {
+            accumulator: self.accumulator + increment,
+            weight: self.weight + weight,
         }
     }
 }
@@ -168,14 +178,14 @@ impl<'a> DetachedPixel<'a> {
 }
 
 pub struct PixelSample {
-    value: f64,
-    weight: f64,
+    value: f32,
+    weight: f32,
     grain: usize,
 }
 
 struct AspectRatio {
-    size: f64,
-    ratio: f64,
+    size: f32,
+    ratio: f32,
     orientation: Orientation,
 }
 
@@ -183,27 +193,27 @@ impl AspectRatio {
     fn new(width: usize, height: usize) -> AspectRatio {
         if width >= height {
             AspectRatio {
-                size: width as f64,
-                ratio: height as f64 / width as f64,
+                size: width as f32,
+                ratio: height as f32 / width as f32,
                 orientation: Orientation::Horizontal,
             }
         } else {
             AspectRatio {
-                size: height as f64,
-                ratio: width as f64 / height as f64,
+                size: height as f32,
+                ratio: width as f32 / height as f32,
                 orientation: Orientation::Vertical,
             }
         }
     }
 
-    fn contains(&self, point: Point2<f64>) -> bool {
+    fn contains(&self, point: Point2<f32>) -> bool {
         match self.orientation {
             Orientation::Horizontal => point.y.abs() <= self.ratio,
             Orientation::Vertical => point.x.abs() <= self.ratio,
         }
     }
 
-    fn to_pixel(&self, point: Point2<f64>) -> Option<Point2<usize>> {
+    fn to_pixel(&self, point: Point2<f32>) -> Option<Point2<usize>> {
         if self.contains(point) {
             let (x, y) = match self.orientation {
                 Orientation::Horizontal => (point.x + 1.0, point.y + self.ratio),
@@ -247,9 +257,9 @@ impl<S> Area<S> {
 
 #[derive(Clone)]
 pub struct Sample {
-    pub brightness: f64,
-    pub wavelength: f64,
-    pub weight: f64,
+    pub brightness: f32,
+    pub wavelength: f32,
+    pub weight: f32,
 }
 
 pub struct DevelopedPixels<'a> {
@@ -286,8 +296,8 @@ impl<'a> Iterator for DevelopedPixels<'a> {
 }
 
 pub struct Spectrum<'a> {
-    pub min: f64,
-    pub width: f64,
+    pub min: f32,
+    pub width: f32,
     grains: &'a [Grain],
 }
 
@@ -295,15 +305,15 @@ impl<'a> Spectrum<'a> {
     pub fn segments(&self) -> SpectrumSegments<'_> {
         SpectrumSegments {
             start: self.min,
-            segment_width: self.width / self.grains.len() as f64,
+            segment_width: self.width / self.grains.len() as f32,
             grains: self.grains.iter().enumerate(),
         }
     }
 }
 
 pub struct SpectrumSegments<'a> {
-    start: f64,
-    segment_width: f64,
+    start: f32,
+    segment_width: f32,
     grains: Enumerate<Iter<'a, Grain>>,
 }
 
@@ -313,7 +323,7 @@ impl<'a> Iterator for SpectrumSegments<'a> {
     fn next(&mut self) -> Option<Segment> {
         match self.grains.next() {
             Some((i, v)) => Some(Segment {
-                start: self.start + i as f64 * self.segment_width,
+                start: self.start + i as f32 * self.segment_width,
                 width: self.segment_width,
                 value: v.develop(),
             }),
@@ -323,7 +333,7 @@ impl<'a> Iterator for SpectrumSegments<'a> {
 }
 
 pub struct Segment {
-    pub start: f64,
-    pub width: f64,
-    pub value: f64,
+    pub start: f32,
+    pub width: f32,
+    pub value: f32,
 }

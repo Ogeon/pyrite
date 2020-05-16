@@ -8,26 +8,26 @@ use collision::Ray3;
 use crate::config::entry::Entry;
 use crate::config::{Decode, Value};
 use crate::lamp::{self, Lamp};
-use crate::world::World;
+use crate::{math::DIST_EPSILON, world::World};
 
 pub use self::Reflection::{Emit, Reflect};
 
-pub type Brdf = fn(ray_in: Vector3<f64>, ray_out: Vector3<f64>, normal: Vector3<f64>) -> f64;
-pub type Color = dyn ParametricValue<RenderContext, f64>;
+pub type Brdf = fn(ray_in: Vector3<f32>, ray_out: Vector3<f32>, normal: Vector3<f32>) -> f32;
+pub type Color = dyn ParametricValue<RenderContext, f32>;
 
 pub trait Material<R: Rng>: Sync {
     fn reflect<'a>(
         &'a self,
         light: &mut Light,
-        ray_in: Ray3<f64>,
-        normal: Ray3<f64>,
+        ray_in: Ray3<f32>,
+        normal: Ray3<f32>,
         rng: &mut R,
     ) -> Reflection<'a>;
     fn get_emission<'a>(
         &'a self,
         light: &mut Light,
-        ray_in: Vector3<f64>,
-        normal: Ray3<f64>,
+        ray_in: Vector3<f32>,
+        normal: Ray3<f32>,
         rng: &mut R,
     ) -> Option<&'a Color>;
 }
@@ -36,41 +36,41 @@ pub trait ParametricValue<From, To>: Send + Sync {
     fn get(&self, i: &From) -> To;
 }
 
-impl<From> ParametricValue<From, f64> for f64 {
-    fn get(&self, _: &From) -> f64 {
+impl<From> ParametricValue<From, f32> for f32 {
+    fn get(&self, _: &From) -> f32 {
         *self
     }
 }
 
 pub enum Reflection<'a> {
     Emit(&'a Color),
-    Reflect(Ray3<f64>, &'a Color, f64, Option<Brdf>),
+    Reflect(Ray3<f32>, &'a Color, f32, Option<Brdf>),
 }
 
 pub struct RenderContext {
-    pub wavelength: f64,
-    pub normal: Vector3<f64>,
-    pub incident: Vector3<f64>,
+    pub wavelength: f32,
+    pub normal: Vector3<f32>,
+    pub incident: Vector3<f32>,
 }
 
 pub struct Bounce<'a> {
     pub ty: BounceType,
     pub light: Light,
     pub color: &'a Color,
-    pub incident: Vector3<f64>,
-    pub normal: Ray3<f64>,
-    pub probability: f64,
+    pub incident: Vector3<f32>,
+    pub normal: Ray3<f32>,
+    pub probability: f32,
     pub direct_light: Vec<DirectLight<'a>>,
 }
 
 pub enum BounceType {
-    Diffuse(Brdf, Vector3<f64>),
+    Diffuse(Brdf, Vector3<f32>),
     Specular,
     Emission,
 }
 
 impl BounceType {
-    pub fn brdf(&self, incident: Vector3<f64>, normal: Vector3<f64>) -> f64 {
+    pub fn brdf(&self, incident: Vector3<f32>, normal: Vector3<f32>) -> f32 {
         if let BounceType::Diffuse(brdf, out) = *self {
             brdf(incident, normal, out)
         } else {
@@ -90,26 +90,26 @@ impl BounceType {
 pub struct DirectLight<'a> {
     pub light: Light,
     pub color: &'a Color,
-    pub incident: Vector3<f64>,
-    pub normal: Vector3<f64>,
-    pub probability: f64,
+    pub incident: Vector3<f32>,
+    pub normal: Vector3<f32>,
+    pub probability: f32,
 }
 
 #[derive(Clone)]
 pub struct Light {
-    wavelength: f64,
+    wavelength: f32,
     white: bool,
 }
 
 impl Light {
-    pub fn new(wavelength: f64) -> Light {
+    pub fn new(wavelength: f32) -> Light {
         Light {
             wavelength: wavelength,
             white: true,
         }
     }
 
-    pub fn colored(&mut self) -> f64 {
+    pub fn colored(&mut self) -> f32 {
         self.white = false;
         self.wavelength
     }
@@ -121,7 +121,7 @@ impl Light {
 
 pub fn trace<'w, R: Rng>(
     rng: &mut R,
-    mut ray: Ray3<f64>,
+    mut ray: Ray3<f32>,
     mut light: Light,
     world: &'w World<R>,
     bounces: u32,
@@ -198,7 +198,7 @@ pub fn trace<'w, R: Rng>(
                     color: color,
                     incident: ray.direction,
                     normal: Ray3::new(
-                        Point3::from_vec(&ray.direction * std::f64::INFINITY),
+                        Point3::from_vec(&ray.direction * std::f32::INFINITY),
                         -ray.direction,
                     ),
                     probability: 1.0,
@@ -217,8 +217,8 @@ fn trace_direct<'w, R: Rng>(
     rng: &mut R,
     samples: usize,
     light: Light,
-    ray_in: Vector3<f64>,
-    normal: Ray3<f64>,
+    ray_in: Vector3<f32>,
+    normal: Ray3<f32>,
     world: &'w World<R>,
     brdf: Brdf,
 ) -> Vec<DirectLight<'w>> {
@@ -231,7 +231,7 @@ fn trace_direct<'w, R: Rng>(
 
         let normal = Ray3::new(normal.origin, n);
 
-        let probability = 1.0 / (samples as f64 * 2.0 * std::f64::consts::PI * probability);
+        let probability = 1.0 / (samples as f32 * 2.0 * std::f32::consts::PI * probability);
 
         (0..samples)
             .filter_map(|_| {
@@ -254,7 +254,7 @@ fn trace_direct<'w, R: Rng>(
                         .map(|(hit_normal, _)| (hit_normal.origin - &normal.origin).magnitude2());
 
                     let blocked = match (hit_dist, sq_distance) {
-                        (Some(hit), Some(lamp)) if hit >= lamp - 0.0000001 => false,
+                        (Some(hit), Some(lamp)) if hit >= lamp - DIST_EPSILON => false,
                         (None, _) => false,
                         _ => true,
                     };
@@ -300,7 +300,7 @@ fn trace_direct<'w, R: Rng>(
     }
 }
 
-fn trace_directional<'w, R: Rng>(ray: Vector3<f64>, world: &'w World<R>) -> Option<&'w Color> {
+fn trace_directional<'w, R: Rng>(ray: Vector3<f32>, world: &'w World<R>) -> Option<&'w Color> {
     for light in &world.lights {
         if let &Lamp::Directional {
             direction,
@@ -319,9 +319,9 @@ fn trace_directional<'w, R: Rng>(ray: Vector3<f64>, world: &'w World<R>) -> Opti
 
 pub fn decode_parametric_number<From: Decode + 'static>(
     item: Entry<'_>,
-) -> Result<Box<dyn ParametricValue<From, f64>>, String> {
+) -> Result<Box<dyn ParametricValue<From, f32>>, String> {
     if let Some(&Value::Number(num)) = item.as_value() {
-        Ok(Box::new(num.as_float()) as Box<dyn ParametricValue<From, f64>>)
+        Ok(Box::new(num.as_float()) as Box<dyn ParametricValue<From, f32>>)
     } else {
         item.dynamic_decode()
     }

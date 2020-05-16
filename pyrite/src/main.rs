@@ -193,7 +193,7 @@ fn spectrum_to_rgb(
     red: &Interpolated,
     green: &Interpolated,
     blue: &Interpolated,
-) -> LinSrgb<f64> {
+) -> LinSrgb {
     let mut sum = LinSrgb::new(0.0, 0.0, 0.0);
     let mut weight = LinSrgb::new(0.0, 0.0, 0.0);
 

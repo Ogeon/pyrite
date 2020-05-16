@@ -25,7 +25,7 @@ pub enum Sky {
 }
 
 impl Sky {
-    pub fn color<'a>(&'a self, _direction: &Vector3<f64>) -> &'a Color {
+    pub fn color<'a>(&'a self, _direction: &Vector3<f32>) -> &'a Color {
         match *self {
             Sky::Color(ref c) => &**c,
         }
@@ -39,14 +39,14 @@ pub struct World<R: Rng> {
 }
 
 impl<R: Rng> World<R> {
-    pub fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &dyn Material<R>)> {
+    pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &dyn Material<R>)> {
         self.objects.intersect(ray)
     }
 
-    pub fn pick_lamp(&self, rng: &mut R) -> Option<(&Lamp<R>, f64)> {
+    pub fn pick_lamp(&self, rng: &mut R) -> Option<(&Lamp<R>, f32)> {
         self.lights
             .get(rng.gen_range(0, self.lights.len()))
-            .map(|l| (l, 1.0 / self.lights.len() as f64))
+            .map(|l| (l, 1.0 / self.lights.len() as f32))
     }
 }
 
@@ -59,29 +59,29 @@ pub enum Object<R: Rng> {
     Mesh {
         file: String,
         materials: HashMap<String, (materials::MaterialBox<R>, bool)>,
-        scale: f64,
-        transform: Matrix4<f64>,
+        scale: f32,
+        transform: Matrix4<f32>,
     },
 }
 
 pub trait ObjectContainer<R: Rng> {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &dyn Material<R>)>;
+    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &dyn Material<R>)>;
 }
 
 impl<R: Rng> ObjectContainer<R> for bkd_tree::BkdTree<Arc<shapes::Shape<R>>> {
-    fn intersect(&self, ray: &Ray3<f64>) -> Option<(Ray3<f64>, &dyn Material<R>)> {
+    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &dyn Material<R>)> {
         let ray = BkdRay(*ray);
         self.find(&ray)
             .map(|(normal, object)| (normal, object.get_material()))
     }
 }
 
-pub struct BkdRay(pub Ray3<f64>);
+pub struct BkdRay(pub Ray3<f32>);
 
 impl bkd_tree::Ray for BkdRay {
     type Dim = Dim3;
 
-    fn plane_intersections(&self, min: f64, max: f64, axis: Dim3) -> Option<(f64, f64)> {
+    fn plane_intersections(&self, min: f32, max: f32, axis: Dim3) -> Option<(f32, f32)> {
         let &BkdRay(ray) = self;
 
         let (origin, direction) = match axis {
@@ -103,7 +103,7 @@ impl bkd_tree::Ray for BkdRay {
     }
 
     #[inline]
-    fn plane_distance(&self, min: f64, max: f64, axis: Dim3) -> (f64, f64) {
+    fn plane_distance(&self, min: f32, max: f32, axis: Dim3) -> (f32, f32) {
         let &BkdRay(ray) = self;
 
         let (origin, direction) = match axis {
@@ -235,12 +235,12 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
     })
 }
 
-fn vertex_to_point(v: &[f32; 3]) -> Point3<f64> {
-    Point3::new(v[0] as f64, v[1] as f64, v[2] as f64)
+fn vertex_to_point(v: &[f32; 3]) -> Point3<f32> {
+    Point3::new(v[0], v[1], v[2])
 }
 
-fn vertex_to_vector(v: &[f32; 3]) -> Vector3<f64> {
-    Vector3::new(v[0] as f64, v[1] as f64, v[2] as f64)
+fn vertex_to_vector(v: &[f32; 3]) -> Vector3<f32> {
+    Vector3::new(v[0], v[1], v[2])
 }
 
 fn make_triangle<M: obj::GenPolygon, R: Rng>(

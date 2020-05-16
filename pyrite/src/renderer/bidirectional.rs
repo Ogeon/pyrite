@@ -12,7 +12,7 @@ use crate::renderer::algorithm::contribute;
 use crate::renderer::{Renderer, Status, WorkPool};
 use crate::tracer::{trace, Bounce, BounceType, Light};
 use crate::utils::pairs;
-use crate::world::World;
+use crate::{math::DIST_EPSILON, world::World};
 
 pub struct BidirParams {
     pub bounces: u32,
@@ -94,7 +94,7 @@ fn render_tile<R: Rng>(
                 }
                 Surface::Color(color) => (Some(color), ray),
             };
-            ray.origin += normal.direction * 0.00001;
+            ray.origin += normal.direction * DIST_EPSILON;
 
             if let Some(color) = color {
                 lamp_path.push(Bounce {
@@ -139,7 +139,7 @@ fn render_tile<R: Rng>(
             renderer.light_samples,
         );
 
-        let total = (camera_path.len() * lamp_path.len()) as f64;
+        let total = (camera_path.len() * lamp_path.len()) as f32;
         let weight = 1.0 / total;
 
         let mut main_sample = (
@@ -196,7 +196,7 @@ fn render_tile<R: Rng>(
             }
         }
 
-        let weight = 1.0 / lamp_path.len() as f64;
+        let weight = 1.0 / lamp_path.len() as f32;
         for (i, bounce) in lamp_path.iter().enumerate() {
             if let BounceType::Diffuse(_, _) = bounce.ty {
             } else {
@@ -253,8 +253,8 @@ fn render_tile<R: Rng>(
 
 fn connect_paths<R: Rng>(
     bounce: &Bounce<'_>,
-    main: &(Sample, f64),
-    additional: &[(Sample, f64)],
+    main: &(Sample, f32),
+    additional: &[(Sample, f32)],
     path: &[Bounce<'_>],
     world: &World<R>,
     use_additional: bool,
@@ -289,7 +289,7 @@ fn connect_paths<R: Rng>(
             .intersect(&ray)
             .map(|(hit_normal, _)| (hit_normal.origin - from).magnitude2());
         if let Some(dist) = hit {
-            if dist < sq_distance - 0.0000001 {
+            if dist < sq_distance - DIST_EPSILON {
                 continue;
             }
         }
@@ -299,7 +299,7 @@ fn connect_paths<R: Rng>(
         let brdf_out = bounce_brdf(bounce.incident, bounce.normal.direction, ray.direction)
             / bounce.ty.brdf(bounce.incident, bounce.normal.direction);
 
-        let scale = cos_in * cos_out * brdf_out / (2.0 * std::f64::consts::PI * sq_distance);
+        let scale = cos_in * cos_out * brdf_out / (2.0 * std::f32::consts::PI * sq_distance);
         let brdf_in = lamp_bounce
             .ty
             .brdf(-ray.direction, lamp_bounce.normal.direction)

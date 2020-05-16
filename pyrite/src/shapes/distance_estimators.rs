@@ -9,13 +9,13 @@ use crate::shapes::DistanceEstimator;
 
 struct Mandelbulb {
     iterations: u16,
-    threshold: f64,
-    power: f64,
-    constant: Option<Vector3<f64>>,
+    threshold: f32,
+    power: f32,
+    constant: Option<Vector3<f32>>,
 }
 
-impl ParametricValue<Point3<f64>, f64> for Mandelbulb {
-    fn get(&self, point: &Point3<f64>) -> f64 {
+impl ParametricValue<Point3<f32>, f32> for Mandelbulb {
+    fn get(&self, point: &Point3<f32>) -> f32 {
         let mut z = point.to_vec();
         let mut r = 0.0;
         let mut dr = 1.0;
@@ -48,14 +48,14 @@ impl ParametricValue<Point3<f64>, f64> for Mandelbulb {
 
 struct QuaternionJulia {
     iterations: u16,
-    threshold: f64,
-    constant: Quaternion<f64>,
-    slice_plane: f64,
+    threshold: f32,
+    constant: Quaternion<f32>,
+    slice_plane: f32,
     ty: QuatMul,
 }
 
-impl ParametricValue<Point3<f64>, f64> for QuaternionJulia {
-    fn get(&self, point: &Point3<f64>) -> f64 {
+impl ParametricValue<Point3<f32>, f32> for QuaternionJulia {
+    fn get(&self, point: &Point3<f32>) -> f32 {
         let mut z = Quaternion::new(point.x, point.y, point.z, self.slice_plane);
         let mut r = 0.0;
         let mut dz = Quaternion::new(1.0, 0.0, 0.0, 0.0);
@@ -81,7 +81,7 @@ enum QuatMul {
 }
 
 impl QuatMul {
-    fn pow(&self, z: &Quaternion<f64>) -> Quaternion<f64> {
+    fn pow(&self, z: &Quaternion<f32>) -> Quaternion<f32> {
         match *self {
             QuatMul::Regular => z * z,
             QuatMul::Cubic => z * z * z,
@@ -89,7 +89,7 @@ impl QuatMul {
         }
     }
 
-    fn pow_prim(&self, z: &Quaternion<f64>, dz: &Quaternion<f64>) -> Quaternion<f64> {
+    fn pow_prim(&self, z: &Quaternion<f32>, dz: &Quaternion<f32>) -> Quaternion<f32> {
         match *self {
             QuatMul::Regular => dz * z * 2.0,
             QuatMul::Cubic => dz * z * z * 3.0,
@@ -98,7 +98,7 @@ impl QuatMul {
     }
 }
 
-fn bicomplex_mul(a: &Quaternion<f64>, b: &Quaternion<f64>) -> Quaternion<f64> {
+fn bicomplex_mul(a: &Quaternion<f32>, b: &Quaternion<f32>) -> Quaternion<f32> {
     let (x1, x2) = (a.s, b.s);
     let (y1, y2) = (a.v.x, b.v.x);
     let (z1, z2) = (a.v.y, b.v.y);
