@@ -4,17 +4,13 @@ use std::time::Instant;
 
 use image;
 use pyrite_config as config;
-use rand;
 
 use std::io::{stdout, Write};
 use std::path::Path;
 
 use cgmath::Vector2;
 
-use rand::Rng;
-use rand_xorshift::XorShiftRng;
-
-use palette::{LinSrgb, Pixel, Srgb};
+use palette::{ComponentWise, LinSrgb, Pixel, Srgb};
 
 use crate::film::{Film, Spectrum};
 use crate::math::utils::Interpolated;
@@ -29,6 +25,7 @@ macro_rules! try_for {
 }
 
 mod cameras;
+mod color;
 mod film;
 mod lamp;
 mod materials;
@@ -62,7 +59,7 @@ fn main() {
     }
 }
 
-fn render<P: AsRef<Path>>(project: project::Project<XorShiftRng>, project_path: P) {
+fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
     let image_size = Vector2::new(project.image.width, project.image.height);
 
     let config = RenderContext {
@@ -219,11 +216,11 @@ fn spectrum_to_rgb(
         }
     }
 
-    sum / weight
+    sum.component_wise(&weight, |s, w| if w <= 0.0 { s } else { s / w })
 }
 
-struct RenderContext<R: Rng> {
+struct RenderContext {
     camera: cameras::Camera,
-    world: world::World<R>,
+    world: world::World,
     renderer: renderer::Renderer,
 }

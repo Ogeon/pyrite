@@ -74,11 +74,11 @@ impl Camera {
         }
     }
 
-    pub fn is_visible<R: Rng>(
+    pub fn is_visible(
         &self,
         target: Point3<f32>,
-        world: &World<R>,
-        rng: &mut R,
+        world: &World,
+        rng: &mut impl Rng,
     ) -> Option<(Point2<f32>, Ray3<f32>)> {
         match *self {
             Camera::Perspective {

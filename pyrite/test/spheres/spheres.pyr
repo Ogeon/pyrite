@@ -45,16 +45,13 @@ world.objects = [
 		material = Material.FresnelMix {
 			ior = 1.5
 			refract = Material.Diffuse {
-				color = Math.Curve {
-					input = Value.Wavelength
-					points = [
-						[400, 0],
-						[450, 0.3],
-						[500, 0],
-						[550, 1],
-						[600, 0]
-					]
-				}
+				color = Color.Spectrum([
+					[400, 0],
+					[450, 0.3],
+					[500, 0],
+					[550, 1],
+					[600, 0]
+				])
 			}
 			reflect = Material.Mirror(1)
 		}
@@ -63,15 +60,12 @@ world.objects = [
 	ball {
 		position.x = 3
 		material = Material.Diffuse {
-			color = Math.Curve {
-				input = Value.Wavelength
-				points = [
-					[580, 0],
-					[600, 1],
-					[610, 1],
-					[650, 0]
-				]
-			}
+			color = Color.Spectrum([
+				[580, 0],
+				[600, 1],
+				[610, 1],
+				[650, 0]
+			])
 		}
 	}
 ]

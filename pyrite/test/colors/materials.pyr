@@ -1,8 +1,6 @@
 glass_template = Material.Refractive {
 	ior = 1.5
-	color = Math.Curve {
-		input = Value.Wavelength
-	}
+	color = Color.Spectrum
 }
 
 light = Material.Emission { color = 5 }

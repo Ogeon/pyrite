@@ -15,61 +15,64 @@ use crate::config::Prelude;
 
 use crate::spatial::{bkd_tree, Dim3};
 
+use crate::color::{decode_color, Color};
 use crate::lamp::Lamp;
-use crate::materials;
-use crate::shapes::{self, Shape};
-use crate::tracer::{self, Color, Material};
+use crate::materials::Material;
+use crate::{
+    math::RenderMath,
+    shapes::{self, Shape},
+};
 
 pub enum Sky {
-    Color(Box<Color>),
+    Color(RenderMath<Color>),
 }
 
 impl Sky {
-    pub fn color<'a>(&'a self, _direction: &Vector3<f32>) -> &'a Color {
-        match *self {
-            Sky::Color(ref c) => &**c,
+    pub fn color<'a>(&'a self, _direction: &Vector3<f32>) -> &'a RenderMath<Color> {
+        match self {
+            Sky::Color(color) => color,
         }
     }
 }
 
-pub struct World<R: Rng> {
+pub struct World {
     pub sky: Sky,
-    pub lights: Vec<Lamp<R>>,
-    pub objects: Box<dyn ObjectContainer<R> + 'static + Send + Sync>,
+    pub lights: Vec<Lamp>,
+    pub objects: Box<dyn ObjectContainer + 'static + Send + Sync>,
 }
 
-impl<R: Rng> World<R> {
-    pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &dyn Material<R>)> {
+impl World {
+    pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &Material)> {
         self.objects.intersect(ray)
     }
 
-    pub fn pick_lamp(&self, rng: &mut R) -> Option<(&Lamp<R>, f32)> {
+    pub fn pick_lamp(&self, rng: &mut impl Rng) -> Option<(&Lamp, f32)> {
         self.lights
             .get(rng.gen_range(0, self.lights.len()))
             .map(|l| (l, 1.0 / self.lights.len() as f32))
     }
 }
 
-pub enum Object<R: Rng> {
-    Lamp(Lamp<R>),
+pub enum Object {
+    Lamp(Lamp),
     Shape {
-        shape: Shape<R>,
+        shape: Shape,
         emissive: bool,
     },
     Mesh {
         file: String,
-        materials: HashMap<String, (materials::MaterialBox<R>, bool)>,
+        materials: HashMap<String, (Material, bool)>,
         scale: f32,
         transform: Matrix4<f32>,
     },
 }
 
-pub trait ObjectContainer<R: Rng> {
-    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &dyn Material<R>)>;
+pub trait ObjectContainer {
+    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &Material)>;
 }
 
-impl<R: Rng> ObjectContainer<R> for bkd_tree::BkdTree<Arc<shapes::Shape<R>>> {
-    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &dyn Material<R>)> {
+impl ObjectContainer for bkd_tree::BkdTree<Arc<shapes::Shape>> {
+    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &Material)> {
         let ray = BkdRay(*ray);
         self.find(&ray)
             .map(|(normal, object)| (normal, object.get_material()))
@@ -133,17 +136,17 @@ fn decode_sky_color(entry: Entry<'_>) -> Result<Sky, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(decode_color(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
     Ok(Sky::Color(color))
 }
 
-pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
+pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(
     entry: Entry<'_>,
     make_path: F,
-) -> Result<World<R>, String> {
+) -> Result<World, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let sky = match fields.get("sky") {
@@ -159,7 +162,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
         None => return Err("missing field 'objects'".into()),
     };
 
-    let mut objects: Vec<Arc<shapes::Shape<R>>> = Vec::new();
+    let mut objects: Vec<Arc<shapes::Shape>> = Vec::new();
     let mut lights = Vec::new();
 
     for (i, object) in object_protos.into_iter().enumerate() {
@@ -185,10 +188,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
 
                     let (object_material, emissive) = match materials.remove(&object.name) {
                         Some(m) => {
-                            let (material, emissive): (
-                                Box<dyn Material<R> + 'static + Send + Sync>,
-                                bool,
-                            ) = m;
+                            let (material, emissive): (Material, bool) = m;
                             (Arc::new(material), emissive)
                         }
                         None => {
@@ -231,7 +231,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>, R: Rng + 'static>(
     Ok(World {
         sky: sky,
         lights: lights,
-        objects: Box::new(tree) as Box<dyn ObjectContainer<R> + 'static + Send + Sync>,
+        objects: Box::new(tree) as Box<dyn ObjectContainer + 'static + Send + Sync>,
     })
 }
 
@@ -243,13 +243,13 @@ fn vertex_to_vector(v: &[f32; 3]) -> Vector3<f32> {
     Vector3::new(v[0], v[1], v[2])
 }
 
-fn make_triangle<M: obj::GenPolygon, R: Rng>(
+fn make_triangle<M: obj::GenPolygon>(
     obj: &obj::Obj<'_, M>,
     obj::IndexTuple(v1, _t1, n1): obj::IndexTuple,
     obj::IndexTuple(v2, _t2, n2): obj::IndexTuple,
     obj::IndexTuple(v3, _t3, n3): obj::IndexTuple,
-    material: Arc<Box<dyn Material<R> + 'static + Send + Sync>>,
-) -> shapes::Shape<R> {
+    material: Arc<Material>,
+) -> shapes::Shape {
     let v1 = vertex_to_point(&obj.position[v1]);
     let v2 = vertex_to_point(&obj.position[v2]);
     let v3 = vertex_to_point(&obj.position[v3]);

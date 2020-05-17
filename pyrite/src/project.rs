@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use rand::Rng;
-
 use crate::config;
 use crate::config::entry::Entry;
 use crate::config::Prelude;
@@ -12,10 +10,9 @@ use crate::materials;
 use crate::math;
 use crate::renderer;
 use crate::shapes;
-use crate::tracer;
 use crate::types3d;
 use crate::values;
-use crate::world;
+use crate::{color, world};
 
 macro_rules! try_parse {
     ($e:expr) => {
@@ -39,19 +36,20 @@ pub enum ParseResult<T> {
     InterpretError(String),
 }
 
-pub fn from_file<P: AsRef<Path>, R: Rng + 'static>(path: P) -> ParseResult<Project<R>> {
+pub fn from_file<P: AsRef<Path>>(path: P) -> ParseResult<Project> {
     let mut context = Prelude::new();
 
     types3d::register_types(&mut context);
     world::register_types(&mut context);
     renderer::register_types(&mut context);
     cameras::register_types(&mut context);
-    shapes::register_types::<R>(&mut context);
-    lamp::register_types::<R>(&mut context);
-    materials::register_types::<R>(&mut context);
+    shapes::register_types(&mut context);
+    lamp::register_types(&mut context);
+    materials::register_types(&mut context);
     values::register_types(&mut context);
-    math::register_types::<tracer::RenderContext>(&mut context);
-    math::register_specific_types(&mut context);
+    math::register_types::<color::Color>(&mut context);
+    math::register_specific_types::<color::Color>(&mut context);
+    color::register_types(&mut context);
     register_types(&mut context);
 
     let mut config = context.into_parser();
@@ -102,11 +100,11 @@ pub fn from_file<P: AsRef<Path>, R: Rng + 'static>(path: P) -> ParseResult<Proje
     })
 }
 
-pub struct Project<R: Rng> {
+pub struct Project {
     pub image: ImageSpec,
     pub renderer: renderer::Renderer,
     pub camera: cameras::Camera,
-    pub world: world::World<R>,
+    pub world: world::World,
 }
 
 pub struct ImageSpec {

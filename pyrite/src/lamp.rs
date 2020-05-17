@@ -9,23 +9,29 @@ use rand::Rng;
 use crate::config::entry::Entry;
 use crate::config::Prelude;
 
-use crate::math::utils::{sample_cone, sample_hemisphere, sample_sphere};
+use crate::math::{
+    utils::{sample_cone, sample_hemisphere, sample_sphere},
+    RenderMath,
+};
 use crate::shapes::Shape;
-use crate::tracer::{self, Color, Material};
-use crate::world;
+use crate::{
+    color::{decode_color, Color},
+    materials::Material,
+    world,
+};
 
-pub enum Lamp<R: Rng> {
+pub enum Lamp {
     Directional {
         direction: Vector3<f32>,
         width: f32,
-        color: Box<Color>,
+        color: RenderMath<Color>,
     },
-    Point(Point3<f32>, Box<Color>),
-    Shape(Arc<Shape<R>>),
+    Point(Point3<f32>, RenderMath<Color>),
+    Shape(Arc<Shape>),
 }
 
-impl<R: Rng> Lamp<R> {
-    pub fn sample(&self, rng: &mut R, target: Point3<f32>) -> Sample<'_, R> {
+impl Lamp {
+    pub fn sample(&self, rng: &mut impl Rng, target: Point3<f32>) -> Sample<'_> {
         match *self {
             Lamp::Directional {
                 direction,
@@ -41,7 +47,7 @@ impl<R: Rng> Lamp<R> {
                 Sample {
                     direction: dir,
                     sq_distance: None,
-                    surface: Surface::Color(&**color),
+                    surface: Surface::Color(&color),
                     weight: 1.0,
                 }
             }
@@ -51,7 +57,7 @@ impl<R: Rng> Lamp<R> {
                 Sample {
                     direction: v.normalize(),
                     sq_distance: Some(distance),
-                    surface: Surface::Color(&**color),
+                    surface: Surface::Color(&color),
                     weight: 4.0 * std::f32::consts::PI / distance,
                 }
             }
@@ -79,14 +85,14 @@ impl<R: Rng> Lamp<R> {
         }
     }
 
-    pub fn sample_ray(&self, rng: &mut R) -> Option<RaySample<'_, R>> {
+    pub fn sample_ray(&self, rng: &mut impl Rng) -> Option<RaySample<'_>> {
         match *self {
             Lamp::Directional { .. } => None,
             Lamp::Point(center, ref color) => {
                 let direction = sample_sphere(rng);
                 Some(RaySample {
                     ray: Ray3::new(center, direction),
-                    surface: Surface::Color(&**color),
+                    surface: Surface::Color(&color),
                     weight: (4.0 * std::f32::consts::PI),
                 })
             }
@@ -108,36 +114,36 @@ impl<R: Rng> Lamp<R> {
     }
 }
 
-pub struct Sample<'a, R: Rng> {
+pub struct Sample<'a> {
     pub direction: Vector3<f32>,
     pub sq_distance: Option<f32>,
-    pub surface: Surface<'a, R>,
+    pub surface: Surface<'a>,
     pub weight: f32,
 }
 
-pub enum Surface<'a, R: Rng> {
+pub enum Surface<'a> {
     Physical {
         normal: Ray3<f32>,
-        material: &'a dyn Material<R>,
+        material: &'a Material,
     },
-    Color(&'a Color),
+    Color(&'a RenderMath<Color>),
 }
 
-pub struct RaySample<'a, R: Rng> {
+pub struct RaySample<'a> {
     pub ray: Ray3<f32>,
-    pub surface: Surface<'a, R>,
+    pub surface: Surface<'a>,
     pub weight: f32,
 }
 
-pub fn register_types<R: Rng + 'static>(context: &mut Prelude) {
+pub fn register_types(context: &mut Prelude) {
     let mut group = context.object("Light".into());
     group
         .object("Directional".into())
-        .add_decoder(decode_directional::<R>);
-    group.object("Point".into()).add_decoder(decode_point::<R>);
+        .add_decoder(decode_directional);
+    group.object("Point".into()).add_decoder(decode_point);
 }
 
-fn decode_directional<R: Rng>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+fn decode_directional(entry: Entry<'_>) -> Result<world::Object, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let direction: Vector3<_> = match fields.get("direction") {
@@ -151,18 +157,18 @@ fn decode_directional<R: Rng>(entry: Entry<'_>) -> Result<world::Object<R>, Stri
     };
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(decode_color(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
     Ok(world::Object::Lamp(Lamp::Directional {
         direction: direction.normalize(),
         width: (width.to_radians() / 2.0).cos(),
-        color: color,
+        color,
     }))
 }
 
-fn decode_point<R: Rng>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+fn decode_point(entry: Entry<'_>) -> Result<world::Object, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let position = match fields.get("position") {
@@ -171,7 +177,7 @@ fn decode_point<R: Rng>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
     };
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(decode_color(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 

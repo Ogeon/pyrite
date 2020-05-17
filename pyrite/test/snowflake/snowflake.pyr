@@ -34,28 +34,22 @@ ice = Material.Refractive {
 
 background = Material.Diffuse {
 	color = Math.Mul {
-		a = Math.Curve {
-			input = Value.Wavelength
-			points = [
-				[400, 0.025],
-				[600, 0.0175],
-				[700, 0.01]
-			]
-		}
+		a = Color.Spectrum([
+			[400, 0.025],
+			[600, 0.0175],
+			[700, 0.01]
+		])
 
 		b = 0.2
 	}
 }
 
 world.sky = Sky.Color {
-	color = Math.Curve {
-		input = Value.Wavelength
-		points = [
-			[400, 0.3],
-			[600, 0.2],
-			[700, 0.1]
-		]
-	}
+	color = Color.Spectrum([
+		[400, 0.3],
+		[600, 0.2],
+		[700, 0.1]
+	])
 }
 
 world.objects = [

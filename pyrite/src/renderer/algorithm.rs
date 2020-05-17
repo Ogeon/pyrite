@@ -6,7 +6,7 @@ use rand::Rng;
 
 use crate::cameras::Camera;
 use crate::film::{Area, Sample};
-use crate::tracer::{self, Bounce, BounceType, RenderContext};
+use crate::tracer::{self, Bounce, BounceType, ParametricValue, RenderContext};
 
 pub fn contribute(
     bounce: &Bounce<'_>,

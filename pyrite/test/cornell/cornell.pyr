@@ -9,55 +9,39 @@ image = {
 	rgb_curves = response_curves
 }
 
-renderer = Renderer.PhotonMapping {
-	pixel_samples = 300
-	spectrum.samples = 10
+renderer = Renderer.Bidirectional {
+	pixel_samples = 3000
+	spectrum.samples = 20
 	spectrum.bins = 50
-	spectrum.span = [400, 700]
+	spectrum.span = [370, 770]
 	tile_size = 32
-	light_samples = 0
-	bounces = 4
-	light_bounces = 8
-	photons = 100000
-	photon_bounces = 16
-	photon_passes = 2
-	radius = 0.1
+	bounces = 3
+	light_samples = 1
+	light_bounces = 3
 }
 
 camera = Camera.Perspective {
-	fov = 37.7
+	fov = 15
 	transform = Transform.LookAt
 	transform.from = Vector(-2.78, -8, 2.73)
-	transform.to = Vector(-2.78, 0, 2.73)
+	transform.to = Vector(-4, 0.5, 1)
 	transform.up = Vector { z=1 }
 }
 
 light = Material.Emission {
-	color = Math.Curve {
-		input = Value.Wavelength
-		points = lamp.color
-	}
+	color = Color.Spectrum(lamp.color)
 }
 
 white = Material.Diffuse {
-	color = Math.Curve {
-		input = Value.Wavelength
-		points = colors.white
-	}
+	color = Color.Spectrum(colors.white)
 }
 
 green = Material.Diffuse {
-	color = Math.Curve {
-		input = Value.Wavelength
-		points = colors.green
-	}
+	color = Color.Spectrum(colors.green)
 }
 
 red = Material.Diffuse {
-	color = Math.Curve {
-		input = Value.Wavelength
-		points = colors.red
-	}
+	color = Color.Spectrum(colors.red)
 }
 			min = Vector(-5, 0, 0)
 			max = Vector(-3, 2, 2)

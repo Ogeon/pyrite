@@ -1,7 +1,5 @@
 use num_cpus;
 
-use rand_xorshift::XorShiftRng;
-
 use crate::config::entry::{Entry, Object};
 use crate::config::Prelude;
 
@@ -49,7 +47,7 @@ impl Renderer {
         workers: &mut W,
         on_status: F,
         camera: &cameras::Camera,
-        world: &world::World<XorShiftRng>,
+        world: &world::World,
     ) {
         match self.algorithm {
             Algorithm::Simple => simple::render(film, workers, on_status, self, world, camera),

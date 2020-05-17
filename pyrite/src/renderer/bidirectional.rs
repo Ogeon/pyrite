@@ -24,7 +24,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     mut on_status: F,
     renderer: &Renderer,
     config: &BidirParams,
-    world: &World<XorShiftRng>,
+    world: &World,
     camera: &Camera,
 ) {
     fn gen_rng() -> XorShiftRng {
@@ -62,14 +62,16 @@ fn render_tile<R: Rng>(
     tile: Tile,
     film: &Film,
     camera: &Camera,
-    world: &World<R>,
+    world: &World,
     renderer: &Renderer,
     bidir_params: &BidirParams,
 ) {
     let mut lamp_path = Vec::with_capacity(bidir_params.bounces as usize + 1);
+    let mut camera_path = Vec::with_capacity(renderer.bounces as usize);
 
     for _ in 0..(tile.area() * renderer.pixel_samples as usize) {
         lamp_path.clear();
+        camera_path.clear();
 
         let position = tile.sample_point(&mut rng);
         let wavelength = film.sample_wavelength(&mut rng);
@@ -107,7 +109,15 @@ fn render_tile<R: Rng>(
                     direct_light: vec![],
                 });
 
-                lamp_path.extend(trace(&mut rng, ray, light, world, bidir_params.bounces, 0));
+                trace(
+                    &mut lamp_path,
+                    &mut rng,
+                    ray,
+                    light,
+                    world,
+                    bidir_params.bounces,
+                    0,
+                );
 
                 pairs(&mut lamp_path, |to, from| {
                     to.incident = -from.incident;
@@ -130,7 +140,8 @@ fn render_tile<R: Rng>(
             }
         }
 
-        let camera_path = trace(
+        trace(
+            &mut camera_path,
             &mut rng,
             camera_ray,
             light,
@@ -165,7 +176,7 @@ fn render_tile<R: Rng>(
             })
             .collect();
 
-        for bounce in camera_path {
+        for bounce in camera_path.drain(..) {
             for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
                 used_additional = contribute(&bounce, sample, reflectance, true) && used_additional;
             }
@@ -251,12 +262,12 @@ fn render_tile<R: Rng>(
     }
 }
 
-fn connect_paths<R: Rng>(
+fn connect_paths(
     bounce: &Bounce<'_>,
     main: &(Sample, f32),
     additional: &[(Sample, f32)],
     path: &[Bounce<'_>],
-    world: &World<R>,
+    world: &World,
     use_additional: bool,
 ) -> Vec<Sample> {
     let mut contributions = vec![];

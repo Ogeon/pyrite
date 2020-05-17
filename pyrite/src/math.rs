@@ -1,31 +1,48 @@
 use crate::tracer;
 
 use crate::config::entry::Entry;
-use crate::config::{Decode, Prelude};
+use crate::config::{Decode, Prelude, Value};
 
 pub const DIST_EPSILON: f32 = 0.0001;
 
 macro_rules! make_operators {
     ($($fn_name:ident : $struct_name:ident { $($arg:ident),+ } => $operation:expr),*) => (
-        fn insert_operators<From: Decode + 'static>(context: &mut Prelude) {
+        pub enum Operator<T> {
+            $(
+                $struct_name($struct_name<T>),
+            )*
+        }
+
+        impl<T: tracer::ParametricValue<From, f32>, From> tracer::ParametricValue<From, f32> for Operator<T> {
+            fn get(&self, i: &From) -> f32 {
+                match self {
+                    $(
+                        Operator::$struct_name(op) => op.get(i),
+                    )+
+                }
+            }
+        }
+
+        fn insert_operators<T: Decode + From<f32> + 'static>(context: &mut Prelude) {
             let mut group = context.object("Math".into());
             $(
                 {
                     let mut object = group.object(stringify!($struct_name).into());
-                    object.add_decoder($fn_name::<From>);
+                    object.add_decoder($fn_name::<T, NoOp>);
+                    object.add_decoder($fn_name::<T, Fresnel<T>>);
                     object.arguments(vec![$(stringify!($arg).into()),+]);
                 }
             )*
         }
         $(
 
-            struct $struct_name<From> {
+            pub struct $struct_name<T> {
                 $(
-                    $arg: Box<dyn tracer::ParametricValue<From, f32>>
+                    $arg: Box<T>
                 ),+
             }
 
-            impl<From> tracer::ParametricValue<From, f32> for $struct_name<From> {
+            impl<T: tracer::ParametricValue<From, f32>, From> tracer::ParametricValue<From, f32> for $struct_name<T> {
                 fn get(&self, i: &From) -> f32 {
                     $(
                         let $arg = self.$arg.get(i);
@@ -34,22 +51,22 @@ macro_rules! make_operators {
                 }
             }
 
-            fn $fn_name<From: Decode + 'static>(entry: Entry<'_>) -> Result<Box<dyn tracer::ParametricValue<From, f32>>, String> {
+            fn $fn_name<T: Decode + From<f32> + 'static, E: Decode + 'static>(entry: Entry<'_>) -> Result<Math<T, E>, String> {
                 let fields = entry.as_object().ok_or("not an object")?;
 
                 $(
                     let $arg = match fields.get(stringify!($arg)) {
-                        Some(v) => try_for!(tracer::decode_parametric_number(v), stringify!($arg)),
+                        Some(v) => try_for!(decode_value(v), stringify!($arg)),
                         None => return Err(format!("missing field '{}'", stringify!($arg)))
                     };
                 )+
 
                 Ok(
-                    Box::new($struct_name::<From> {
+                    Math::Operator(Operator::$struct_name($struct_name {
                         $(
-                            $arg: $arg
+                            $arg: Box::new($arg)
                         ),+
-                    }) as Box<dyn tracer::ParametricValue<From, f32>>
+                    }))
                 )
             }
 
@@ -201,18 +218,18 @@ pub mod utils {
     }
 }
 
-pub fn register_types<From: Decode + 'static>(context: &mut Prelude) {
-    insert_operators::<From>(context);
-    context
-        .object("Math".into())
-        .object("Curve".into())
-        .add_decoder(decode_curve::<From>);
+pub fn register_types<T: Decode + From<f32> + 'static>(context: &mut Prelude) {
+    insert_operators::<T>(context);
+    let mut object = context.object("Math".into());
+    let mut object = object.object("Curve".into());
+    object.add_decoder(decode_curve::<T, NoOp>);
+    object.add_decoder(decode_curve::<T, Fresnel<T>>);
 }
 
-pub fn register_specific_types(context: &mut Prelude) {
+pub fn register_specific_types<T: Decode + From<f32> + 'static>(context: &mut Prelude) {
     let mut group = context.object("Math".into());
     let mut object = group.object("Fresnel".into());
-    object.add_decoder(decode_fresnel);
+    object.add_decoder(decode_fresnel::<T>);
     object.arguments(vec!["ior".into(), "env_ior".into()]);
 }
 
@@ -227,24 +244,60 @@ make_operators! {
     decode_mix: Mix { a, b, factor } => { let f = factor.min(1.0).max(0.0); a * (1.0 - f) + b * f }
 }
 
-struct Curve<From> {
-    input: Box<dyn tracer::ParametricValue<From, f32>>,
+pub enum Math<T, E = NoOp> {
+    Value(T),
+    Operator(Operator<Math<T, E>>),
+    Curve(Curve<T>),
+    Extra(E),
+}
+
+impl<T: tracer::ParametricValue<From, f32>, E: tracer::ParametricValue<From, f32>, From>
+    tracer::ParametricValue<From, f32> for Math<T, E>
+{
+    fn get(&self, i: &From) -> f32 {
+        match self {
+            Math::Value(value) => value.get(i),
+            Math::Operator(op) => op.get(i),
+            Math::Curve(curve) => curve.get(i),
+            Math::Extra(extra) => extra.get(i),
+        }
+    }
+}
+
+impl<T: From<f32>, E> From<f32> for Math<T, E> {
+    fn from(constant: f32) -> Self {
+        Math::Value(constant.into())
+    }
+}
+
+pub type RenderMath<T> = Math<T, Fresnel<T>>;
+
+pub struct NoOp;
+
+impl<From> tracer::ParametricValue<From, f32> for NoOp {
+    fn get(&self, _: &From) -> f32 {
+        0.0
+    }
+}
+
+pub struct Curve<T> {
+    input: Box<Math<T>>,
     points: utils::Interpolated,
 }
 
-impl<From> tracer::ParametricValue<From, f32> for Curve<From> {
+impl<T: tracer::ParametricValue<From, f32>, From> tracer::ParametricValue<From, f32> for Curve<T> {
     fn get(&self, i: &From) -> f32 {
         self.points.get(self.input.get(i))
     }
 }
 
-fn decode_curve<From: Decode + 'static>(
+fn decode_curve<T: Decode + From<f32> + 'static, E: Decode + 'static>(
     entry: Entry<'_>,
-) -> Result<Box<dyn tracer::ParametricValue<From, f32>>, String> {
+) -> Result<Math<T, E>, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let input = match fields.get("input") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "input"),
+        Some(v) => try_for!(decode_value(v), "input"),
         None => return Err("missing field 'input'".into()),
     };
 
@@ -253,18 +306,21 @@ fn decode_curve<From: Decode + 'static>(
         None => return Err("missing field 'points'".into()),
     };
 
-    Ok(Box::new(Curve::<From> {
-        input: input,
-        points: utils::Interpolated { points: points },
-    }) as Box<dyn tracer::ParametricValue<From, f32>>)
+    Ok(Math::Curve(Curve {
+        input: Box::new(input),
+        points: utils::Interpolated { points },
+    })
+    .into())
 }
 
-struct Fresnel {
-    ior: Box<dyn tracer::ParametricValue<tracer::RenderContext, f32>>,
-    env_ior: Box<dyn tracer::ParametricValue<tracer::RenderContext, f32>>,
+pub struct Fresnel<T> {
+    ior: Box<RenderMath<T>>,
+    env_ior: Box<RenderMath<T>>,
 }
 
-impl tracer::ParametricValue<tracer::RenderContext, f32> for Fresnel {
+impl<T: tracer::ParametricValue<tracer::RenderContext, f32>>
+    tracer::ParametricValue<tracer::RenderContext, f32> for Fresnel<T>
+{
     fn get(&self, i: &tracer::RenderContext) -> f32 {
         use cgmath::InnerSpace;
 
@@ -279,23 +335,31 @@ impl tracer::ParametricValue<tracer::RenderContext, f32> for Fresnel {
     }
 }
 
-fn decode_fresnel(
+fn decode_fresnel<T: Decode + From<f32> + 'static>(
     entry: Entry<'_>,
-) -> Result<Box<dyn tracer::ParametricValue<tracer::RenderContext, f32>>, String> {
+) -> Result<RenderMath<T>, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "ior"),
+        Some(v) => try_for!(decode_value(v), "ior"),
         None => return Err("missing field 'ior'".into()),
     };
 
     let env_ior = match fields.get("env_ior") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "env_ior"),
-        None => Box::new(1.0f32) as Box<dyn tracer::ParametricValue<tracer::RenderContext, f32>>,
+        Some(v) => try_for!(decode_value(v), "env_ior"),
+        None => RenderMath::<T>::Value(1.0f32.into()),
     };
 
-    Ok(Box::new(Fresnel {
-        ior: ior,
-        env_ior: env_ior,
+    Ok(RenderMath::Extra(Fresnel {
+        ior: Box::new(ior),
+        env_ior: Box::new(env_ior),
     }))
+}
+
+fn decode_value<T: Decode + From<f32> + 'static>(entry: Entry<'_>) -> Result<T, String> {
+    if let Some(&Value::Number(num)) = entry.as_value() {
+        Ok(num.as_float().into())
+    } else {
+        entry.dynamic_decode()
+    }
 }

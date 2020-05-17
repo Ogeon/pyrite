@@ -3,27 +3,66 @@ use rand::Rng;
 use cgmath::{InnerSpace, Vector3};
 use collision::Ray3;
 
-use crate::tracer::{self, Color, Emit, Light, Material, Reflect, Reflection};
+use crate::tracer::{Emit, Light, Reflect, Reflection};
 
 use crate::config::entry::Entry;
 use crate::config::Prelude;
 
-use crate::math;
+use crate::{
+    color::{decode_color, Color},
+    math,
+};
+use math::RenderMath;
 
-pub type MaterialBox<R> = Box<dyn Material<R> + 'static + Send + Sync>;
-
-pub struct Diffuse {
-    pub color: Box<Color>,
+pub enum Material {
+    Diffuse(Diffuse),
+    Emission(Emission),
+    Mirror(Mirror),
+    Refractive(Refractive),
+    Mix(Mix),
+    FresnelMix(FresnelMix),
 }
 
-impl<R: Rng> Material<R> for Diffuse {
-    fn reflect(
+impl Material {
+    pub fn reflect(
         &self,
-        _light: &mut Light,
+        light: &mut Light,
         ray_in: Ray3<f32>,
         normal: Ray3<f32>,
-        rng: &mut R,
+        rng: &mut impl Rng,
     ) -> Reflection<'_> {
+        match self {
+            Material::Diffuse(material) => material.reflect(ray_in, normal, rng),
+            Material::Emission(material) => material.reflect(),
+            Material::Mirror(material) => material.reflect(ray_in, normal),
+            Material::Refractive(material) => material.reflect(light, ray_in, normal, rng),
+            Material::Mix(material) => material.reflect(light, ray_in, normal, rng),
+            Material::FresnelMix(material) => material.reflect(light, ray_in, normal, rng),
+        }
+    }
+
+    pub fn get_emission(
+        &self,
+        light: &mut Light,
+        ray_in: Vector3<f32>,
+        normal: Ray3<f32>,
+        rng: &mut impl Rng,
+    ) -> Option<&RenderMath<Color>> {
+        match self {
+            Material::Emission(material) => material.get_emission(),
+            Material::Mix(material) => material.get_emission(light, ray_in, normal, rng),
+            Material::FresnelMix(material) => material.get_emission(light, ray_in, normal, rng),
+            Material::Diffuse(_) | Material::Mirror(_) | Material::Refractive(_) => None,
+        }
+    }
+}
+
+pub struct Diffuse {
+    pub color: RenderMath<Color>,
+}
+
+impl Diffuse {
+    fn reflect(&self, ray_in: Ray3<f32>, normal: Ray3<f32>, rng: &mut impl Rng) -> Reflection<'_> {
         let n = if ray_in.direction.dot(normal.direction) < 0.0 {
             normal.direction
         } else {
@@ -33,20 +72,10 @@ impl<R: Rng> Material<R> for Diffuse {
         let reflected = math::utils::sample_hemisphere(rng, n);
         Reflect(
             Ray3::new(normal.origin, reflected),
-            &*self.color,
+            &self.color,
             1.0,
             Some(lambertian),
         )
-    }
-
-    fn get_emission(
-        &self,
-        _light: &mut Light,
-        _ray_in: Vector3<f32>,
-        _normal: Ray3<f32>,
-        _rng: &mut R,
-    ) -> Option<&Color> {
-        None
     }
 }
 
@@ -55,43 +84,25 @@ fn lambertian(_ray_in: Vector3<f32>, ray_out: Vector3<f32>, normal: Vector3<f32>
 }
 
 pub struct Emission {
-    pub color: Box<Color>,
+    pub color: RenderMath<Color>,
 }
 
-impl<R: Rng> Material<R> for Emission {
-    fn reflect(
-        &self,
-        _light: &mut Light,
-        _ray_in: Ray3<f32>,
-        _normal: Ray3<f32>,
-        _rng: &mut R,
-    ) -> Reflection<'_> {
-        Emit(&*self.color)
+impl Emission {
+    fn reflect(&self) -> Reflection<'_> {
+        Emit(&self.color)
     }
 
-    fn get_emission(
-        &self,
-        _light: &mut Light,
-        _ray_in: Vector3<f32>,
-        _normal: Ray3<f32>,
-        _rng: &mut R,
-    ) -> Option<&Color> {
-        Some(&*self.color)
+    fn get_emission(&self) -> Option<&RenderMath<Color>> {
+        Some(&self.color)
     }
 }
 
 pub struct Mirror {
-    pub color: Box<Color>,
+    pub color: RenderMath<Color>,
 }
 
-impl<R: Rng> Material<R> for Mirror {
-    fn reflect(
-        &self,
-        _light: &mut Light,
-        ray_in: Ray3<f32>,
-        normal: Ray3<f32>,
-        _rng: &mut R,
-    ) -> Reflection<'_> {
+impl Mirror {
+    fn reflect(&self, ray_in: Ray3<f32>, normal: Ray3<f32>) -> Reflection<'_> {
         let mut n = if ray_in.direction.dot(normal.direction) < 0.0 {
             normal.direction
         } else {
@@ -102,36 +113,26 @@ impl<R: Rng> Material<R> for Mirror {
         n *= perp;
         Reflect(
             Ray3::new(normal.origin, ray_in.direction - n),
-            &*self.color,
+            &self.color,
             1.0,
             None,
         )
     }
-
-    fn get_emission(
-        &self,
-        _light: &mut Light,
-        _ray_in: Vector3<f32>,
-        _normal: Ray3<f32>,
-        _rng: &mut R,
-    ) -> Option<&Color> {
-        None
-    }
 }
 
-pub struct Mix<R: Rng> {
+pub struct Mix {
     factor: f32,
-    pub a: MaterialBox<R>,
-    pub b: MaterialBox<R>,
+    pub a: Box<Material>,
+    pub b: Box<Material>,
 }
 
-impl<R: Rng> Material<R> for Mix<R> {
+impl Mix {
     fn reflect(
         &self,
         light: &mut Light,
         ray_in: Ray3<f32>,
         normal: Ray3<f32>,
-        rng: &mut R,
+        rng: &mut impl Rng,
     ) -> Reflection<'_> {
         if self.factor < rng.gen() {
             self.a.reflect(light, ray_in, normal, rng)
@@ -145,8 +146,8 @@ impl<R: Rng> Material<R> for Mix<R> {
         light: &mut Light,
         ray_in: Vector3<f32>,
         normal: Ray3<f32>,
-        rng: &mut R,
-    ) -> Option<&Color> {
+        rng: &mut impl Rng,
+    ) -> Option<&RenderMath<Color>> {
         if self.factor < rng.gen() {
             self.a.get_emission(light, ray_in, normal, rng)
         } else {
@@ -155,22 +156,22 @@ impl<R: Rng> Material<R> for Mix<R> {
     }
 }
 
-struct FresnelMix<R: Rng> {
+pub struct FresnelMix {
     ior: f32,
     dispersion: f32,
     env_ior: f32,
     env_dispersion: f32,
-    pub reflect: MaterialBox<R>,
-    pub refract: MaterialBox<R>,
+    pub reflect: Box<Material>,
+    pub refract: Box<Material>,
 }
 
-impl<R: Rng> Material<R> for FresnelMix<R> {
+impl FresnelMix {
     fn reflect(
         &self,
         light: &mut Light,
         ray_in: Ray3<f32>,
         normal: Ray3<f32>,
-        rng: &mut R,
+        rng: &mut impl Rng,
     ) -> Reflection<'_> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
@@ -205,8 +206,8 @@ impl<R: Rng> Material<R> for FresnelMix<R> {
         light: &mut Light,
         ray_in: Vector3<f32>,
         normal: Ray3<f32>,
-        rng: &mut R,
-    ) -> Option<&Color> {
+        rng: &mut impl Rng,
+    ) -> Option<&RenderMath<Color>> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
@@ -239,12 +240,12 @@ impl<R: Rng> Material<R> for FresnelMix<R> {
 fn fresnel_mix<'a, R: Rng>(
     ior: f32,
     env_ior: f32,
-    reflect: &'a MaterialBox<R>,
-    refract: &'a MaterialBox<R>,
+    reflect: &'a Material,
+    refract: &'a Material,
     ray_in: Vector3<f32>,
     normal: Ray3<f32>,
     rng: &mut R,
-) -> &'a MaterialBox<R> {
+) -> &'a Material {
     let factor = if ray_in.dot(normal.direction) < 0.0 {
         math::utils::schlick(env_ior, ior, normal.direction, ray_in)
     } else {
@@ -258,21 +259,21 @@ fn fresnel_mix<'a, R: Rng>(
     }
 }
 
-struct Refractive {
-    color: Box<Color>,
+pub struct Refractive {
+    color: RenderMath<Color>,
     ior: f32,
     dispersion: f32,
     env_ior: f32,
     env_dispersion: f32,
 }
 
-impl<R: Rng> Material<R> for Refractive {
+impl Refractive {
     fn reflect(
         &self,
         light: &mut Light,
         ray_in: Ray3<f32>,
         normal: Ray3<f32>,
-        rng: &mut R,
+        rng: &mut impl Rng,
     ) -> Reflection<'_> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
@@ -283,22 +284,12 @@ impl<R: Rng> Material<R> for Refractive {
             refract(self.ior, self.env_ior, &self.color, ray_in, normal, rng)
         }
     }
-
-    fn get_emission(
-        &self,
-        _light: &mut Light,
-        _ray_in: Vector3<f32>,
-        _normal: Ray3<f32>,
-        _rng: &mut R,
-    ) -> Option<&Color> {
-        None
-    }
 }
 
 fn refract<'a, R: Rng>(
     ior: f32,
     env_ior: f32,
-    color: &'a Box<Color>,
+    color: &'a RenderMath<Color>,
     ray_in: Ray3<f32>,
     normal: Ray3<f32>,
     rng: &mut R,
@@ -320,7 +311,7 @@ fn refract<'a, R: Rng>(
     let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
     if cos2t < 0.0 {
         // Total internal reflection
-        return Reflect(Ray3::new(normal.origin, reflected), &**color, 1.0, None);
+        return Reflect(Ray3::new(normal.origin, reflected), &color, 1.0, None);
     }
 
     let s = if into { 1.0 } else { -1.0 } * (ddn * nnt + cos2t.sqrt());
@@ -343,76 +334,76 @@ fn refract<'a, R: Rng>(
     let tp = tr / (1.0 - p);
 
     if rng.gen::<f32>() < p {
-        return Reflect(Ray3::new(normal.origin, reflected), &**color, rp, None);
+        return Reflect(Ray3::new(normal.origin, reflected), &color, rp, None);
     } else {
-        return Reflect(Ray3::new(normal.origin, tdir), &**color, tp, None);
+        return Reflect(Ray3::new(normal.origin, tdir), &color, tp, None);
     }
 }
 
-pub fn register_types<R: Rng + 'static>(context: &mut Prelude) {
+pub fn register_types(context: &mut Prelude) {
     let mut group = context.object("Material".into());
     {
         let mut object = group.object("Diffuse".into());
-        object.add_decoder(decode_diffuse::<R>);
+        object.add_decoder(decode_diffuse);
         object.arguments(vec!["color".into()]);
     }
     {
         let mut object = group.object("Emission".into());
-        object.add_decoder(decode_emission::<R>);
+        object.add_decoder(decode_emission);
         object.arguments(vec!["color".into()]);
     }
     {
         let mut object = group.object("Mirror".into());
-        object.add_decoder(decode_mirror::<R>);
+        object.add_decoder(decode_mirror);
         object.arguments(vec!["color".into()]);
     }
     {
         let mut object = group.object("Mix".into());
-        object.add_decoder(decode_mix::<R>);
+        object.add_decoder(decode_mix);
         object.arguments(vec!["a".into(), "b".into(), "factor".into()]);
     }
     group
         .object("FresnelMix".into())
-        .add_decoder(decode_fresnel_mix::<R>);
+        .add_decoder(decode_fresnel_mix);
     group
         .object("Refractive".into())
-        .add_decoder(decode_refractive::<R>);
+        .add_decoder(decode_refractive);
 }
 
-pub fn decode_diffuse<R: Rng>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+pub fn decode_diffuse(entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(decode_color(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
-    Ok((Box::new(Diffuse { color: color }) as MaterialBox<R>, false))
+    Ok((Material::Diffuse(Diffuse { color }), false))
 }
 
-pub fn decode_emission<R: Rng>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+pub fn decode_emission(entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(decode_color(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
-    Ok((Box::new(Emission { color: color }) as MaterialBox<R>, true))
+    Ok((Material::Emission(Emission { color }), true))
 }
 
-pub fn decode_mirror<R: Rng>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+pub fn decode_mirror(entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(decode_color(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
-    Ok((Box::new(Mirror { color: color }) as MaterialBox<R>, false))
+    Ok((Material::Mirror(Mirror { color }), false))
 }
 
-pub fn decode_mix<R: Rng + 'static>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+pub fn decode_mix(entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let factor = match fields.get("factor") {
@@ -420,29 +411,27 @@ pub fn decode_mix<R: Rng + 'static>(entry: Entry<'_>) -> Result<(MaterialBox<R>,
         None => return Err("missing field 'factor'".into()),
     };
 
-    let (a, a_emissive): (MaterialBox<R>, bool) = match fields.get("a") {
+    let (a, a_emissive): (Material, bool) = match fields.get("a") {
         Some(v) => try_for!(v.dynamic_decode(), "a"),
         None => return Err("missing field 'a'".into()),
     };
 
-    let (b, b_emissive): (MaterialBox<R>, bool) = match fields.get("b") {
+    let (b, b_emissive): (Material, bool) = match fields.get("b") {
         Some(v) => try_for!(v.dynamic_decode(), "b"),
         None => return Err("missing field 'b'".into()),
     };
 
     Ok((
-        Box::new(Mix {
-            factor: factor,
-            a: a,
-            b: b,
-        }) as MaterialBox<R>,
+        Material::Mix(Mix {
+            factor,
+            a: Box::new(a),
+            b: Box::new(b),
+        }),
         a_emissive || b_emissive,
     ))
 }
 
-pub fn decode_fresnel_mix<R: Rng + 'static>(
-    entry: Entry<'_>,
-) -> Result<(MaterialBox<R>, bool), String> {
+pub fn decode_fresnel_mix(entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
@@ -465,30 +454,30 @@ pub fn decode_fresnel_mix<R: Rng + 'static>(
         None => 0.0,
     };
 
-    let (reflect, reflect_emissive): (MaterialBox<R>, bool) = match fields.get("reflect") {
+    let (reflect, reflect_emissive): (Material, bool) = match fields.get("reflect") {
         Some(v) => try_for!(v.dynamic_decode(), "reflect"),
         None => return Err("missing field 'reflect'".into()),
     };
 
-    let (refract, refract_emissive): (MaterialBox<R>, bool) = match fields.get("refract") {
+    let (refract, refract_emissive): (Material, bool) = match fields.get("refract") {
         Some(v) => try_for!(v.dynamic_decode(), "refract"),
         None => return Err("missing field 'refract'".into()),
     };
 
     Ok((
-        Box::new(FresnelMix {
-            ior: ior,
-            dispersion: dispersion,
-            env_ior: env_ior,
-            env_dispersion: env_dispersion,
-            reflect: reflect,
-            refract: refract,
-        }) as MaterialBox<R>,
+        Material::FresnelMix(FresnelMix {
+            ior,
+            dispersion,
+            env_ior,
+            env_dispersion,
+            reflect: Box::new(reflect),
+            refract: Box::new(refract),
+        }),
         refract_emissive || reflect_emissive,
     ))
 }
 
-pub fn decode_refractive<R: Rng>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bool), String> {
+pub fn decode_refractive(entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
@@ -512,18 +501,18 @@ pub fn decode_refractive<R: Rng>(entry: Entry<'_>) -> Result<(MaterialBox<R>, bo
     };
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(tracer::decode_parametric_number(v), "color"),
+        Some(v) => try_for!(decode_color(v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
     Ok((
-        Box::new(Refractive {
-            ior: ior,
-            dispersion: dispersion,
-            env_ior: env_ior,
-            env_dispersion: env_dispersion,
-            color: color,
-        }) as MaterialBox<R>,
+        Material::Refractive(Refractive {
+            ior,
+            dispersion,
+            env_ior,
+            env_dispersion,
+            color,
+        }),
         false,
     ))
 }

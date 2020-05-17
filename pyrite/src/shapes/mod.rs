@@ -12,21 +12,21 @@ use collision::{Continuous, Ray3};
 
 use rand::Rng;
 
-use crate::tracer::{Material, ParametricValue};
+use crate::tracer::ParametricValue;
 
 use crate::config::entry::Entry;
 use crate::config::Prelude;
 
-use crate::materials;
+use crate::materials::Material;
 use crate::math::{self, DIST_EPSILON};
 use crate::spatial::{bkd_tree, Dim3};
 use crate::world;
 
+pub use self::Shape::{Plane, RayMarched, Sphere, Triangle};
+
 const EPSILON: f32 = DIST_EPSILON;
 
 mod distance_estimators;
-
-pub use self::Shape::{Plane, RayMarched, Sphere, Triangle};
 
 type DistanceEstimator = Box<dyn ParametricValue<Point3<f32>, f32>>;
 
@@ -35,30 +35,30 @@ pub struct Vertex<S> {
     pub normal: Vector3<S>,
 }
 
-pub enum Shape<R: Rng> {
+pub enum Shape {
     Sphere {
         position: Point3<f32>,
         radius: f32,
-        material: materials::MaterialBox<R>,
+        material: Material,
     },
     Plane {
         shape: collision::Plane<f32>,
-        material: materials::MaterialBox<R>,
+        material: Material,
     },
     Triangle {
         v1: Vertex<f32>,
         v2: Vertex<f32>,
         v3: Vertex<f32>,
-        material: Arc<materials::MaterialBox<R>>,
+        material: Arc<Material>,
     },
     RayMarched {
         estimator: DistanceEstimator,
         bounds: BoundingVolume,
-        material: materials::MaterialBox<R>,
+        material: Material,
     },
 }
 
-impl<R: Rng> Shape<R> {
+impl Shape {
     pub fn ray_intersect(&self, ray: &Ray3<f32>) -> Option<(f32, Ray3<f32>)> {
         match *self {
             Sphere {
@@ -164,16 +164,16 @@ impl<R: Rng> Shape<R> {
         }
     }
 
-    pub fn get_material(&self) -> &dyn Material<R> {
+    pub fn get_material(&self) -> &Material {
         match *self {
-            Sphere { ref material, .. } => &**material,
-            Plane { ref material, .. } => &**material,
-            Triangle { ref material, .. } => &**material.deref(),
-            RayMarched { ref material, .. } => &**material,
+            Sphere { ref material, .. } => material,
+            Plane { ref material, .. } => material,
+            Triangle { ref material, .. } => &**material,
+            RayMarched { ref material, .. } => material,
         }
     }
 
-    pub fn sample_point(&self, rng: &mut R) -> Option<Ray3<f32>> {
+    pub fn sample_point(&self, rng: &mut impl Rng) -> Option<Ray3<f32>> {
         match *self {
             Sphere {
                 ref position,
@@ -211,7 +211,7 @@ impl<R: Rng> Shape<R> {
         }
     }
 
-    pub fn sample_towards(&self, rng: &mut R, target: &Point3<f32>) -> Option<Ray3<f32>> {
+    pub fn sample_towards(&self, rng: &mut impl Rng, target: &Point3<f32>) -> Option<Ray3<f32>> {
         match *self {
             Sphere {
                 ref position,
@@ -224,9 +224,17 @@ impl<R: Rng> Shape<R> {
 
                 if dist2 > radius * radius {
                     let cos_theta_max = (1.0 - (radius * radius) / dist2).max(0.0).sqrt();
-                    let ray_dir = math::utils::sample_cone(rng, dir.normalize(), cos_theta_max);
-                    self.ray_intersect(&Ray3::new(*target, ray_dir))
-                        .map(|(_, n)| n)
+
+                    let mut intersection = None;
+                    while intersection.is_none() {
+                        let ray_dir = math::utils::sample_cone(rng, dir.normalize(), cos_theta_max);
+
+                        intersection = self
+                            .ray_intersect(&Ray3::new(*target, ray_dir))
+                            .map(|(_, n)| n);
+                    }
+
+                    intersection
                 } else {
                     self.sample_point(rng)
                 }
@@ -324,7 +332,7 @@ impl<R: Rng> Shape<R> {
     }
 }
 
-impl<R: Rng> bkd_tree::Element for Arc<Shape<R>> {
+impl bkd_tree::Element for Arc<Shape> {
     type Item = Ray3<f32>;
     type Ray = world::BkdRay;
 
@@ -505,17 +513,15 @@ impl BoundingVolume {
     }
 }
 
-pub fn register_types<R: Rng + 'static>(context: &mut Prelude) {
+pub fn register_types(context: &mut Prelude) {
     {
         let mut group = context.object("Shape".into());
-        group
-            .object("Sphere".into())
-            .add_decoder(decode_sphere::<R>);
-        group.object("Plane".into()).add_decoder(decode_plane::<R>);
-        group.object("Mesh".into()).add_decoder(decode_mesh::<R>);
+        group.object("Sphere".into()).add_decoder(decode_sphere);
+        group.object("Plane".into()).add_decoder(decode_plane);
+        group.object("Mesh".into()).add_decoder(decode_mesh);
         group
             .object("RayMarched".into())
-            .add_decoder(decode_ray_marched::<R>);
+            .add_decoder(decode_ray_marched);
     }
     {
         let mut group = context.object("Bounds".into());
@@ -528,7 +534,7 @@ pub fn register_types<R: Rng + 'static>(context: &mut Prelude) {
     distance_estimators::register_types(context);
 }
 
-fn decode_sphere<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+fn decode_sphere(entry: Entry<'_>) -> Result<world::Object, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let position = match items.get("position") {
@@ -541,7 +547,7 @@ fn decode_sphere<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>,
         None => return Err("missing field 'radius'".into()),
     };
 
-    let (material, emissive): (materials::MaterialBox<R>, bool) = match items.get("material") {
+    let (material, emissive): (Material, bool) = match items.get("material") {
         Some(v) => try_for!(v.dynamic_decode(), "material"),
         None => return Err("missing field 'material'".into()),
     };
@@ -556,7 +562,7 @@ fn decode_sphere<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>,
     })
 }
 
-fn decode_plane<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+fn decode_plane(entry: Entry<'_>) -> Result<world::Object, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let origin = match items.get("origin") {
@@ -569,7 +575,7 @@ fn decode_plane<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, 
         None => return Err("missing field 'normal'".into()),
     };
 
-    let (material, emissive): (materials::MaterialBox<R>, bool) = match items.get("material") {
+    let (material, emissive): (Material, bool) = match items.get("material") {
         Some(v) => try_for!(v.dynamic_decode(), "material"),
         None => return Err("missing field 'material'".into()),
     };
@@ -583,7 +589,7 @@ fn decode_plane<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, 
     })
 }
 
-fn decode_mesh<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+fn decode_mesh(entry: Entry<'_>) -> Result<world::Object, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let file_name: String = match items.get("file") {
@@ -625,7 +631,7 @@ fn decode_mesh<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, S
     })
 }
 
-fn decode_ray_marched<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Object<R>, String> {
+fn decode_ray_marched(entry: Entry<'_>) -> Result<world::Object, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let bounds = match items.get("bounds") {
@@ -638,7 +644,7 @@ fn decode_ray_marched<R: Rng + 'static>(entry: Entry<'_>) -> Result<world::Objec
         None => return Err("missing field 'shape'".into()),
     };
 
-    let (material, emissive): (materials::MaterialBox<R>, bool) = match items.get("material") {
+    let (material, emissive): (Material, bool) = match items.get("material") {
         Some(v) => try_for!(v.dynamic_decode(), "material"),
         None => return Err("missing field 'material'".into()),
     };

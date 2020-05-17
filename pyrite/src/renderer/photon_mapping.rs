@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use rand::{self, Rng, SeedableRng};
+use rand::{self, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
 use cgmath::{InnerSpace, Point2, Point3, Vector3};
@@ -13,7 +13,7 @@ use crate::renderer::algorithm::contribute;
 use crate::renderer::{Renderer, Status, WorkPool};
 use crate::spatial::kd_tree::{self, KdTree};
 use crate::spatial::Dim3;
-use crate::tracer::{trace, Bounce, BounceType, Light, RenderContext};
+use crate::tracer::{trace, Bounce, BounceType, Light, ParametricValue, RenderContext};
 use crate::utils::{pairs, BatchRange};
 use crate::{math::DIST_EPSILON, world::World};
 
@@ -23,7 +23,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     mut on_status: F,
     renderer: &Renderer,
     config: &Config,
-    world: &World<XorShiftRng>,
+    world: &World,
     camera: &Camera,
 ) {
     fn gen_rng() -> XorShiftRng {
@@ -56,13 +56,18 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
             tiles.iter().map(|f| (f, gen_rng())),
             |(tile, mut rng)| {
                 let mut all_bounces = vec![];
+                let mut bounces = Vec::with_capacity(renderer.bounces as usize);
+
                 for _ in 0..tile.area() as usize {
+                    bounces.clear();
+
                     let position = tile.sample_point(&mut rng);
                     let ray = camera.ray_towards(&position, &mut rng);
                     let wavelength = film.sample_wavelength(&mut rng);
                     let light = Light::new(wavelength);
 
-                    let bounces = trace(
+                    trace(
+                        &mut bounces,
                         &mut rng,
                         ray,
                         light,
@@ -94,7 +99,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                         .collect();
 
                     let mut current = Parent::Source(position);
-                    for bounce in bounces {
+                    for bounce in bounces.drain(..) {
                         for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
                             used_additional =
                                 contribute(&bounce, sample, reflectance, true) && used_additional;
@@ -167,8 +172,11 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                 }),
                 |(num_rays, mut rng)| {
                     let mut processed = vec![];
+                    let mut bounces = Vec::with_capacity(renderer.bounces as usize);
 
                     for _ in 0..num_rays {
+                        bounces.clear();
+
                         let res = world
                             .pick_lamp(&mut rng)
                             .and_then(|(lamp, p)| lamp.sample_ray(&mut rng).map(|s| (lamp, p, s)));
@@ -192,7 +200,8 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                             if let Some(color) = color {
                                 ray_sample.ray.origin += normal.direction * DIST_EPSILON;
 
-                                let mut bounces = trace(
+                                trace(
+                                    &mut bounces,
                                     &mut rng,
                                     ray_sample.ray,
                                     light.clone(),
@@ -234,7 +243,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                     }
                                 });
 
-                                for bounce in bounces {
+                                for bounce in bounces.drain(..) {
                                     match bounce.ty {
                                         BounceType::Diffuse(_, _) => {
                                             let b = Arc::new(LightBounce {
@@ -501,8 +510,8 @@ impl<'a> LightBounce<'a> {
     }
 }
 
-struct LightSource<'a, R: Rng> {
-    surface: Surface<'a, R>,
+struct LightSource<'a> {
+    surface: Surface<'a>,
     weight: f32,
 }
 

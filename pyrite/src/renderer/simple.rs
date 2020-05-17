@@ -14,7 +14,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     workers: &mut W,
     mut on_status: F,
     renderer: &Renderer,
-    world: &World<XorShiftRng>,
+    world: &World,
     camera: &Camera,
 ) {
     fn gen_rng() -> XorShiftRng {
@@ -52,16 +52,23 @@ fn render_tile<R: Rng>(
     tile: Tile,
     film: &Film,
     camera: &Camera,
-    world: &World<R>,
+    world: &World,
     renderer: &Renderer,
 ) {
+    let mut additional_samples = Vec::with_capacity(renderer.spectrum_samples as usize - 1);
+    let mut path = Vec::with_capacity(renderer.bounces as usize);
+
     for _ in 0..(tile.area() * renderer.pixel_samples as usize) {
+        additional_samples.clear();
+        path.clear();
+
         let position = tile.sample_point(&mut rng);
 
         let ray = camera.ray_towards(&position, &mut rng);
         let wavelength = film.sample_wavelength(&mut rng);
         let light = Light::new(wavelength);
-        let path = trace(
+        trace(
+            &mut path,
             &mut rng,
             ray,
             light,
@@ -80,18 +87,16 @@ fn render_tile<R: Rng>(
         );
 
         let mut used_additional = true;
-        let mut additional_samples: Vec<_> = (0..renderer.spectrum_samples - 1)
-            .map(|_| {
-                (
-                    Sample {
-                        wavelength: film.sample_wavelength(&mut rng),
-                        brightness: 0.0,
-                        weight: 1.0,
-                    },
-                    1.0,
-                )
-            })
-            .collect();
+        additional_samples.extend((0..renderer.spectrum_samples - 1).map(|_| {
+            (
+                Sample {
+                    wavelength: film.sample_wavelength(&mut rng),
+                    brightness: 0.0,
+                    weight: 1.0,
+                },
+                1.0,
+            )
+        }));
 
         for bounce in &path {
             for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
@@ -105,7 +110,7 @@ fn render_tile<R: Rng>(
         film.expose(position, main_sample.0);
 
         if used_additional {
-            for (sample, _) in additional_samples {
+            for (sample, _) in additional_samples.drain(..) {
                 film.expose(position, sample);
             }
         }
