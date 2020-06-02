@@ -111,7 +111,7 @@ pub struct ImageSpec {
     pub width: usize,
     pub height: usize,
     pub format: ImageFormat,
-    pub rgb_curves: (Vec<(f32, f32)>, Vec<(f32, f32)>, Vec<(f32, f32)>),
+    pub rgb_curves: Option<(Vec<(f32, f32)>, Vec<(f32, f32)>, Vec<(f32, f32)>)>,
 }
 
 fn decode_image_spec(entry: Entry<'_>) -> Result<ImageSpec, String> {
@@ -133,15 +133,15 @@ fn decode_image_spec(entry: Entry<'_>) -> Result<ImageSpec, String> {
     };
 
     let rgb_curves = match fields.get("rgb_curves") {
-        Some(v) => try_for!(decode_rgb_curves(v), "rgb_curves"),
-        None => return Err("missing field 'rgb_curves'".into()),
+        Some(v) => Some(try_for!(decode_rgb_curves(v), "rgb_curves")),
+        None => None,
     };
 
     Ok(ImageSpec {
-        width: width,
-        height: height,
-        format: format,
-        rgb_curves: rgb_curves,
+        width,
+        height,
+        format,
+        rgb_curves,
     })
 }
 

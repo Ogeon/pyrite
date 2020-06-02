@@ -26,3 +26,8 @@ noisy_float = "0.1"
 
 [dependencies.pyrite-config]
 path = "../config"
+
+[build-dependencies]
+csv = "^1.1"
+quote = "^1.0"
+serde = "^1.0"

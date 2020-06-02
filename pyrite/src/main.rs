@@ -6,11 +6,14 @@ use image;
 use pyrite_config as config;
 
 use std::io::{stdout, Write};
-use std::path::Path;
+use std::{
+    ops::{Add, AddAssign, Div, Mul},
+    path::Path,
+};
 
 use cgmath::Vector2;
 
-use palette::{ComponentWise, LinSrgb, Pixel, Srgb};
+use palette::{ComponentWise, LinSrgb, Pixel, Srgb, Xyz};
 
 use crate::film::{Film, Spectrum};
 use crate::math::utils::Interpolated;
@@ -39,6 +42,7 @@ mod types3d;
 mod utils;
 mod values;
 mod world;
+mod xyz;
 
 fn main() {
     let mut args = std::env::args();
@@ -72,13 +76,13 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
 
     let mut pixels = image::ImageBuffer::new(image_size.x as u32, image_size.y as u32);
 
-    let (red, green, blue) = project.image.rgb_curves;
-
-    let red = math::utils::Interpolated { points: red };
-
-    let green = math::utils::Interpolated { points: green };
-
-    let blue = math::utils::Interpolated { points: blue };
+    let rgb_curves = project.image.rgb_curves.map(|(red, green, blue)| {
+        (
+            Interpolated { points: red },
+            Interpolated { points: green },
+            Interpolated { points: blue },
+        )
+    });
 
     let project_path = project_path.as_ref();
     let render_path = project_path
@@ -97,21 +101,35 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
         config.renderer.spectrum_span,
     );
 
-    let mut last_print = Instant::now();
+    let mut last_print: Option<Instant> = None;
+    let mut last_image: Instant = Instant::now();
 
     config.renderer.render(
         &film,
         &mut pool,
         |status| {
-            if (Instant::now() - last_print).as_millis() >= 500 {
+            let time_since_print = last_print.map(|last_print| Instant::now() - last_print);
+
+            let should_print = time_since_print
+                .map(|time| time.as_millis() >= 500)
+                .unwrap_or(true);
+
+            if should_print {
                 print!("\r{}... {:2}%", status.message, status.progress);
                 stdout().flush().unwrap();
+                last_print = Some(Instant::now());
 
-                if (Instant::now() - last_print).as_secs() >= 20 {
+                let time_since_image = Instant::now() - last_image;
+                if time_since_image.as_secs() >= 20 {
                     let begin_iter = Instant::now();
                     for (spectrum, pixel) in film.developed_pixels().zip(pixels.pixels_mut()) {
-                        let color = spectrum_to_rgb(spectrum, &red, &green, &blue);
-                        let rgb: Srgb<u8> = Srgb::from_linear(color).into_format();
+                        let rgb: Srgb<u8> = if let Some((red, green, blue)) = &rgb_curves {
+                            let color = spectrum_to_rgb(30.0, spectrum, &red, &green, &blue);
+                            Srgb::from_linear(color).into_format()
+                        } else {
+                            let color = spectrum_to_xyz(30.0, spectrum);
+                            Srgb::from(color).into_format()
+                        };
 
                         *pixel = image::Rgb(rgb.into_raw());
                     }
@@ -125,7 +143,7 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
                     if let Err(e) = pixels.save(&render_path) {
                         println!("\rerror while writing image: {}", e);
                     }
-                    last_print = Instant::now();
+                    last_image = Instant::now();
                 }
             }
         },
@@ -171,52 +189,104 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
         }
     });*/
 
+    println!("\nSaving final result...");
+
     for (spectrum, pixel) in film.developed_pixels().zip(pixels.pixels_mut()) {
-        let color = spectrum_to_rgb(spectrum, &red, &green, &blue);
-        let rgb = Srgb::from_linear(color).into_format();
+        let rgb: Srgb<u8> = if let Some((red, green, blue)) = &rgb_curves {
+            let color = spectrum_to_rgb(2.0, spectrum, &red, &green, &blue);
+            Srgb::from_linear(color).into_format()
+        } else {
+            let color = spectrum_to_xyz(2.0, spectrum);
+            Srgb::from(color).into_format()
+        };
 
         *pixel = image::Rgb(rgb.into_raw());
     }
 
     if let Err(e) = pixels.save(&render_path) {
-        println!("\rerror while writing image: {}", e);
+        println!("error while writing image: {}", e);
     }
 
-    println!("\rDone!")
+    println!("Done!")
 }
 
 fn spectrum_to_rgb(
+    step_size: f32,
     spectrum: Spectrum,
     red: &Interpolated,
     green: &Interpolated,
     blue: &Interpolated,
 ) -> LinSrgb {
-    let mut sum = LinSrgb::new(0.0, 0.0, 0.0);
-    let mut weight = LinSrgb::new(0.0, 0.0, 0.0);
+    spectrum_to_tristimulus(step_size, spectrum, red, green, blue)
+}
 
-    for segment in spectrum.segments() {
-        let mut offset = 0.0;
-        let mut start_resp = LinSrgb::new(
-            red.get(segment.start),
-            green.get(segment.start),
-            blue.get(segment.start),
-        );
+fn spectrum_to_xyz(step_size: f32, spectrum: Spectrum) -> Xyz {
+    let color: Xyz = spectrum_to_tristimulus(
+        step_size,
+        spectrum,
+        &Interpolated {
+            points: xyz::response::X,
+        },
+        &Interpolated {
+            points: xyz::response::Y,
+        },
+        &Interpolated {
+            points: xyz::response::Z,
+        },
+    );
 
-        while offset < segment.width {
-            let step = (segment.width - offset).min(5.0);
-            let end = segment.start + offset + step;
-            let end_resp = LinSrgb::new(red.get(end), green.get(end), blue.get(end));
+    color * 3.444 // Scale up to better match D65 light source data
+}
 
-            let w = (start_resp + end_resp) * step;
-            sum += w * segment.value;
-            weight += w;
+fn spectrum_to_tristimulus<T, P>(
+    step_size: f32,
+    spectrum: Spectrum,
+    first: &Interpolated<P>,
+    second: &Interpolated<P>,
+    third: &Interpolated<P>,
+) -> T
+where
+    T: ComponentWise<Scalar = f32>
+        + From<(f32, f32, f32)>
+        + Into<(f32, f32, f32)>
+        + Add<Output = T>
+        + Mul<Output = T>
+        + Mul<f32, Output = T>
+        + Div<f32, Output = T>
+        + AddAssign
+        + Copy,
+    P: AsRef<[(f32, f32)]>,
+{
+    let mut sum = T::from((0.0, 0.0, 0.0));
+    let mut weight = 0.0;
 
-            start_resp = end_resp;
-            offset += step;
-        }
+    let (min, max) = spectrum.spectrum_width();
+    let num_segments = ((max - min) / step_size).ceil() as usize;
+    let segments = spectrum
+        .segments_between(min, max, num_segments)
+        .zip(first.segments_between(min, max, num_segments))
+        .zip(second.segments_between(min, max, num_segments))
+        .zip(third.segments_between(min, max, num_segments));
+
+    for (((spectrum, first), second), third) in segments {
+        let ((wl_min, spectrum_min), (wl_max, spectrum_max)) = spectrum;
+        let ((_, first_min), (_, first_max)) = first;
+        let ((_, second_min), (_, second_max)) = second;
+        let ((_, third_min), (_, third_max)) = third;
+
+        let start_resp = T::from((first_min, second_min, third_min));
+        let end_resp = T::from((first_max, second_max, third_max));
+
+        let w = wl_max - wl_min;
+        sum += (start_resp * spectrum_min + end_resp * spectrum_max) * 0.5 * w;
+        weight += w;
     }
 
-    sum.component_wise(&weight, |s, w| if w <= 0.0 { s } else { s / w })
+    if weight == 0.0 {
+        sum
+    } else {
+        sum / weight
+    }
 }
 
 struct RenderContext {

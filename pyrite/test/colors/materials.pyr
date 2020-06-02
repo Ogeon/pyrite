@@ -1,9 +1,13 @@
+include "../light_sources/d65.pyr" as d65
+
 glass_template = Material.Refractive {
 	ior = 1.5
 	color = Color.Spectrum
 }
 
-light = Material.Emission { color = 5 }
+light = Material.Emission {
+	color = Math.Mul(Color.Spectrum(d65.spectrum), 5)
+}
 
 floor = Material.Diffuse { color = 1 }
 

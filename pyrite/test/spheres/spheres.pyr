@@ -1,10 +1,9 @@
-include "../cameras/canon_40d.pyr" as response_curves
+include "../light_sources/d65.pyr" as d65
 
 image = {
 	width = 512
 	height = 256
 	format = Image.Png
-	rgb_curves = response_curves
 }
 
 renderer = Renderer.Simple {
@@ -37,7 +36,7 @@ world.objects = [
 
 	ball {
 		position.y = 1.5
-		material = Material.Emission(3)
+		material = Material.Emission(Math.Mul(Color.Spectrum(d65.spectrum), 3))
 	},
 
 	ball {

@@ -6,25 +6,28 @@ image = {
 	width = 512
 	height = 512
 	format = Image.Png
-	rgb_curves = response_curves
 }
 
-renderer = Renderer.Bidirectional {
-	pixel_samples = 3000
-	spectrum.samples = 20
+renderer = Renderer.PhotonMapping {
+	pixel_samples = 300
+	spectrum.samples = 10
 	spectrum.bins = 50
-	spectrum.span = [370, 770]
+	spectrum.span = [400, 700]
 	tile_size = 32
-	bounces = 3
-	light_samples = 1
-	light_bounces = 3
+	light_samples = 0
+	bounces = 4
+	light_bounces = 8
+	photons = 100000
+	photon_bounces = 16
+	photon_passes = 2
+	radius = 0.1
 }
 
 camera = Camera.Perspective {
-	fov = 15
+	fov = 37.7
 	transform = Transform.LookAt
 	transform.from = Vector(-2.78, -8, 2.73)
-	transform.to = Vector(-4, 0.5, 1)
+	transform.to = Vector(-2.78, 0, 2.73)
 	transform.up = Vector { z=1 }
 }
 

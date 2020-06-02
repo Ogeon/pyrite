@@ -1,10 +1,9 @@
-include "../cameras/canon_40d.pyr" as response_curves
+include "../light_sources/d65.pyr" as d65
 
 image = {
 	width = 512
 	height = 300
 	format = Image.Png
-	rgb_curves = response_curves
 }
 
 renderer = Renderer.Simple {
@@ -40,8 +39,8 @@ world.objects = [
 		file = "diamonds.obj"
 
 		materials.diamonds = diamond
-		materials.light_left = Material.Emission(1)
-		materials.light_right = Material.Emission(2)
+		materials.light_left = Material.Emission(Color.Spectrum(d65.spectrum))
+		materials.light_right = Material.Emission(Math.Mul(Color.Spectrum(d65.spectrum), 2))
 		materials.bottom = plexi
 	}
 ]

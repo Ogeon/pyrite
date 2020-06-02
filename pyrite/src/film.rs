@@ -296,8 +296,8 @@ impl<'a> Iterator for DevelopedPixels<'a> {
 }
 
 pub struct Spectrum<'a> {
-    pub min: f32,
-    pub width: f32,
+    min: f32,
+    width: f32,
     grains: &'a [Grain],
 }
 
@@ -309,6 +309,14 @@ impl<'a> Spectrum<'a> {
             grains: self.grains.iter().enumerate(),
         }
     }
+
+    pub fn segments_between(&self, min: f32, max: f32, segments: usize) -> SegmentsBetween<'_> {
+        SegmentsBetween::new(self.segments(), min, max, segments)
+    }
+
+    pub fn spectrum_width(&self) -> (f32, f32) {
+        (self.min, self.min + self.width)
+    }
 }
 
 pub struct SpectrumSegments<'a> {
@@ -318,22 +326,140 @@ pub struct SpectrumSegments<'a> {
 }
 
 impl<'a> Iterator for SpectrumSegments<'a> {
-    type Item = Segment;
+    type Item = Segment<'a>;
 
-    fn next(&mut self) -> Option<Segment> {
+    fn next(&mut self) -> Option<Self::Item> {
         match self.grains.next() {
             Some((i, v)) => Some(Segment {
                 start: self.start + i as f32 * self.segment_width,
-                width: self.segment_width,
-                value: v.develop(),
+                end: self.start + (i + 1) as f32 * self.segment_width,
+                grain: v,
             }),
             None => None,
         }
     }
 }
 
-pub struct Segment {
+pub struct SegmentsBetween<'a> {
+    from: f32,
+    segment_size: f32,
+    segments: usize,
+    current_segment: usize,
+    start_grain: Option<Segment<'a>>,
+    end_grain: Option<Segment<'a>>,
+    grains: std::iter::Peekable<SpectrumSegments<'a>>,
+}
+
+impl<'a> SegmentsBetween<'a> {
+    fn new(grains: SpectrumSegments<'a>, min: f32, max: f32, segments: usize) -> Self {
+        if segments < 1 {
+            panic!("need at least one segment");
+        }
+        let mut grains = grains.peekable();
+
+        let segment_size = (max - min) / segments as f32;
+
+        let start = min;
+        let end = min + segment_size;
+        let mut start_grain = None;
+        let mut end_grain = None;
+
+        while let Some(&grain) = grains.peek() {
+            let min = grain.start;
+            let max = grain.end;
+
+            if min > end {
+                break;
+            }
+
+            grains.next();
+
+            if min <= start && max > start {
+                start_grain = Some(grain);
+            }
+
+            if min <= end && max > end {
+                end_grain = Some(grain);
+            }
+        }
+
+        SegmentsBetween {
+            from: min,
+            segment_size,
+            segments,
+            current_segment: 0,
+            start_grain,
+            end_grain,
+            grains,
+        }
+    }
+}
+
+impl<'a> Iterator for SegmentsBetween<'a> {
+    type Item = ((f32, f32), (f32, f32));
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_segment >= self.segments {
+            return None;
+        }
+
+        let start = self.current_segment as f32 * self.segment_size + self.from;
+        let end = (self.current_segment + 1) as f32 * self.segment_size + self.from;
+
+        let result = (
+            self.start_grain
+                .map(|grain| (start, grain.value()))
+                .unwrap_or((start, 0.0)),
+            self.end_grain
+                .map(|grain| (end, grain.value()))
+                .unwrap_or((end, 0.0)),
+        );
+
+        self.current_segment += 1;
+        self.start_grain = self.end_grain;
+
+        let next_end = (self.current_segment + 1) as f32 * self.segment_size + self.from;
+
+        let find_new_end = if let Some(grain) = self.end_grain {
+            grain.end <= next_end
+        } else {
+            true
+        };
+
+        if find_new_end {
+            let mut end_grain = None;
+
+            while let Some(&grain) = self.grains.peek() {
+                let min = grain.start;
+                let max = grain.end;
+
+                if min > next_end {
+                    break;
+                }
+
+                self.grains.next();
+
+                if min <= next_end && max > next_end {
+                    end_grain = Some(grain);
+                }
+            }
+
+            self.end_grain = end_grain;
+        }
+
+        Some(result)
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct Segment<'a> {
     pub start: f32,
-    pub width: f32,
-    pub value: f32,
+    pub end: f32,
+    grain: &'a Grain,
+}
+
+impl<'a> Segment<'a> {
+    pub fn value(&self) -> f32 {
+        self.grain.develop()
+    }
 }
