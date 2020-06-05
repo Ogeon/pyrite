@@ -7,6 +7,54 @@ use quote::quote;
 fn main() -> Result<(), Box<dyn Error>> {
     let out_dir = std::env::var_os("OUT_DIR").unwrap();
 
+    read_rgb_response(&Path::new(&out_dir))?;
+    read_xyz_response(&Path::new(&out_dir))?;
+
+    println!("cargo:rerun-if-changed=build.rs");
+    Ok(())
+}
+
+fn read_rgb_response(out_dir: &Path) -> Result<(), Box<dyn Error>> {
+    let mut r_response = vec![];
+    let mut g_response = vec![];
+    let mut b_response = vec![];
+
+    // Uses data from http://scottburns.us/fast-rgb-to-spectrum-conversion-for-reflectances/
+    println!("cargo:rerun-if-changed=data/srgb_cie1931.csv");
+    let mut reader = csv::Reader::from_path("data/srgb_cie1931.csv")?;
+    for (offset, record_result) in reader.deserialize().enumerate() {
+        let wavelength = (360 + offset) as f32;
+        let RgbResponse { r, g, b } = record_result?;
+        r_response.push(quote!((#wavelength, #r)));
+        g_response.push(quote!((#wavelength, #g)));
+        b_response.push(quote!((#wavelength, #b)));
+    }
+
+    fs::write(
+        out_dir.join("rgb_response.rs"),
+        quote! {
+            pub mod response {
+                use crate::math::utils::Interpolated;
+
+                pub const RED: Interpolated<&[(f32, f32)]> = Interpolated{ points: &[#(#r_response),*] };
+                pub const GREEN: Interpolated<&[(f32, f32)]> = Interpolated{ points: &[#(#g_response),*] };
+                pub const BLUE: Interpolated<&[(f32, f32)]> = Interpolated{ points: &[#(#b_response),*] };
+            }
+        }
+        .to_string(),
+    )?;
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct RgbResponse {
+    r: f32,
+    g: f32,
+    b: f32,
+}
+
+fn read_xyz_response(out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mut x_response = vec![];
     let mut y_response = vec![];
     let mut z_response = vec![];
@@ -25,7 +73,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     fs::write(
-        &Path::new(&out_dir).join("xyz_response.rs"),
+        out_dir.join("xyz_response.rs"),
         quote! {
             pub mod response {
                 pub const X: &[(f32, f32)] = &[#(#x_response),*];
@@ -36,7 +84,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .to_string(),
     )?;
 
-    println!("cargo:rerun-if-changed=build.rs");
     Ok(())
 }
 

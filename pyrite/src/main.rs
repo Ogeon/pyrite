@@ -35,6 +35,7 @@ mod materials;
 mod math;
 mod project;
 mod renderer;
+mod rgb;
 mod shapes;
 mod spatial;
 mod tracer;
