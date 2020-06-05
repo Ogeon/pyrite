@@ -8,7 +8,7 @@ image = {
 
 renderer = Renderer.Simple {
 	pixel_samples = 100
-	spectrum.samples = 5
+	spectrum.samples = 1
 	spectrum.bins = 50
 	spectrum.span = [400, 700]
 	tile_size = 32
@@ -22,7 +22,7 @@ camera = Camera.Perspective {
 	transform.to = Vector(0.1, 0, 0.1)
 	transform.up = Vector { z = 1 }
 	focus_distance = 11.08
-	aperture = 0.002
+	aperture = 0.02
 }
 
 diamond = Material.Refractive {
