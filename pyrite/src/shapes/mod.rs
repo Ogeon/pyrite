@@ -225,16 +225,18 @@ impl Shape {
                 if dist2 > radius * radius {
                     let cos_theta_max = (1.0 - (radius * radius) / dist2).max(0.0).sqrt();
 
-                    let mut intersection = None;
-                    while intersection.is_none() {
-                        let ray_dir = math::utils::sample_cone(rng, dir.normalize(), cos_theta_max);
+                    let ray_dir = math::utils::sample_cone(rng, dir.normalize(), cos_theta_max);
 
-                        intersection = self
-                            .ray_intersect(&Ray3::new(*target, ray_dir))
-                            .map(|(_, n)| n);
+                    let intersection = self
+                        .ray_intersect(&Ray3::new(*target, ray_dir))
+                        .map(|(_, n)| n);
+
+                    if let Some(intersection) = intersection {
+                        Some(intersection)
+                    } else {
+                        // cheat
+                        Some(Ray3::new(*target, -dir.normalize()))
                     }
-
-                    intersection
                 } else {
                     self.sample_point(rng)
                 }
