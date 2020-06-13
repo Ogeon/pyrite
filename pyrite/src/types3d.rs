@@ -1,9 +1,8 @@
-use cgmath::Vector3;
-use cgmath::{EuclideanSpace, Point3, Quaternion};
-use cgmath::{Matrix4, SquareMatrix};
+use std::path::Path;
 
-use crate::config::entry::Entry;
-use crate::config::Prelude;
+use cgmath::{EuclideanSpace, Matrix4, Point3, Quaternion, SquareMatrix, Vector3};
+
+use crate::config::{entry::Entry, Prelude};
 
 pub fn register_types(context: &mut Prelude) {
     {
@@ -19,7 +18,7 @@ pub fn register_types(context: &mut Prelude) {
         .add_decoder(decode_transform_look_at);
 }
 
-fn decode_vector_3d(entry: Entry<'_>) -> Result<Vector3<f32>, String> {
+fn decode_vector_3d(_path: &'_ Path, entry: Entry<'_>) -> Result<Vector3<f32>, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let x = match items.get("x") {
@@ -40,7 +39,7 @@ fn decode_vector_3d(entry: Entry<'_>) -> Result<Vector3<f32>, String> {
     Ok(Vector3::new(x, y, z))
 }
 
-fn decode_point_3d(entry: Entry<'_>) -> Result<Point3<f32>, String> {
+fn decode_point_3d(_path: &'_ Path, entry: Entry<'_>) -> Result<Point3<f32>, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let x = match items.get("x") {
@@ -61,7 +60,7 @@ fn decode_point_3d(entry: Entry<'_>) -> Result<Point3<f32>, String> {
     Ok(Point3::new(x, y, z))
 }
 
-fn decode_quaternion(entry: Entry<'_>) -> Result<Quaternion<f32>, String> {
+fn decode_quaternion(_path: &'_ Path, entry: Entry<'_>) -> Result<Quaternion<f32>, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let x = match items.get("x") {
@@ -87,7 +86,7 @@ fn decode_quaternion(entry: Entry<'_>) -> Result<Quaternion<f32>, String> {
     Ok(Quaternion::new(x, y, z, w))
 }
 
-fn decode_transform_look_at(entry: Entry<'_>) -> Result<Matrix4<f32>, String> {
+fn decode_transform_look_at(_path: &'_ Path, entry: Entry<'_>) -> Result<Matrix4<f32>, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let from = match items.get("from") {

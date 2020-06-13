@@ -1,13 +1,16 @@
 //!Tools for defining decoders, argument lists and predefined values.
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
-use crate::Parser;
-use crate::Node;
-use crate::NodeType;
-use crate::Value;
 use crate::Decode;
 use crate::Decoder;
+use crate::Node;
+use crate::NodeType;
+use crate::Parser;
+use crate::Value;
 
 use crate::entry::Entry;
 
@@ -19,8 +22,8 @@ pub struct Prelude(Parser);
 ///referred to from within the configuration.
 impl Prelude {
     ///Create an empty prelude.
-    pub fn new() -> Prelude {
-        Prelude(Parser::new())
+    pub fn new(project_root: PathBuf) -> Prelude {
+        Prelude(Parser::new(project_root))
     }
 
     ///Create or access an object in the prelude.
@@ -34,9 +37,9 @@ impl Prelude {
                 NodeType::Object {
                     base: None,
                     children: HashMap::new(),
-                    arguments: vec![]
+                    arguments: vec![],
                 },
-                0
+                0,
             ));
             self.0.prelude.insert(ident, id);
             id
@@ -44,7 +47,7 @@ impl Prelude {
 
         Object {
             cfg: &mut self.0,
-            id: id
+            id: id,
         }
     }
 
@@ -54,26 +57,20 @@ impl Prelude {
         let id = if let Some(id) = maybe_id {
             id
         } else {
-            let id = self.0.add_node(Node::new(
-                NodeType::List(vec![]),
-                0
-            ));
+            let id = self.0.add_node(Node::new(NodeType::List(vec![]), 0));
             self.0.prelude.insert(ident, id);
             id
         };
 
         List {
             cfg: &mut self.0,
-            id: id
+            id: id,
         }
     }
 
     ///Create a value in the prelude.
     pub fn value<'a, V: Into<Value>>(&'a mut self, ident: String, value: V) {
-        let id = self.0.add_node(Node::new(
-            NodeType::Value(value.into()),
-            0
-        ));
+        let id = self.0.add_node(Node::new(NodeType::Value(value.into()), 0));
         self.0.prelude.insert(ident, id);
     }
 
@@ -87,13 +84,16 @@ impl Prelude {
 ///An object in the prelude.
 pub struct Object<'a> {
     cfg: &'a mut Parser,
-    id: usize
+    id: usize,
 }
 
 impl<'a> Object<'a> {
     ///Create or access an object inside this object.
     pub fn object<'b>(&'b mut self, ident: String) -> Object<'b> {
-        let maybe_id = if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
+        let maybe_id = if let &mut NodeType::Object {
+            ref mut children, ..
+        } = &mut self.cfg.nodes[self.id].ty
+        {
             children.get(&ident).map(|&node| node)
         } else {
             unreachable!()
@@ -106,12 +106,15 @@ impl<'a> Object<'a> {
                 NodeType::Object {
                     base: None,
                     children: HashMap::new(),
-                    arguments: vec![]
+                    arguments: vec![],
                 },
-                self.id
+                self.id,
             ));
 
-            if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
+            if let &mut NodeType::Object {
+                ref mut children, ..
+            } = &mut self.cfg.nodes[self.id].ty
+            {
                 children.insert(ident, id);
             }
 
@@ -120,13 +123,16 @@ impl<'a> Object<'a> {
 
         Object {
             cfg: self.cfg,
-            id: new_id
+            id: new_id,
         }
     }
 
     ///Create or access a list inside this object.
     pub fn list<'b>(&'b mut self, ident: String) -> List<'b> {
-        let maybe_id = if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
+        let maybe_id = if let &mut NodeType::Object {
+            ref mut children, ..
+        } = &mut self.cfg.nodes[self.id].ty
+        {
             children.get(&ident).map(|&node| node)
         } else {
             unreachable!()
@@ -135,12 +141,14 @@ impl<'a> Object<'a> {
         let new_id = if let Some(id) = maybe_id {
             id
         } else {
-            let id = self.cfg.add_node(Node::new(
-                NodeType::List(vec![]),
-                self.id
-            ));
+            let id = self
+                .cfg
+                .add_node(Node::new(NodeType::List(vec![]), self.id));
 
-            if let &mut NodeType::Object { ref mut children, .. } = &mut self.cfg.nodes[self.id].ty {
+            if let &mut NodeType::Object {
+                ref mut children, ..
+            } = &mut self.cfg.nodes[self.id].ty
+            {
                 children.insert(ident, id);
             }
 
@@ -149,34 +157,42 @@ impl<'a> Object<'a> {
 
         List {
             cfg: self.cfg,
-            id: new_id
+            id: new_id,
         }
     }
 
     ///Create a value inside this object.
     pub fn value<V: Into<Value>>(&mut self, ident: String, value: V) {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::Value(value.into()),
-            self.id
-        ));
-        if let &mut NodeType::Object { ref mut children, .. }  = &mut self.cfg.nodes[self.id].ty {
+        let new_id = self
+            .cfg
+            .add_node(Node::new(NodeType::Value(value.into()), self.id));
+        if let &mut NodeType::Object {
+            ref mut children, ..
+        } = &mut self.cfg.nodes[self.id].ty
+        {
             children.insert(ident, new_id);
         }
     }
 
     ///Attach a decoder to this object. Multiple decoders are allowed, as long
     ///as they decodes to different types.
-    pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
+    pub fn add_decoder<T, F>(&mut self, decoder_fn: F)
+    where
         T: Decode,
-        F: Fn(Entry<'_>) -> Result<T, String>,
-        F: 'static
+        F: Fn(&'_ Path, Entry<'_>) -> Result<T, String>,
+        F: 'static,
     {
-        self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
+        self.cfg.nodes[self.id]
+            .decoder
+            .insert(Decoder::new(decoder_fn));
     }
 
     ///Give this object an argument list that maps input to entry keys.
     pub fn arguments(&mut self, args: Vec<String>) {
-        if let &mut NodeType::Object { ref mut arguments, .. }  = &mut self.cfg.nodes[self.id].ty {
+        if let &mut NodeType::Object {
+            ref mut arguments, ..
+        } = &mut self.cfg.nodes[self.id].ty
+        {
             *arguments = args;
         }
     }
@@ -185,7 +201,7 @@ impl<'a> Object<'a> {
 ///A list in the prelude.
 pub struct List<'a> {
     cfg: &'a mut Parser,
-    id: usize
+    id: usize,
 }
 
 impl<'a> List<'a> {
@@ -195,9 +211,9 @@ impl<'a> List<'a> {
             NodeType::Object {
                 base: None,
                 children: HashMap::new(),
-                arguments: vec![]
+                arguments: vec![],
             },
-            self.id
+            self.id,
         ));
 
         if let &mut NodeType::List(ref mut items) = &mut self.cfg.nodes[self.id].ty {
@@ -206,16 +222,15 @@ impl<'a> List<'a> {
 
         Object {
             cfg: self.cfg,
-            id: new_id
+            id: new_id,
         }
     }
 
     ///Add another list to the end of this list.
     pub fn list<'b>(&'b mut self) -> List<'b> {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::List(vec![]),
-            self.id
-        ));
+        let new_id = self
+            .cfg
+            .add_node(Node::new(NodeType::List(vec![]), self.id));
 
         if let &mut NodeType::List(ref mut items) = &mut self.cfg.nodes[self.id].ty {
             items.push(new_id);
@@ -223,16 +238,15 @@ impl<'a> List<'a> {
 
         List {
             cfg: self.cfg,
-            id: new_id
+            id: new_id,
         }
     }
 
     ///Add a value to the end of the list.
     pub fn value<V: Into<Value>>(&mut self, value: V) {
-        let new_id = self.cfg.add_node(Node::new(
-            NodeType::Value(value.into()),
-            self.id
-        ));
+        let new_id = self
+            .cfg
+            .add_node(Node::new(NodeType::Value(value.into()), self.id));
         if let &mut NodeType::List(ref mut items) = &mut self.cfg.nodes[self.id].ty {
             items.push(new_id);
         }
@@ -240,11 +254,14 @@ impl<'a> List<'a> {
 
     ///Attach a decoder to this object. Multiple decoders are allowed, as long
     ///as they decodes to different types.
-    pub fn add_decoder<T, F>(&mut self, decoder_fn: F) where
+    pub fn add_decoder<T, F>(&mut self, decoder_fn: F)
+    where
         T: Decode,
-        F: Fn(Entry<'_>) -> Result<T, String>,
-        F: 'static
+        F: Fn(&'_ Path, Entry<'_>) -> Result<T, String>,
+        F: 'static,
     {
-        self.cfg.nodes[self.id].decoder.insert(Decoder::new(decoder_fn));
+        self.cfg.nodes[self.id]
+            .decoder
+            .insert(Decoder::new(decoder_fn));
     }
 }

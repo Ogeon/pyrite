@@ -5,9 +5,13 @@ use std::sync::Arc;
 use std::{
     collections::HashMap,
     f32::{INFINITY, NEG_INFINITY},
+    path::Path,
 };
 
-use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point3, SquareMatrix, Transform, Vector3};
+use cgmath::{
+    ElementWise, EuclideanSpace, InnerSpace, Matrix3, Matrix4, Point2, Point3, SquareMatrix,
+    Transform, Vector3,
+};
 use collision::{Continuous, Ray3};
 
 use rand::Rng;
@@ -23,6 +27,7 @@ use crate::spatial::{bkd_tree, Dim3};
 use crate::world;
 
 pub use self::Shape::{Plane, RayMarched, Sphere, Triangle};
+use math::utils::ortho;
 
 const EPSILON: f32 = DIST_EPSILON;
 
@@ -33,6 +38,7 @@ type DistanceEstimator = Box<dyn ParametricValue<Point3<f32>, f32>>;
 pub struct Vertex<S> {
     pub position: Point3<S>,
     pub normal: Vector3<S>,
+    pub texture: Point2<S>,
 }
 
 pub enum Shape {
@@ -43,6 +49,9 @@ pub enum Shape {
     },
     Plane {
         shape: collision::Plane<f32>,
+        tangent: Vector3<f32>,
+        binormal: Vector3<f32>,
+        texture_scale: f32,
         material: Material,
     },
     Triangle {
@@ -59,7 +68,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub fn ray_intersect(&self, ray: &Ray3<f32>) -> Option<(f32, Ray3<f32>)> {
+    pub fn ray_intersect(&self, ray: &Ray3<f32>) -> Option<Intersection> {
         match *self {
             Sphere {
                 ref position,
@@ -67,21 +76,36 @@ impl Shape {
                 ..
             } => {
                 let sphere = collision::Sphere {
-                    radius: radius,
+                    radius,
                     center: position.clone(),
                 };
-                sphere.intersection(ray).map(|intersection| {
-                    (
-                        (intersection - ray.origin).magnitude(),
-                        Ray3::new(intersection, (intersection - position).normalize()),
-                    )
+                sphere.intersection(ray).map(|intersection| Intersection {
+                    distance: (intersection - ray.origin).magnitude(),
+                    position: intersection,
+                    normal: (intersection - position).normalize(),
+                    texture: Point2::origin(),
                 })
             }
-            Plane { ref shape, .. } => shape.intersection(ray).map(|intersection| {
-                (
-                    (intersection - ray.origin).magnitude(),
-                    Ray3::new(intersection, shape.n.clone()),
-                )
+            Plane {
+                ref shape,
+                tangent,
+                binormal,
+                texture_scale,
+                ..
+            } => shape.intersection(ray).map(|intersection| {
+                let Vector3 {
+                    x: tex_x, y: tex_y, ..
+                } = Matrix3::from_cols(tangent, binormal, shape.n)
+                    .invert()
+                    .expect("could not invert plane texture space")
+                    * intersection.to_vec();
+
+                Intersection {
+                    distance: (intersection - ray.origin).magnitude(),
+                    position: intersection,
+                    normal: shape.n,
+                    texture: Point2::new(tex_x, tex_y) / texture_scale,
+                }
             }),
             Triangle {
                 ref v1,
@@ -121,7 +145,15 @@ impl Shape {
                 if dist > EPSILON {
                     let hit_position = ray.origin + ray.direction * dist;
                     let normal = v1.normal * (1.0 - (u + v)) + v2.normal * u + v3.normal * v;
-                    Some((dist, Ray3::new(hit_position, normal.normalize())))
+                    let texture = (v1.texture * (1.0 - (u + v)))
+                        .add_element_wise(v2.texture * u)
+                        .add_element_wise(v3.texture * v);
+                    Some(Intersection {
+                        distance: dist,
+                        position: hit_position,
+                        normal: normal.normalize(),
+                        texture,
+                    })
                 } else {
                     None
                 }
@@ -155,8 +187,13 @@ impl Shape {
                     )
                     .normalize();
                     let p = ray.origin + ray.direction * total_distance;
-                    //println!("n: {:?}", n);
-                    Some((total_distance, Ray3::new(p, n)))
+
+                    Some(Intersection {
+                        distance: total_distance,
+                        position: p,
+                        normal: n,
+                        texture: Point2::origin(),
+                    })
                 } else {
                     None
                 }
@@ -173,7 +210,7 @@ impl Shape {
         }
     }
 
-    pub fn sample_point(&self, rng: &mut impl Rng) -> Option<Ray3<f32>> {
+    pub fn sample_point(&self, rng: &mut impl Rng) -> Option<(Ray3<f32>, Point2<f32>)> {
         match *self {
             Sphere {
                 ref position,
@@ -181,7 +218,10 @@ impl Shape {
                 ..
             } => {
                 let sphere_point = math::utils::sample_sphere(rng);
-                Some(Ray3::new(position + sphere_point * radius, sphere_point))
+                Some((
+                    Ray3::new(position + sphere_point * radius, sphere_point),
+                    Point2::origin(),
+                ))
             }
             Plane { .. } => None,
             Triangle {
@@ -204,14 +244,21 @@ impl Shape {
 
                 let position = v1.position + a * u + b * v;
                 let normal = v1.normal * (1.0 - (u + v)) + v2.normal * u + v3.normal * v;
+                let texture = (v1.texture * (1.0 - (u + v)))
+                    .add_element_wise(v2.texture * u)
+                    .add_element_wise(v3.texture * v);
 
-                Some(Ray3::new(position, normal.normalize()))
+                Some((Ray3::new(position, normal.normalize()), texture))
             }
             RayMarched { .. } => None,
         }
     }
 
-    pub fn sample_towards(&self, rng: &mut impl Rng, target: &Point3<f32>) -> Option<Ray3<f32>> {
+    pub fn sample_towards(
+        &self,
+        rng: &mut impl Rng,
+        target: &Point3<f32>,
+    ) -> Option<(Ray3<f32>, Point2<f32>)> {
         match *self {
             Sphere {
                 ref position,
@@ -227,15 +274,17 @@ impl Shape {
 
                     let ray_dir = math::utils::sample_cone(rng, dir.normalize(), cos_theta_max);
 
-                    let intersection = self
-                        .ray_intersect(&Ray3::new(*target, ray_dir))
-                        .map(|(_, n)| n);
+                    let intersection = self.ray_intersect(&Ray3::new(*target, ray_dir)).map(
+                        |Intersection {
+                             position, normal, ..
+                         }| Ray3::new(position, normal),
+                    );
 
                     if let Some(intersection) = intersection {
-                        Some(intersection)
+                        Some((intersection, Point2::origin()))
                     } else {
                         // cheat
-                        Some(Ray3::new(*target, -dir.normalize()))
+                        Some((Ray3::new(*target, -dir.normalize()), Point2::origin()))
                     }
                 } else {
                     self.sample_point(rng)
@@ -335,7 +384,7 @@ impl Shape {
 }
 
 impl bkd_tree::Element for Arc<Shape> {
-    type Item = Ray3<f32>;
+    type Item = Intersection;
     type Ray = world::BkdRay;
 
     fn get_bounds_interval(&self, axis: Dim3) -> (f32, f32) {
@@ -382,10 +431,18 @@ impl bkd_tree::Element for Arc<Shape> {
         }
     }
 
-    fn intersect(&self, ray: &world::BkdRay) -> Option<(f32, Ray3<f32>)> {
+    fn intersect(&self, ray: &world::BkdRay) -> Option<(f32, Intersection)> {
         let &world::BkdRay(ref ray) = ray;
         self.ray_intersect(ray)
+            .map(|intersection| (intersection.distance, intersection))
     }
+}
+
+pub struct Intersection {
+    pub distance: f32,
+    pub position: Point3<f32>,
+    pub normal: Vector3<f32>,
+    pub texture: Point2<f32>,
 }
 
 pub enum BoundingVolume {
@@ -536,7 +593,7 @@ pub fn register_types(context: &mut Prelude) {
     distance_estimators::register_types(context);
 }
 
-fn decode_sphere(entry: Entry<'_>) -> Result<world::Object, String> {
+fn decode_sphere(_path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let position = match items.get("position") {
@@ -564,7 +621,7 @@ fn decode_sphere(entry: Entry<'_>) -> Result<world::Object, String> {
     })
 }
 
-fn decode_plane(entry: Entry<'_>) -> Result<world::Object, String> {
+fn decode_plane(_path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let origin = match items.get("origin") {
@@ -577,6 +634,14 @@ fn decode_plane(entry: Entry<'_>) -> Result<world::Object, String> {
         None => return Err("missing field 'normal'".into()),
     };
 
+    let texture_scale = match items.get("texture_scale") {
+        Some(v) => try_for!(v.decode(), "texture_scale"),
+        None => 1.0,
+    };
+
+    let tangent = ortho(normal).normalize();
+    let binormal = normal.cross(tangent).normalize();
+
     let (material, emissive): (Material, bool) = match items.get("material") {
         Some(v) => try_for!(v.dynamic_decode(), "material"),
         None => return Err("missing field 'material'".into()),
@@ -585,13 +650,16 @@ fn decode_plane(entry: Entry<'_>) -> Result<world::Object, String> {
     Ok(world::Object::Shape {
         shape: Plane {
             shape: collision::Plane::from_point_normal(Point3::from_vec(origin), normal),
-            material: material,
+            tangent,
+            binormal,
+            texture_scale,
+            material,
         },
-        emissive: emissive,
+        emissive,
     })
 }
 
-fn decode_mesh(entry: Entry<'_>) -> Result<world::Object, String> {
+fn decode_mesh(_path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let file_name: String = match items.get("file") {
@@ -633,7 +701,7 @@ fn decode_mesh(entry: Entry<'_>) -> Result<world::Object, String> {
     })
 }
 
-fn decode_ray_marched(entry: Entry<'_>) -> Result<world::Object, String> {
+fn decode_ray_marched(_path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let bounds = match items.get("bounds") {
@@ -661,7 +729,7 @@ fn decode_ray_marched(entry: Entry<'_>) -> Result<world::Object, String> {
     })
 }
 
-fn decode_bounding_sphere(entry: Entry<'_>) -> Result<BoundingVolume, String> {
+fn decode_bounding_sphere(_path: &'_ Path, entry: Entry<'_>) -> Result<BoundingVolume, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let position = match items.get("position") {
@@ -677,7 +745,7 @@ fn decode_bounding_sphere(entry: Entry<'_>) -> Result<BoundingVolume, String> {
     Ok(BoundingVolume::Sphere(position, radius))
 }
 
-fn decode_bounding_box(entry: Entry<'_>) -> Result<BoundingVolume, String> {
+fn decode_bounding_box(_path: &'_ Path, entry: Entry<'_>) -> Result<BoundingVolume, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let min = match items.get("min") {

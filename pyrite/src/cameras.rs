@@ -1,4 +1,4 @@
-use std::f32::consts;
+use std::{f32::consts, path::Path};
 
 use rand::Rng;
 
@@ -111,11 +111,10 @@ impl Camera {
 
                 let world_origin = transform.transform_point(origin);
                 let direction = target - world_origin;
-                let sq_distance = direction.magnitude2();
-                let ray = Ray::new(world_origin, direction.normalize());
+                let distance = direction.magnitude();
+                let ray = Ray::new(world_origin, direction / distance);
                 if let Some((hit, _)) = world.intersect(&ray) {
-                    let hit_distance = (hit.origin - world_origin).magnitude2();
-                    if hit_distance < sq_distance - DIST_EPSILON {
+                    if hit.distance < distance - DIST_EPSILON {
                         return None;
                     }
                 }
@@ -137,7 +136,7 @@ impl Camera {
     }
 }
 
-fn decode_perspective(entry: Entry<'_>) -> Result<Camera, String> {
+fn decode_perspective(_path: &'_ Path, entry: Entry<'_>) -> Result<Camera, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let transform = match items.get("transform") {

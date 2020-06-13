@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anymap::any::Any;
 use anymap::AnyMap;
@@ -77,12 +77,13 @@ impl From<std::io::Error> for Error {
 ///Parses the configuration source.
 pub struct Parser {
     nodes: Vec<Node>,
+    project_root: PathBuf,
     prelude: HashMap<String, usize>,
 }
 
 impl Parser {
     ///Create a new parser.
-    pub fn new() -> Parser {
+    pub fn new(project_root: PathBuf) -> Parser {
         Parser {
             nodes: vec![Node::new(
                 NodeType::Object {
@@ -92,6 +93,7 @@ impl Parser {
                 },
                 0,
             )],
+            project_root,
             prelude: HashMap::new(),
         }
     }
@@ -109,6 +111,10 @@ impl Parser {
     ///Get a reference to the root entry.
     pub fn root(&self) -> Entry<'_> {
         Entry::root_of(self)
+    }
+
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
     }
 
     fn add_node(&mut self, node: Node) -> usize {
@@ -334,12 +340,12 @@ pub trait Decode: Any {}
 
 impl<T: Any> Decode for T {}
 
-struct Decoder<T: Decode>(Box<dyn Fn(Entry<'_>) -> Result<T, String>>);
+struct Decoder<T: Decode>(Box<dyn Fn(&'_ Path, Entry<'_>) -> Result<T, String>>);
 
 impl<T: Decode> Decoder<T> {
     fn new<F>(decode_fn: F) -> Decoder<T>
     where
-        F: Fn(Entry<'_>) -> Result<T, String>,
+        F: Fn(&'_ Path, Entry<'_>) -> Result<T, String>,
         F: 'static,
     {
         Decoder(Box::new(decode_fn))
@@ -995,17 +1001,17 @@ mod tests {
     }
 
     fn with_prelude<T: for<'a> FromEntry<'a> + Any>() -> Parser {
-        let mut prelude = Prelude::new();
+        let mut prelude = Prelude::new(".".into());
         {
             let mut object = prelude.object("o".into());
-            object.add_decoder(|entry| SingleItem::<T>::from_entry(entry));
-            object.add_decoder(|entry| SingleItem2::<T>::from_entry(entry));
+            object.add_decoder(|_, entry| SingleItem::<T>::from_entry(entry));
+            object.add_decoder(|_, entry| SingleItem2::<T>::from_entry(entry));
         }
         prelude.into_parser()
     }
 
     fn with_args<T: for<'a> FromEntry<'a> + Any>() -> Parser {
-        let mut prelude = Prelude::new();
+        let mut prelude = Prelude::new(".".into());
         {
             let mut object = prelude.object("o".into());
             object.object("a".into());
@@ -1018,7 +1024,7 @@ mod tests {
 
     #[test]
     fn assign_object() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         cfg.parse_string("a = {}").unwrap();
         assert_eq!(
             cfg.nodes,
@@ -1045,7 +1051,7 @@ mod tests {
 
     #[test]
     fn assign_deep_object() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         cfg.parse_string("a.b = {}").unwrap();
         assert_eq!(
             cfg.nodes,
@@ -1080,7 +1086,7 @@ mod tests {
 
     #[test]
     fn assign_in_object() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         cfg.parse_string("a = { b = {} }").unwrap();
         assert_eq!(
             cfg.nodes,
@@ -1115,7 +1121,7 @@ mod tests {
 
     #[test]
     fn assign_to_object() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         cfg.parse_string("a = {}").unwrap();
         assert_eq!(
             cfg.nodes,
@@ -1173,7 +1179,7 @@ mod tests {
 
     #[test]
     fn extend_block_style() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         cfg.parse_string("a = {} b = a { c = {} }").unwrap();
         assert_eq!(
             cfg.nodes,
@@ -1216,7 +1222,7 @@ mod tests {
 
     #[test]
     fn insert_list() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         cfg.parse_string("a = []").unwrap();
         assert_eq!(
             cfg.nodes,
@@ -1236,33 +1242,33 @@ mod tests {
 
     #[test]
     fn extend_list() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         assert!(cfg.parse_string("a = [] b = a { c = {} }").is_err());
     }
 
     #[test]
     fn link_to_list() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         assert_ok!(cfg.parse_string("a = [] b = a"));
     }
 
     #[test]
     fn decode_integer_list() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         assert_ok!(cfg.parse_string("a = [1, 2, 3]"));
         assert_eq!(Ok(SingleItem(vec![1, 2, 3])), cfg.root().decode());
     }
 
     #[test]
     fn decode_float_list() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         assert_ok!(cfg.parse_string("a = [1.0, -2.4, 3.8]"));
         assert_eq!(Ok(SingleItem(vec![1.0, -2.4, 3.8])), cfg.root().decode());
     }
 
     #[test]
     fn decode_string_list() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         assert_ok!(cfg.parse_string("a = [\"foo\", \"bar\"]"));
         assert_eq!(Ok(SingleItem(vec!["foo", "bar"])), cfg.root().decode());
     }
@@ -1278,7 +1284,7 @@ mod tests {
 
     #[test]
     fn parse_relative_in_inner_root() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         assert_ok!(cfg.parse_string("a.b.c = {}"));
         {
             let root_id = cfg.nodes.len() - 1;
@@ -1297,7 +1303,7 @@ mod tests {
 
     #[test]
     fn link_in_inner_root() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         assert_ok!(cfg.parse_string("a.b.c = {} f = []"));
         {
             let root_id = cfg.nodes.len() - 2;
@@ -1330,7 +1336,7 @@ mod tests {
 
     #[test]
     fn extend_upgrade_unknown() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         assert_ok!(cfg.parse_string("a = b.c b.c = 5"));
         let a = cfg.root().get("a");
         assert_eq!(Ok(5), a.decode());
@@ -1338,7 +1344,7 @@ mod tests {
 
     #[test]
     fn circular_reference() {
-        let mut cfg = Parser::new();
+        let mut cfg = Parser::new(".".into());
         assert!(cfg.parse_string("a = b b = a").is_err());
         assert!(cfg.parse_string("a = b b = c c = a").is_err());
         assert!(cfg.parse_string("a = b b = c c = a { b = 0}").is_err());

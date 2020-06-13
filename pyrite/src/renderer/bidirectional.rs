@@ -1,7 +1,7 @@
 use rand::{self, Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
-use cgmath::{InnerSpace, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Point2, Vector3};
 use collision::Ray3;
 
 use super::algorithm::{make_tiles, Tile};
@@ -89,12 +89,16 @@ fn render_tile<R: Rng>(
             } = lamp_sample;
 
             let mut light = light.clone();
-            let (color, normal) = match surface {
-                Surface::Physical { normal, material } => {
+            let (color, normal, texture) = match surface {
+                Surface::Physical {
+                    normal,
+                    material,
+                    texture,
+                } => {
                     let color = material.get_emission(&mut light, -ray.direction, normal, &mut rng);
-                    (color, normal)
+                    (color, normal, texture)
                 }
-                Surface::Color(color) => (Some(color), ray),
+                Surface::Color(color) => (Some(color), ray, Point2::origin()),
             };
             ray.origin += normal.direction * DIST_EPSILON;
 
@@ -102,9 +106,10 @@ fn render_tile<R: Rng>(
                 lamp_path.push(Bounce {
                     ty: BounceType::Emission,
                     light: light.clone(),
-                    color: color,
+                    color,
                     incident: Vector3::new(0.0, 0.0, 0.0),
-                    normal: normal,
+                    normal,
+                    texture,
                     probability: weight / probability,
                     direct_light: vec![],
                 });
@@ -285,8 +290,9 @@ fn connect_paths(
         let to = lamp_bounce.normal.origin;
 
         let direction = to - from;
-        let ray = Ray3::new(from, direction.normalize());
         let sq_distance = direction.magnitude2();
+        let distance = sq_distance.sqrt();
+        let ray = Ray3::new(from, direction / distance);
 
         if bounce.normal.direction.dot(ray.direction) <= 0.0 {
             continue;
@@ -296,11 +302,9 @@ fn connect_paths(
             continue;
         }
 
-        let hit = world
-            .intersect(&ray)
-            .map(|(hit_normal, _)| (hit_normal.origin - from).magnitude2());
+        let hit = world.intersect(&ray).map(|(hit, _)| hit.distance);
         if let Some(dist) = hit {
-            if dist < sq_distance - DIST_EPSILON {
+            if dist < distance - DIST_EPSILON {
                 continue;
             }
         }

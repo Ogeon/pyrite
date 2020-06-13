@@ -7,7 +7,7 @@ use rand::Rng;
 use genmesh;
 use obj;
 
-use cgmath::{InnerSpace, Matrix4, Point3, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point2, Vector3};
 use collision::Ray3;
 
 use crate::config::entry::Entry;
@@ -20,7 +20,7 @@ use crate::lamp::Lamp;
 use crate::materials::Material;
 use crate::{
     math::RenderMath,
-    shapes::{self, Shape},
+    shapes::{Intersection, Shape, Triangle, Vertex},
 };
 
 pub enum Sky {
@@ -42,7 +42,7 @@ pub struct World {
 }
 
 impl World {
-    pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &Material)> {
+    pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)> {
         self.objects.intersect(ray)
     }
 
@@ -68,14 +68,14 @@ pub enum Object {
 }
 
 pub trait ObjectContainer {
-    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &Material)>;
+    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)>;
 }
 
-impl ObjectContainer for bkd_tree::BkdTree<Arc<shapes::Shape>> {
-    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Ray3<f32>, &Material)> {
+impl ObjectContainer for bkd_tree::BkdTree<Arc<Shape>> {
+    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)> {
         let ray = BkdRay(*ray);
         self.find(&ray)
-            .map(|(normal, object)| (normal, object.get_material()))
+            .map(|(intersection, object)| (intersection, object.get_material()))
     }
 }
 
@@ -132,11 +132,11 @@ pub fn register_types(context: &mut Prelude) {
     object.arguments(vec!["color".into()]);
 }
 
-fn decode_sky_color(entry: Entry<'_>) -> Result<Sky, String> {
+fn decode_sky_color(path: &'_ Path, entry: Entry<'_>) -> Result<Sky, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(v), "color"),
+        Some(v) => try_for!(decode_color(path, v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
@@ -162,7 +162,7 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(
         None => return Err("missing field 'objects'".into()),
     };
 
-    let mut objects: Vec<Arc<shapes::Shape>> = Vec::new();
+    let mut objects: Vec<Arc<Shape>> = Vec::new();
     let mut lights = Vec::new();
 
     for (i, object) in object_protos.into_iter().enumerate() {
@@ -235,53 +235,58 @@ pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(
     })
 }
 
-fn vertex_to_point(v: &[f32; 3]) -> Point3<f32> {
-    Point3::new(v[0], v[1], v[2])
-}
-
-fn vertex_to_vector(v: &[f32; 3]) -> Vector3<f32> {
-    Vector3::new(v[0], v[1], v[2])
-}
-
 fn make_triangle<M: obj::GenPolygon>(
     obj: &obj::Obj<'_, M>,
-    obj::IndexTuple(v1, _t1, n1): obj::IndexTuple,
-    obj::IndexTuple(v2, _t2, n2): obj::IndexTuple,
-    obj::IndexTuple(v3, _t3, n3): obj::IndexTuple,
+    obj::IndexTuple(v1, t1, n1): obj::IndexTuple,
+    obj::IndexTuple(v2, t2, n2): obj::IndexTuple,
+    obj::IndexTuple(v3, t3, n3): obj::IndexTuple,
     material: Arc<Material>,
-) -> shapes::Shape {
-    let v1 = vertex_to_point(&obj.position[v1]);
-    let v2 = vertex_to_point(&obj.position[v2]);
-    let v3 = vertex_to_point(&obj.position[v3]);
+) -> Shape {
+    let v1 = obj.position[v1].into();
+    let v2 = obj.position[v2].into();
+    let v3 = obj.position[v3].into();
 
     let (n1, n2, n3) = match (n1, n2, n3) {
         (Some(n1), Some(n2), Some(n3)) => {
-            let n1 = vertex_to_vector(&obj.normal[n1]);
-            let n2 = vertex_to_vector(&obj.normal[n2]);
-            let n3 = vertex_to_vector(&obj.normal[n3]);
+            let n1 = obj.normal[n1].into();
+            let n2 = obj.normal[n2].into();
+            let n3 = obj.normal[n3].into();
             (n1, n2, n3)
         }
         _ => {
-            let a = v2 - &v1;
-            let b = v3 - &v1;
+            let a: Vector3<_> = v2 - v1;
+            let b = v3 - v1;
             let normal = a.cross(b).normalize();
             (normal, normal, normal)
         }
     };
 
-    shapes::Triangle {
-        v1: shapes::Vertex {
+    let t1 = t1
+        .map(|t1| obj.texture[t1].into())
+        .unwrap_or(Point2::origin());
+    let t2 = t2
+        .map(|t2| obj.texture[t2].into())
+        .unwrap_or(Point2::origin());
+    let t3 = t3
+        .map(|t3| obj.texture[t3].into())
+        .unwrap_or(Point2::origin());
+
+    Triangle {
+        v1: Vertex {
             position: v1,
             normal: n1,
+            texture: t1,
         },
-        v2: shapes::Vertex {
+        v2: Vertex {
             position: v2,
             normal: n2,
+            texture: t2,
         },
-        v3: shapes::Vertex {
+        v3: Vertex {
             position: v3,
             normal: n3,
+            texture: t3,
         },
-        material: material,
+        material,
     }
 }

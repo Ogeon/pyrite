@@ -84,10 +84,11 @@ impl<'a> Entry<'a> {
 
     ///Try to dynamically decode this entry.
     pub fn dynamic_decode<T: Decode>(&self) -> Result<T, String> {
+        let path = &self.cfg.project_root;
         self.cfg
             .get_decoder(self.id)
             .ok_or("could not decode dynamically".into())
-            .and_then(|&Decoder(ref decoder)| decoder(self.clone()))
+            .and_then(|&Decoder(ref decoder)| decoder(path, self.clone()))
     }
 }
 

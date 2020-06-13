@@ -20,6 +20,7 @@ pub fn contribute(
         color,
         incident,
         normal,
+        texture,
         probability,
         ref direct_light,
     } = bounce;
@@ -30,8 +31,9 @@ pub fn contribute(
 
     let context = RenderContext {
         wavelength: sample.wavelength,
-        incident: incident,
+        incident,
         normal: normal.direction,
+        texture,
     };
 
     let c = color.get(&context) * probability;
@@ -55,6 +57,7 @@ pub fn contribute(
                     wavelength: sample.wavelength,
                     incident: l_incident,
                     normal: l_normal,
+                    texture,
                 };
 
                 let l_c = l_color.get(&context) * l_probability;

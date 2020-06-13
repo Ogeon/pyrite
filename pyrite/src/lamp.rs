@@ -1,7 +1,7 @@
 use std;
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
-use cgmath::{InnerSpace, Point3, Vector3};
+use cgmath::{InnerSpace, Point2, Point3, Vector3};
 use collision::Ray3;
 
 use rand::Rng;
@@ -62,7 +62,7 @@ impl Lamp {
                 }
             }
             Lamp::Shape(ref shape) => {
-                let ray = shape
+                let (ray, texture) = shape
                     .sample_towards(rng, &target)
                     .expect("trying to use infinite shape in direct lighting");
                 let v = ray.origin - target;
@@ -77,9 +77,10 @@ impl Lamp {
                     sq_distance: Some(distance),
                     surface: Surface::Physical {
                         normal: ray,
+                        texture,
                         material: shape.get_material(),
                     },
-                    weight: weight,
+                    weight,
                 }
             }
         }
@@ -97,14 +98,15 @@ impl Lamp {
                 })
             }
             Lamp::Shape(ref shape) => {
-                let normal = shape
+                let (normal, texture) = shape
                     .sample_point(rng)
                     .expect("trying to use infinite shape as lamp");
                 let direction = sample_hemisphere(rng, normal.direction);
                 Some(RaySample {
                     ray: Ray3::new(normal.origin, direction),
                     surface: Surface::Physical {
-                        normal: normal,
+                        normal,
+                        texture,
                         material: shape.get_material(),
                     },
                     weight: shape.surface_area(),
@@ -124,6 +126,7 @@ pub struct Sample<'a> {
 pub enum Surface<'a> {
     Physical {
         normal: Ray3<f32>,
+        texture: Point2<f32>,
         material: &'a Material,
     },
     Color(&'a RenderMath<Color>),
@@ -143,7 +146,7 @@ pub fn register_types(context: &mut Prelude) {
     group.object("Point".into()).add_decoder(decode_point);
 }
 
-fn decode_directional(entry: Entry<'_>) -> Result<world::Object, String> {
+fn decode_directional(path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let direction: Vector3<_> = match fields.get("direction") {
@@ -157,7 +160,7 @@ fn decode_directional(entry: Entry<'_>) -> Result<world::Object, String> {
     };
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(v), "color"),
+        Some(v) => try_for!(decode_color(path, v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
@@ -168,7 +171,7 @@ fn decode_directional(entry: Entry<'_>) -> Result<world::Object, String> {
     }))
 }
 
-fn decode_point(entry: Entry<'_>) -> Result<world::Object, String> {
+fn decode_point(path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let position = match fields.get("position") {
@@ -177,7 +180,7 @@ fn decode_point(entry: Entry<'_>) -> Result<world::Object, String> {
     };
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(v), "color"),
+        Some(v) => try_for!(decode_color(path, v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 

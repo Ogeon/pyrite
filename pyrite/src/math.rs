@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::tracer;
 
 use crate::config::entry::Entry;
@@ -51,12 +53,12 @@ macro_rules! make_operators {
                 }
             }
 
-            fn $fn_name<T: Decode + From<f32> + 'static, E: Decode + 'static>(entry: Entry<'_>) -> Result<Math<T, E>, String> {
+            fn $fn_name<T: Decode + From<f32> + 'static, E: Decode + 'static>(path: &'_ Path, entry: Entry<'_>) -> Result<Math<T, E>, String> {
                 let fields = entry.as_object().ok_or("not an object")?;
 
                 $(
                     let $arg = match fields.get(stringify!($arg)) {
-                        Some(v) => try_for!(decode_value(v), stringify!($arg)),
+                        Some(v) => try_for!(decode_value(path, v), stringify!($arg)),
                         None => return Err(format!("missing field '{}'", stringify!($arg)))
                     };
                 )+
@@ -450,12 +452,13 @@ impl<T: tracer::ParametricValue<From, f32>, From> tracer::ParametricValue<From, 
 }
 
 fn decode_curve<T: Decode + From<f32> + 'static, E: Decode + 'static>(
+    path: &'_ Path,
     entry: Entry<'_>,
 ) -> Result<Math<T, E>, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let input = match fields.get("input") {
-        Some(v) => try_for!(decode_value(v), "input"),
+        Some(v) => try_for!(decode_value(path, v), "input"),
         None => return Err("missing field 'input'".into()),
     };
 
@@ -494,17 +497,18 @@ impl<T: tracer::ParametricValue<tracer::RenderContext, f32>>
 }
 
 fn decode_fresnel<T: Decode + From<f32> + 'static>(
+    path: &'_ Path,
     entry: Entry<'_>,
 ) -> Result<RenderMath<T>, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
-        Some(v) => try_for!(decode_value(v), "ior"),
+        Some(v) => try_for!(decode_value(path, v), "ior"),
         None => return Err("missing field 'ior'".into()),
     };
 
     let env_ior = match fields.get("env_ior") {
-        Some(v) => try_for!(decode_value(v), "env_ior"),
+        Some(v) => try_for!(decode_value(path, v), "env_ior"),
         None => RenderMath::<T>::Value(1.0f32.into()),
     };
 
@@ -514,7 +518,10 @@ fn decode_fresnel<T: Decode + From<f32> + 'static>(
     }))
 }
 
-fn decode_value<T: Decode + From<f32> + 'static>(entry: Entry<'_>) -> Result<T, String> {
+fn decode_value<T: Decode + From<f32> + 'static>(
+    _path: &'_ Path,
+    entry: Entry<'_>,
+) -> Result<T, String> {
     if let Some(&Value::Number(num)) = entry.as_value() {
         Ok(num.as_float().into())
     } else {

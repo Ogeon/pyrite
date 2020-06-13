@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::tracer;
 
 use crate::config::entry::Entry;
@@ -27,7 +29,7 @@ macro_rules! make_values {
         }
 
         $(
-            fn $fn_name(_entry: Entry<'_>) -> Result<Box<dyn tracer::ParametricValue<$context_name, $result_name>>, String> {
+            fn $fn_name(_path: &'_ Path, _entry: Entry<'_>) -> Result<Box<dyn tracer::ParametricValue<$context_name, $result_name>>, String> {
                 Ok(Box::new($type_name::$variant_name) as Box<dyn tracer::ParametricValue<$context_name, $result_name>>)
             }
         )*

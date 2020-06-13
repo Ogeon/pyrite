@@ -2,7 +2,7 @@ use std;
 
 use rand::Rng;
 
-use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Point2, Point3, Vector3};
 use collision::Ray3;
 
 use crate::{
@@ -35,6 +35,7 @@ pub struct RenderContext {
     pub wavelength: f32,
     pub normal: Vector3<f32>,
     pub incident: Vector3<f32>,
+    pub texture: Point2<f32>,
 }
 
 pub struct Bounce<'a> {
@@ -43,6 +44,7 @@ pub struct Bounce<'a> {
     pub color: &'a RenderMath<Color>,
     pub incident: Vector3<f32>,
     pub normal: Ray3<f32>,
+    pub texture: Point2<f32>,
     pub probability: f32,
     pub direct_light: Vec<DirectLight<'a>>,
 }
@@ -116,59 +118,65 @@ pub fn trace<'w, R: Rng>(
 
     for _ in 0..bounces {
         match world.intersect(&ray) {
-            Some((normal, material)) => match material.reflect(&mut light, ray, normal, rng) {
-                Reflect(out_ray, color, prob, brdf) => {
-                    let direct_light = if let Some(brdf) = brdf {
-                        trace_direct(
-                            rng,
-                            light_samples,
-                            light.clone(),
-                            ray.direction,
-                            normal,
-                            world,
-                            brdf,
-                        )
-                    } else {
-                        vec![]
-                    };
+            Some((intersection, material)) => {
+                let normal = Ray3::new(intersection.position, intersection.normal);
 
-                    sample_light = brdf.is_none() || light_samples == 0;
+                match material.reflect(&mut light, ray, normal, rng) {
+                    Reflect(out_ray, color, prob, brdf) => {
+                        let direct_light = if let Some(brdf) = brdf {
+                            trace_direct(
+                                rng,
+                                light_samples,
+                                light.clone(),
+                                ray.direction,
+                                normal,
+                                world,
+                                brdf,
+                            )
+                        } else {
+                            vec![]
+                        };
 
-                    let bounce_type = if let Some(brdf) = brdf {
-                        BounceType::Diffuse(brdf, out_ray.direction)
-                    } else {
-                        BounceType::Specular
-                    };
+                        sample_light = brdf.is_none() || light_samples == 0;
 
-                    let bounce = Bounce {
-                        ty: bounce_type,
-                        light: light.clone(),
-                        color: color,
-                        incident: ray.direction,
-                        normal: normal,
-                        probability: prob,
-                        direct_light: direct_light,
-                    };
+                        let bounce_type = if let Some(brdf) = brdf {
+                            BounceType::Diffuse(brdf, out_ray.direction)
+                        } else {
+                            BounceType::Specular
+                        };
 
-                    ray = out_ray;
-                    path.push(bounce);
-                }
-                Emit(color) => {
-                    if sample_light {
-                        path.push(Bounce {
-                            ty: BounceType::Emission,
-                            light: light,
-                            color: color,
+                        let bounce = Bounce {
+                            ty: bounce_type,
+                            light: light.clone(),
+                            color,
                             incident: ray.direction,
-                            normal: normal,
-                            probability: 1.0,
-                            direct_light: vec![],
-                        });
-                    }
+                            normal,
+                            texture: intersection.texture,
+                            probability: prob,
+                            direct_light,
+                        };
 
-                    break;
+                        ray = out_ray;
+                        path.push(bounce);
+                    }
+                    Emit(color) => {
+                        if sample_light {
+                            path.push(Bounce {
+                                ty: BounceType::Emission,
+                                light,
+                                color,
+                                incident: ray.direction,
+                                normal,
+                                texture: intersection.texture,
+                                probability: 1.0,
+                                direct_light: vec![],
+                            });
+                        }
+
+                        break;
+                    }
                 }
-            },
+            }
             None => {
                 let directional = if sample_light {
                     trace_directional(ray.direction, world)
@@ -178,13 +186,14 @@ pub fn trace<'w, R: Rng>(
                 let color = directional.unwrap_or_else(|| world.sky.color(&ray.direction));
                 path.push(Bounce {
                     ty: BounceType::Emission,
-                    light: light,
-                    color: color,
+                    light,
+                    color,
                     incident: ray.direction,
                     normal: Ray3::new(
                         Point3::from_vec(&ray.direction * std::f32::INFINITY),
                         -ray.direction,
                     ),
+                    texture: Point2::origin(),
                     probability: 1.0,
                     direct_light: vec![],
                 });
@@ -233,7 +242,7 @@ fn trace_direct<'w, R: Rng>(
                 if cos_out > 0.0 {
                     let hit_dist = world
                         .intersect(&ray_out)
-                        .map(|(hit_normal, _)| (hit_normal.origin - &normal.origin).magnitude2());
+                        .map(|(hit, _)| hit.distance * hit.distance);
 
                     let blocked = match (hit_dist, sq_distance) {
                         (Some(hit), Some(lamp)) if hit >= lamp - DIST_EPSILON => false,
@@ -246,6 +255,7 @@ fn trace_direct<'w, R: Rng>(
                             lamp::Surface::Physical {
                                 normal: target_normal,
                                 material,
+                                ..
                             } => {
                                 let color = material.get_emission(
                                     &mut light,
@@ -265,8 +275,8 @@ fn trace_direct<'w, R: Rng>(
                             * brdf(ray_in, normal.direction, ray_out.direction);
 
                         return color.map(|color| DirectLight {
-                            light: light,
-                            color: color,
+                            light,
+                            color,
                             incident: ray_out.direction,
                             normal: target_normal,
                             probability: scale,

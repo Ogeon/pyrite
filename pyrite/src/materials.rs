@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use rand::Rng;
 
 use cgmath::{InnerSpace, Vector3};
@@ -370,40 +372,40 @@ pub fn register_types(context: &mut Prelude) {
         .add_decoder(decode_refractive);
 }
 
-pub fn decode_diffuse(entry: Entry<'_>) -> Result<(Material, bool), String> {
+pub fn decode_diffuse(path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(v), "color"),
+        Some(v) => try_for!(decode_color(path, v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
     Ok((Material::Diffuse(Diffuse { color }), false))
 }
 
-pub fn decode_emission(entry: Entry<'_>) -> Result<(Material, bool), String> {
+pub fn decode_emission(path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(v), "color"),
+        Some(v) => try_for!(decode_color(path, v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
     Ok((Material::Emission(Emission { color }), true))
 }
 
-pub fn decode_mirror(entry: Entry<'_>) -> Result<(Material, bool), String> {
+pub fn decode_mirror(path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(v), "color"),
+        Some(v) => try_for!(decode_color(path, v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 
     Ok((Material::Mirror(Mirror { color }), false))
 }
 
-pub fn decode_mix(entry: Entry<'_>) -> Result<(Material, bool), String> {
+pub fn decode_mix(_path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let factor = match fields.get("factor") {
@@ -431,7 +433,7 @@ pub fn decode_mix(entry: Entry<'_>) -> Result<(Material, bool), String> {
     ))
 }
 
-pub fn decode_fresnel_mix(entry: Entry<'_>) -> Result<(Material, bool), String> {
+pub fn decode_fresnel_mix(_path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
@@ -477,7 +479,7 @@ pub fn decode_fresnel_mix(entry: Entry<'_>) -> Result<(Material, bool), String> 
     ))
 }
 
-pub fn decode_refractive(entry: Entry<'_>) -> Result<(Material, bool), String> {
+pub fn decode_refractive(path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let ior = match fields.get("ior") {
@@ -501,7 +503,7 @@ pub fn decode_refractive(entry: Entry<'_>) -> Result<(Material, bool), String> {
     };
 
     let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(v), "color"),
+        Some(v) => try_for!(decode_color(path, v), "color"),
         None => return Err("missing field 'color'".into()),
     };
 

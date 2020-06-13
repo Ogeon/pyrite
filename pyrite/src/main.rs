@@ -38,6 +38,7 @@ mod renderer;
 mod rgb;
 mod shapes;
 mod spatial;
+mod texture;
 mod tracer;
 mod types3d;
 mod utils;

@@ -1,0 +1,54 @@
+include "../light_sources/d65.pyr" as d65
+
+image = {
+	width = 1024
+	height = 512
+	format = Image.Png
+}
+
+renderer = Renderer.Simple {
+	pixel_samples = 200
+	spectrum.samples = 10
+	spectrum.bins = 50
+	tile_size = 32
+	bounces = 8
+	light_samples = 4
+}
+
+camera = Camera.Perspective {
+	fov = 53
+	transform = Transform.LookAt
+	transform.from = Vector(0, 2, 12)
+	transform.to = Vector(0, 2, 0)
+}
+
+light_ball = Shape.Sphere  {
+	material = Material.Emission(Math.Mul(Color.Spectrum(d65.spectrum), 20))
+	position = Vector(0, 0, 0)
+	radius = 1
+}
+
+world.sky = Sky.Color(0)
+world.objects = [
+	Shape.Plane {
+		origin = Vector
+		normal = Vector { y = 1 }
+		material = Material.Diffuse { color = Color.Texture("tiles/color.jpg") }
+		texture_scale = 5
+	},
+	light_ball {
+		position.x = -1
+		position.y = 12
+		position.z = 2
+		radius = 3
+	},
+	light_ball {
+		position.x = 15
+		position.y = 3
+		position.z = 4
+	},
+	Shape.Mesh {
+		file = "color_checker.obj"
+		materials.color_checker = Material.Diffuse(Color.Texture("color_checker.jpg"))
+	}
+]

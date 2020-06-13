@@ -7,6 +7,7 @@ use crate::cameras;
 use crate::world;
 
 use crate::film::Film;
+use std::path::Path;
 
 mod algorithm;
 mod bidirectional;
@@ -197,7 +198,7 @@ fn decode_spectrum(items: Object<'_>) -> Result<(u32, usize, (f32, f32)), String
     Ok((samples, bins, span))
 }
 
-fn decode_simple(entry: Entry<'_>) -> Result<Renderer, String> {
+fn decode_simple(_path: &'_ Path, entry: Entry<'_>) -> Result<Renderer, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let algorithm = Algorithm::Simple;
@@ -205,7 +206,7 @@ fn decode_simple(entry: Entry<'_>) -> Result<Renderer, String> {
     decode_renderer(items, algorithm)
 }
 
-fn decode_bidirectional(entry: Entry<'_>) -> Result<Renderer, String> {
+fn decode_bidirectional(_path: &'_ Path, entry: Entry<'_>) -> Result<Renderer, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let light_bounces = match items.get("light_bounces") {
@@ -220,7 +221,7 @@ fn decode_bidirectional(entry: Entry<'_>) -> Result<Renderer, String> {
     decode_renderer(items, algorithm)
 }
 
-fn decode_photon_mapping(entry: Entry<'_>) -> Result<Renderer, String> {
+fn decode_photon_mapping(_path: &'_ Path, entry: Entry<'_>) -> Result<Renderer, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let photons = match items.get("photons") {

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Quaternion, Vector3};
 
 use crate::config::entry::Entry;
@@ -136,7 +138,7 @@ pub fn register_types(context: &mut Prelude) {
     }
 }
 
-fn decode_mandelbulb(entry: Entry<'_>) -> Result<DistanceEstimator, String> {
+fn decode_mandelbulb(_path: &'_ Path, entry: Entry<'_>) -> Result<DistanceEstimator, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let iterations = match items.get("iterations") {
@@ -167,7 +169,7 @@ fn decode_mandelbulb(entry: Entry<'_>) -> Result<DistanceEstimator, String> {
     }))
 }
 
-fn decode_quaternion_julia(entry: Entry<'_>) -> Result<DistanceEstimator, String> {
+fn decode_quaternion_julia(_path: &'_ Path, entry: Entry<'_>) -> Result<DistanceEstimator, String> {
     let items = entry.as_object().ok_or("not an object")?;
 
     let iterations = match items.get("iterations") {
@@ -204,14 +206,14 @@ fn decode_quaternion_julia(entry: Entry<'_>) -> Result<DistanceEstimator, String
     }))
 }
 
-fn decode_quat_mul_regular(_entry: Entry<'_>) -> Result<QuatMul, String> {
+fn decode_quat_mul_regular(_path: &'_ Path, _entry: Entry<'_>) -> Result<QuatMul, String> {
     Ok(QuatMul::Regular)
 }
 
-fn decode_quat_mul_cubic(_entry: Entry<'_>) -> Result<QuatMul, String> {
+fn decode_quat_mul_cubic(_path: &'_ Path, _entry: Entry<'_>) -> Result<QuatMul, String> {
     Ok(QuatMul::Cubic)
 }
 
-fn decode_quat_mul_bicomplex(_entry: Entry<'_>) -> Result<QuatMul, String> {
+fn decode_quat_mul_bicomplex(_path: &'_ Path, _entry: Entry<'_>) -> Result<QuatMul, String> {
     Ok(QuatMul::Bicomplex)
 }

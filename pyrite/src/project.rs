@@ -37,7 +37,12 @@ pub enum ParseResult<T> {
 }
 
 pub fn from_file<P: AsRef<Path>>(path: P) -> ParseResult<Project> {
-    let mut context = Prelude::new();
+    let mut context = Prelude::new(
+        path.as_ref()
+            .parent()
+            .expect("could not get the project file's parent directory")
+            .into(),
+    );
 
     types3d::register_types(&mut context);
     world::register_types(&mut context);
@@ -60,7 +65,7 @@ pub fn from_file<P: AsRef<Path>>(path: P) -> ParseResult<Project> {
 
     println!("decoding image spec");
     let image_spec = match root.get("image") {
-        Some(v) => try_parse!(decode_image_spec(v), "image"),
+        Some(v) => try_parse!(decode_image_spec(config.project_root(), v), "image"),
         None => return ParseResult::InterpretError("missing image specifications".into()),
     };
 
@@ -114,7 +119,7 @@ pub struct ImageSpec {
     pub rgb_curves: Option<(Vec<(f32, f32)>, Vec<(f32, f32)>, Vec<(f32, f32)>)>,
 }
 
-fn decode_image_spec(entry: Entry<'_>) -> Result<ImageSpec, String> {
+fn decode_image_spec(_path: &'_ Path, entry: Entry<'_>) -> Result<ImageSpec, String> {
     let fields = entry.as_object().ok_or("not an object")?;
 
     let width = match fields.get("width") {
@@ -179,6 +184,6 @@ pub enum ImageFormat {
     Png,
 }
 
-fn decode_png(_: Entry<'_>) -> Result<ImageFormat, String> {
+fn decode_png(_: &'_ Path, _: Entry<'_>) -> Result<ImageFormat, String> {
     Ok(ImageFormat::Png)
 }

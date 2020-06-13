@@ -3,7 +3,7 @@ use std::sync::Arc;
 use rand::{self, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
-use cgmath::{InnerSpace, Point2, Point3, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Point2, Point3, Vector3};
 
 use super::algorithm::make_tiles;
 use crate::cameras::Camera;
@@ -184,17 +184,23 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                         if let Some((_lamp, probability, mut ray_sample)) = res {
                             let mut light = Light::new(film.sample_wavelength(&mut rng));
 
-                            let (color, normal) = match ray_sample.surface {
-                                Surface::Physical { normal, material } => {
+                            let (color, normal, texture) = match ray_sample.surface {
+                                Surface::Physical {
+                                    normal,
+                                    material,
+                                    texture,
+                                } => {
                                     let color = material.get_emission(
                                         &mut light,
                                         -ray_sample.ray.direction,
                                         normal,
                                         &mut rng,
                                     );
-                                    (color, normal)
+                                    (color, normal, texture)
                                 }
-                                Surface::Color(color) => (Some(color), ray_sample.ray),
+                                Surface::Color(color) => {
+                                    (Some(color), ray_sample.ray, Point2::origin())
+                                }
                             };
 
                             if let Some(color) = color {
@@ -220,10 +226,11 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                     parent: None,
                                     bounce: Bounce {
                                         ty: BounceType::Emission,
-                                        light: light,
-                                        color: color,
-                                        incident: incident,
-                                        normal: normal,
+                                        light,
+                                        color,
+                                        incident,
+                                        normal,
+                                        texture,
                                         probability: ray_sample.weight * probability,
                                         direct_light: vec![],
                                     },
@@ -417,6 +424,7 @@ impl<'a> CameraBounce<'a> {
                 color,
                 incident,
                 normal,
+                texture,
                 probability,
                 ..
             } = &hit.bounce;
@@ -430,8 +438,9 @@ impl<'a> CameraBounce<'a> {
             for &mut (ref sample, ref mut reflectance) in &mut *samples {
                 let context = RenderContext {
                     wavelength: sample.wavelength,
-                    incident: incident,
+                    incident,
                     normal: normal.direction,
+                    texture,
                 };
                 let c = color.get(&context);
                 *reflectance *= c * probability * brdf;
@@ -485,6 +494,7 @@ impl<'a> LightBounce<'a> {
                 color,
                 incident,
                 normal,
+                texture,
                 probability,
                 ..
             } = &hit.bounce;
@@ -492,8 +502,9 @@ impl<'a> LightBounce<'a> {
             for &mut (ref mut sample, ref mut reflectance) in &mut *samples {
                 let context = RenderContext {
                     wavelength: sample.wavelength,
-                    incident: incident,
+                    incident,
                     normal: normal.direction,
+                    texture,
                 };
 
                 let c = color.get(&context) * probability;
