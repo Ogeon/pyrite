@@ -1,47 +1,241 @@
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::{error::Error, sync::Arc};
 
 use rand::Rng;
 
 use genmesh;
 use obj;
 
-use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point2, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point2, SquareMatrix, Vector3};
 use collision::Ray3;
-
-use crate::config::entry::Entry;
-use crate::config::Prelude;
 
 use crate::spatial::{bkd_tree, Dim3};
 
-use crate::color::{decode_color, Color};
+use crate::color::Color;
 use crate::lamp::Lamp;
 use crate::materials::Material;
 use crate::{
-    math::RenderMath,
-    shapes::{Intersection, Shape, Triangle, Vertex},
+    math::{utils::ortho, RenderMath},
+    project::{FromExpression, WorldObject},
+    shapes::{distance_estimators::QuatMul, BoundingVolume, Intersection, Shape, Triangle, Vertex},
+    tracer::ParametricValue,
 };
 
-pub enum Sky {
-    Color(RenderMath<Color>),
-}
-
-impl Sky {
-    pub fn color<'a>(&'a self, _direction: &Vector3<f32>) -> &'a RenderMath<Color> {
-        match self {
-            Sky::Color(color) => color,
-        }
-    }
-}
-
 pub struct World {
-    pub sky: Sky,
+    pub sky: RenderMath<Color>,
     pub lights: Vec<Lamp>,
-    pub objects: Box<dyn ObjectContainer + 'static + Send + Sync>,
+    pub objects: bkd_tree::BkdTree<Arc<Shape>>,
 }
 
 impl World {
+    pub fn from_project(
+        project: crate::project::World,
+        make_path: &impl Fn(&str) -> PathBuf,
+    ) -> Result<Self, Box<dyn Error>> {
+        let sky = RenderMath::from_expression_or_else(project.sky, make_path, || 0.0f32.into())?;
+
+        let mut objects: Vec<Arc<Shape>> = Vec::new();
+        let mut lights = Vec::new();
+
+        for (i, object) in project.objects.into_iter().enumerate() {
+            match object {
+                WorldObject::Sphere {
+                    position,
+                    radius,
+                    material,
+                } => {
+                    let material = Material::from_project(material, make_path)?;
+                    let emissive = material.is_emissive();
+
+                    let shape = Arc::new(Shape::Sphere {
+                        position: position.parse(make_path)?,
+                        radius: radius.parse(make_path)?,
+                        material,
+                    });
+
+                    if emissive {
+                        lights.push(Lamp::Shape(shape.clone()));
+                    }
+                    objects.push(shape);
+                }
+                WorldObject::Plane {
+                    origin,
+                    normal,
+                    binormal,
+                    texture_scale,
+                    material,
+                } => {
+                    let normal = normal.parse(make_path)?;
+                    let tangent = ortho(normal).normalize();
+                    let binormal = normal.cross(tangent).normalize();
+
+                    let material = Material::from_project(material, make_path)?;
+                    let emissive = material.is_emissive();
+
+                    let shape = Arc::new(Shape::Plane {
+                        shape: collision::Plane::from_point_normal(
+                            origin.parse(make_path)?,
+                            normal,
+                        ),
+                        tangent,
+                        binormal,
+                        texture_scale: f32::from_expression_or(texture_scale, make_path, 1.0)?,
+                        material,
+                    });
+
+                    if emissive {
+                        lights.push(Lamp::Shape(shape.clone()));
+                    }
+                    objects.push(shape);
+                }
+                WorldObject::RayMarched {
+                    shape,
+                    bounds,
+                    material,
+                } => {
+                    let material = Material::from_project(material, make_path)?;
+                    let emissive = material.is_emissive();
+
+                    let bounds = match bounds {
+                        crate::project::BoundingVolume::Box { min, max } => {
+                            BoundingVolume::Box(min.parse(make_path)?, max.parse(make_path)?)
+                        }
+                        crate::project::BoundingVolume::Sphere { position, radius } => {
+                            BoundingVolume::Sphere(
+                                position.parse(make_path)?,
+                                radius.parse(make_path)?,
+                            )
+                        }
+                    };
+
+                    let estimator = match shape {
+                        crate::project::Estimator::Mandelbulb {
+                            iterations,
+                            threshold,
+                            power,
+                            constant,
+                        } => Box::new(crate::shapes::distance_estimators::Mandelbulb {
+                            iterations: iterations.parse(make_path)?,
+                            threshold: threshold.parse(make_path)?,
+                            power: power.parse(make_path)?,
+                            constant: constant.map(|e| e.parse(make_path)).transpose()?,
+                        }) as Box<dyn ParametricValue<_, _>>,
+                        crate::project::Estimator::QuaternionJulia {
+                            iterations,
+                            threshold,
+                            constant,
+                            slice_plane,
+                            variant,
+                        } => Box::new(crate::shapes::distance_estimators::QuaternionJulia {
+                            iterations: iterations.parse(make_path)?,
+                            threshold: threshold.parse(make_path)?,
+                            constant: constant.parse(make_path)?,
+                            slice_plane: slice_plane.parse(make_path)?,
+                            ty: match &*variant.name {
+                                "regular" => QuatMul::Regular,
+                                "cubic" => QuatMul::Cubic,
+                                "bicomplex" => QuatMul::Bicomplex,
+                                name => {
+                                    return Err(format!(
+                                        "unexpected Julia fractal variant: {}",
+                                        name
+                                    )
+                                    .into())
+                                }
+                            },
+                        }) as Box<dyn ParametricValue<_, _>>,
+                    };
+
+                    let shape = Arc::new(Shape::RayMarched {
+                        bounds,
+                        estimator,
+                        material,
+                    });
+
+                    if emissive {
+                        lights.push(Lamp::Shape(shape.clone()));
+                    }
+                    objects.push(shape);
+                }
+                WorldObject::Mesh {
+                    file,
+                    mut materials,
+                    scale,
+                    transform,
+                } => {
+                    let path = make_path(&file);
+                    let transform = transform
+                        .map(|t| t.into_matrix(make_path))
+                        .unwrap_or_else(|| Ok(Matrix4::identity()))?;
+                    let scale = f32::from_expression_or(scale, make_path, 1.0)?;
+                    let obj = obj::Obj::load(path.as_ref()).map_err(|error| error.to_string())?;
+                    for object in &obj.objects {
+                        println!("adding object '{}'", object.name);
+
+                        let (object_material, emissive) = match materials.remove(&object.name) {
+                            Some(m) => {
+                                let material = Material::from_project(m, make_path)?;
+                                let emissive = material.is_emissive();
+                                (Arc::new(material), emissive)
+                            }
+                            None => {
+                                return Err(format!(
+                                    "objects[{}]: missing material for '{}'",
+                                    i, object.name
+                                )
+                                .into())
+                            }
+                        };
+
+                        for group in &object.groups {
+                            for shape in &group.polys {
+                                match *shape {
+                                    genmesh::Polygon::PolyTri(genmesh::Triangle { x, y, z }) => {
+                                        let mut triangle =
+                                            make_triangle(&obj, x, y, z, object_material.clone());
+                                        triangle.scale(scale);
+                                        triangle.transform(transform);
+                                        let triangle = Arc::new(triangle);
+                                        if emissive {
+                                            lights.push(Lamp::Shape(triangle.clone()));
+                                        }
+
+                                        objects.push(triangle);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+                WorldObject::DirectionalLight {
+                    direction,
+                    width,
+                    color,
+                } => lights.push(Lamp::Directional {
+                    direction: direction.parse(make_path)?,
+                    width: width.parse(make_path)?,
+                    color: color.parse(make_path)?,
+                }),
+                WorldObject::PointLight { position, color } => lights.push(Lamp::Point(
+                    position.parse(make_path)?,
+                    color.parse(make_path)?,
+                )),
+            }
+        }
+
+        println!("the scene contains {} objects", objects.len());
+        println!("building BKD-Tree... ");
+        let tree = bkd_tree::BkdTree::new(objects, 10); //TODO: make arrity configurable
+        println!("done building BKD-Tree");
+
+        Ok(World {
+            sky,
+            lights,
+            objects: tree,
+        })
+    }
+
     pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)> {
         self.objects.intersect(ray)
     }
@@ -51,20 +245,6 @@ impl World {
             .get(rng.gen_range(0, self.lights.len()))
             .map(|l| (l, 1.0 / self.lights.len() as f32))
     }
-}
-
-pub enum Object {
-    Lamp(Lamp),
-    Shape {
-        shape: Shape,
-        emissive: bool,
-    },
-    Mesh {
-        file: String,
-        materials: HashMap<String, (Material, bool)>,
-        scale: f32,
-        transform: Matrix4<f32>,
-    },
 }
 
 pub trait ObjectContainer {
@@ -123,116 +303,6 @@ impl bkd_tree::Ray for BkdRay {
             (max, min)
         }
     }
-}
-
-pub fn register_types(context: &mut Prelude) {
-    let mut group = context.object("Sky".into());
-    let mut object = group.object("Color".into());
-    object.add_decoder(decode_sky_color);
-    object.arguments(vec!["color".into()]);
-}
-
-fn decode_sky_color(path: &'_ Path, entry: Entry<'_>) -> Result<Sky, String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(path, v), "color"),
-        None => return Err("missing field 'color'".into()),
-    };
-
-    Ok(Sky::Color(color))
-}
-
-pub fn decode_world<F: Fn(String) -> P, P: AsRef<Path>>(
-    entry: Entry<'_>,
-    make_path: F,
-) -> Result<World, String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let sky = match fields.get("sky") {
-        Some(v) => try_for!(v.dynamic_decode(), "sky"),
-        None => return Err("missing field 'sky'".into()),
-    };
-
-    let object_protos = match fields.get("objects") {
-        Some(v) => try_for!(
-            v.as_list().ok_or(String::from("expected a list")),
-            "objects"
-        ),
-        None => return Err("missing field 'objects'".into()),
-    };
-
-    let mut objects: Vec<Arc<Shape>> = Vec::new();
-    let mut lights = Vec::new();
-
-    for (i, object) in object_protos.into_iter().enumerate() {
-        let shape = try_for!(object.dynamic_decode(), format!("objects: [{}]", i));
-        match shape {
-            Object::Shape { shape, emissive } => {
-                let shape = Arc::new(shape);
-                if emissive {
-                    lights.push(Lamp::Shape(shape.clone()));
-                }
-                objects.push(shape);
-            }
-            Object::Mesh {
-                file,
-                mut materials,
-                scale,
-                transform,
-            } => {
-                let path = make_path(file);
-                let obj = obj::Obj::load(path.as_ref()).map_err(|error| error.to_string())?;
-                for object in &obj.objects {
-                    println!("adding object '{}'", object.name);
-
-                    let (object_material, emissive) = match materials.remove(&object.name) {
-                        Some(m) => {
-                            let (material, emissive): (Material, bool) = m;
-                            (Arc::new(material), emissive)
-                        }
-                        None => {
-                            return Err(format!(
-                                "objects: [{}]: missing field '{}'",
-                                i, object.name
-                            ))
-                        }
-                    };
-
-                    for group in &object.groups {
-                        for shape in &group.polys {
-                            match *shape {
-                                genmesh::Polygon::PolyTri(genmesh::Triangle { x, y, z }) => {
-                                    let mut triangle =
-                                        make_triangle(&obj, x, y, z, object_material.clone());
-                                    triangle.scale(scale);
-                                    triangle.transform(transform);
-                                    let triangle = Arc::new(triangle);
-                                    if emissive {
-                                        lights.push(Lamp::Shape(triangle.clone()));
-                                    }
-
-                                    objects.push(triangle);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-            Object::Lamp(light) => lights.push(light),
-        }
-    }
-
-    println!("the scene contains {} objects", objects.len());
-    println!("building BKD-Tree... ");
-    let tree = bkd_tree::BkdTree::new(objects, 10); //TODO: make arrity configurable
-    println!("done building BKD-Tree");
-    Ok(World {
-        sky: sky,
-        lights: lights,
-        objects: Box::new(tree) as Box<dyn ObjectContainer + 'static + Send + Sync>,
-    })
 }
 
 fn make_triangle<M: obj::GenPolygon>(

@@ -3,12 +3,12 @@
 use std::time::Instant;
 
 use image;
-use pyrite_config as config;
 
 use std::io::{stdout, Write};
 use std::{
+    error::Error,
     ops::{Add, AddAssign, Div, Mul},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use cgmath::Vector2;
@@ -18,19 +18,11 @@ use palette::{ComponentWise, LinSrgb, Pixel, Srgb, Xyz};
 use crate::film::{Film, Spectrum};
 use crate::math::utils::Interpolated;
 
-macro_rules! try_for {
-    ($e:expr, $under:expr) => {
-        match $e {
-            Ok(v) => v,
-            Err(e) => return Err(format!("{}: {}", $under, e)),
-        }
-    };
-}
-
 mod cameras;
 mod color;
 mod film;
 mod lamp;
+mod light_source;
 mod materials;
 mod math;
 mod project;
@@ -40,9 +32,7 @@ mod shapes;
 mod spatial;
 mod texture;
 mod tracer;
-mod types3d;
 mod utils;
-mod values;
 mod world;
 mod xyz;
 
@@ -51,40 +41,54 @@ fn main() {
     let name = args.next().unwrap_or("pyrite".into());
 
     if let Some(project_path) = args.next() {
-        match project::from_file(&project_path) {
-            project::ParseResult::Success(p) => render(p, project_path),
-            project::ParseResult::ParseError(e) => {
-                println!("error while parsing project file: {}", e)
+        let project = match project::load_project(&project_path) {
+            Ok(project) => project,
+            Err(error) => {
+                eprintln!("error while loading project file: {}", error);
+                return;
             }
-            project::ParseResult::InterpretError(e) => {
-                println!("error while interpreting project file: {}", e)
-            }
+        };
+
+        let project_dir = Path::new(&project_path)
+            .parent()
+            .expect("could not get the project path parent directory");
+
+        match parse_project(project, |path| project_dir.join(path)) {
+            Ok((image, context)) => render(image, context, project_path),
+            Err(error) => eprintln!("error while parsing project: {}", error),
         }
     } else {
-        println!("usage: {} project_file", name);
+        eprintln!("usage: {} project_file", name);
     }
 }
 
-fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
-    let image_size = Vector2::new(project.image.width, project.image.height);
-
+fn parse_project(
+    project: project::Project,
+    make_path: impl Fn(&str) -> PathBuf,
+) -> Result<(project::Image, RenderContext), Box<dyn Error>> {
     let config = RenderContext {
-        camera: project.camera,
-        world: project.world,
-        renderer: project.renderer,
+        camera: cameras::Camera::from_project(project.camera, &make_path)?,
+        renderer: renderer::Renderer::from_project(project.renderer, &make_path)?,
+        world: world::World::from_project(project.world, &make_path)?,
     };
+
+    Ok((project.image, config))
+}
+
+fn render<P: AsRef<Path>>(image_settings: project::Image, config: RenderContext, project_path: P) {
+    let image_size = Vector2::new(image_settings.width, image_settings.height);
 
     let mut pool = renderer::RayonPool;
 
-    let mut pixels = image::ImageBuffer::new(image_size.x as u32, image_size.y as u32);
+    let mut pixels = image::ImageBuffer::new(image_size.x, image_size.y);
 
-    let rgb_curves = project.image.rgb_curves.map(|(red, green, blue)| {
-        (
-            Interpolated { points: red },
-            Interpolated { points: green },
-            Interpolated { points: blue },
-        )
-    });
+    let rgb_curves = None; /*image_settings.rgb_curves.map(|(red, green, blue)| {
+                               (
+                                   Interpolated { points: red },
+                                   Interpolated { points: green },
+                                   Interpolated { points: blue },
+                               )
+                           });*/
 
     let project_path = project_path.as_ref();
     let render_path = project_path
@@ -97,8 +101,8 @@ fn render<P: AsRef<Path>>(project: project::Project, project_path: P) {
     };*/
 
     let film = Film::new(
-        image_size.x,
-        image_size.y,
+        image_size.x as usize,
+        image_size.y as usize,
         config.renderer.spectrum_bins,
         config.renderer.spectrum_span,
     );

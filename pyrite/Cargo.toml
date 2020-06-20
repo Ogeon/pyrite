@@ -23,9 +23,10 @@ collision = "0.20"
 rand_xorshift = "0.2"
 palette = { version = "0.5", default-features = false, features = ["std"] }
 noisy_float = "0.1"
-
-[dependencies.pyrite-config]
-path = "../config"
+rlua = "0.17"
+rlua_serde = "0.4"
+serde = "^1.0"
+serde-value = "0.6"
 
 [build-dependencies]
 csv = "^1.1"

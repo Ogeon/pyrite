@@ -2,11 +2,7 @@ use std;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use std::{
-    collections::HashMap,
-    f32::{INFINITY, NEG_INFINITY},
-    path::Path,
-};
+use std::f32::{INFINITY, NEG_INFINITY};
 
 use cgmath::{
     ElementWise, EuclideanSpace, InnerSpace, Matrix3, Matrix4, Point2, Point3, SquareMatrix,
@@ -18,20 +14,16 @@ use rand::Rng;
 
 use crate::tracer::ParametricValue;
 
-use crate::config::entry::Entry;
-use crate::config::Prelude;
-
 use crate::materials::Material;
 use crate::math::{self, DIST_EPSILON};
 use crate::spatial::{bkd_tree, Dim3};
 use crate::world;
 
 pub use self::Shape::{Plane, RayMarched, Sphere, Triangle};
-use math::utils::ortho;
 
 const EPSILON: f32 = DIST_EPSILON;
 
-mod distance_estimators;
+pub mod distance_estimators;
 
 type DistanceEstimator = Box<dyn ParametricValue<Point3<f32>, f32>>;
 
@@ -570,193 +562,4 @@ impl BoundingVolume {
             BoundingVolume::Sphere(center, _) => center,
         }
     }
-}
-
-pub fn register_types(context: &mut Prelude) {
-    {
-        let mut group = context.object("Shape".into());
-        group.object("Sphere".into()).add_decoder(decode_sphere);
-        group.object("Plane".into()).add_decoder(decode_plane);
-        group.object("Mesh".into()).add_decoder(decode_mesh);
-        group
-            .object("RayMarched".into())
-            .add_decoder(decode_ray_marched);
-    }
-    {
-        let mut group = context.object("Bounds".into());
-        group.object("Box".into()).add_decoder(decode_bounding_box);
-        group
-            .object("Sphere".into())
-            .add_decoder(decode_bounding_sphere);
-    }
-
-    distance_estimators::register_types(context);
-}
-
-fn decode_sphere(_path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
-    let items = entry.as_object().ok_or("not an object")?;
-
-    let position = match items.get("position") {
-        Some(v) => try_for!(v.dynamic_decode(), "position"),
-        None => return Err("missing field 'position'".into()),
-    };
-
-    let radius = match items.get("radius") {
-        Some(v) => try_for!(v.decode(), "radius"),
-        None => return Err("missing field 'radius'".into()),
-    };
-
-    let (material, emissive): (Material, bool) = match items.get("material") {
-        Some(v) => try_for!(v.dynamic_decode(), "material"),
-        None => return Err("missing field 'material'".into()),
-    };
-
-    Ok(world::Object::Shape {
-        shape: Sphere {
-            position: Point3::from_vec(position),
-            radius: radius,
-            material: material,
-        },
-        emissive: emissive,
-    })
-}
-
-fn decode_plane(_path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
-    let items = entry.as_object().ok_or("not an object")?;
-
-    let origin = match items.get("origin") {
-        Some(v) => try_for!(v.dynamic_decode(), "origin"),
-        None => return Err("missing field 'origin'".into()),
-    };
-
-    let normal = match items.get("normal") {
-        Some(v) => try_for!(v.dynamic_decode(), "normal"),
-        None => return Err("missing field 'normal'".into()),
-    };
-
-    let texture_scale = match items.get("texture_scale") {
-        Some(v) => try_for!(v.decode(), "texture_scale"),
-        None => 1.0,
-    };
-
-    let tangent = ortho(normal).normalize();
-    let binormal = normal.cross(tangent).normalize();
-
-    let (material, emissive): (Material, bool) = match items.get("material") {
-        Some(v) => try_for!(v.dynamic_decode(), "material"),
-        None => return Err("missing field 'material'".into()),
-    };
-
-    Ok(world::Object::Shape {
-        shape: Plane {
-            shape: collision::Plane::from_point_normal(Point3::from_vec(origin), normal),
-            tangent,
-            binormal,
-            texture_scale,
-            material,
-        },
-        emissive,
-    })
-}
-
-fn decode_mesh(_path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
-    let items = entry.as_object().ok_or("not an object")?;
-
-    let file_name: String = match items.get("file") {
-        Some(v) => try_for!(v.decode(), "file"),
-        None => return Err("missing field 'file'".into()),
-    };
-
-    let scale = match items.get("scale") {
-        Some(v) => try_for!(v.decode(), "scale"),
-        None => 1.0,
-    };
-
-    let transform = match items.get("transform") {
-        Some(v) => try_for!(v.dynamic_decode(), "transform"),
-        None => Matrix4::identity(),
-    };
-
-    let materials = match items.get("materials").map(|e| e.as_object()) {
-        Some(Some(fields)) => fields
-            .into_iter()
-            .map(|(k, v)| {
-                let i = v.dynamic_decode()?;
-                Ok((k.into(), i))
-            })
-            .collect::<Result<HashMap<_, _>, String>>()?,
-        Some(None) => {
-            return Err(format!(
-                "materials: expected a structure, but found something else"
-            ))
-        } //TODO: better handling
-        None => return Err("missing field 'materials'".into()),
-    };
-
-    Ok(world::Object::Mesh {
-        file: file_name,
-        materials: materials,
-        scale: scale,
-        transform: transform,
-    })
-}
-
-fn decode_ray_marched(_path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
-    let items = entry.as_object().ok_or("not an object")?;
-
-    let bounds = match items.get("bounds") {
-        Some(v) => try_for!(v.dynamic_decode(), "bounds"),
-        None => return Err("missing field 'bounds'".into()),
-    };
-
-    let estimator = match items.get("shape") {
-        Some(v) => try_for!(v.dynamic_decode(), "shape"),
-        None => return Err("missing field 'shape'".into()),
-    };
-
-    let (material, emissive): (Material, bool) = match items.get("material") {
-        Some(v) => try_for!(v.dynamic_decode(), "material"),
-        None => return Err("missing field 'material'".into()),
-    };
-
-    Ok(world::Object::Shape {
-        shape: RayMarched {
-            bounds: bounds,
-            estimator: estimator,
-            material: material,
-        },
-        emissive: emissive,
-    })
-}
-
-fn decode_bounding_sphere(_path: &'_ Path, entry: Entry<'_>) -> Result<BoundingVolume, String> {
-    let items = entry.as_object().ok_or("not an object")?;
-
-    let position = match items.get("position") {
-        Some(v) => try_for!(v.dynamic_decode(), "position"),
-        None => return Err("missing field 'position'".into()),
-    };
-
-    let radius = match items.get("radius") {
-        Some(v) => try_for!(v.decode(), "radius"),
-        None => return Err("missing field 'radius'".into()),
-    };
-
-    Ok(BoundingVolume::Sphere(position, radius))
-}
-
-fn decode_bounding_box(_path: &'_ Path, entry: Entry<'_>) -> Result<BoundingVolume, String> {
-    let items = entry.as_object().ok_or("not an object")?;
-
-    let min = match items.get("min") {
-        Some(v) => try_for!(v.dynamic_decode(), "min"),
-        None => return Err("missing field 'min'".into()),
-    };
-
-    let max = match items.get("max") {
-        Some(v) => try_for!(v.dynamic_decode(), "max"),
-        None => return Err("missing field 'max'".into()),
-    };
-
-    Ok(BoundingVolume::Box(min, max))
 }

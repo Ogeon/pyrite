@@ -1,19 +1,12 @@
-use std::path::Path;
-
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Quaternion, Vector3};
-
-use crate::config::entry::Entry;
-use crate::config::Prelude;
 
 use crate::tracer::ParametricValue;
 
-use crate::shapes::DistanceEstimator;
-
-struct Mandelbulb {
-    iterations: u16,
-    threshold: f32,
-    power: f32,
-    constant: Option<Vector3<f32>>,
+pub struct Mandelbulb {
+    pub iterations: u16,
+    pub threshold: f32,
+    pub power: f32,
+    pub constant: Option<Vector3<f32>>,
 }
 
 impl ParametricValue<Point3<f32>, f32> for Mandelbulb {
@@ -48,12 +41,12 @@ impl ParametricValue<Point3<f32>, f32> for Mandelbulb {
     }
 }
 
-struct QuaternionJulia {
-    iterations: u16,
-    threshold: f32,
-    constant: Quaternion<f32>,
-    slice_plane: f32,
-    ty: QuatMul,
+pub struct QuaternionJulia {
+    pub iterations: u16,
+    pub threshold: f32,
+    pub constant: Quaternion<f32>,
+    pub slice_plane: f32,
+    pub ty: QuatMul,
 }
 
 impl ParametricValue<Point3<f32>, f32> for QuaternionJulia {
@@ -76,7 +69,7 @@ impl ParametricValue<Point3<f32>, f32> for QuaternionJulia {
     }
 }
 
-enum QuatMul {
+pub enum QuatMul {
     Regular,
     Cubic,
     Bicomplex,
@@ -111,109 +104,4 @@ fn bicomplex_mul(a: &Quaternion<f32>, b: &Quaternion<f32>) -> Quaternion<f32> {
     let z = x1 * z2 - y1 * w2 + z1 * x2 - w1 * y2;
     let w = x1 * w2 + y1 * z2 + z1 * y2 + w1 * x2;
     Quaternion::new(x, y, z, w)
-}
-
-pub fn register_types(context: &mut Prelude) {
-    {
-        let mut group = context.object("RayMarched".into());
-        group
-            .object("Mandelbulb".into())
-            .add_decoder(decode_mandelbulb);
-        group
-            .object("QuaternionJulia".into())
-            .add_decoder(decode_quaternion_julia);
-    }
-
-    {
-        let mut group = context.object("QuaternionJulia".into());
-        group
-            .object("Regular".into())
-            .add_decoder(decode_quat_mul_regular);
-        group
-            .object("Cubic".into())
-            .add_decoder(decode_quat_mul_cubic);
-        group
-            .object("Bicomplex".into())
-            .add_decoder(decode_quat_mul_bicomplex);
-    }
-}
-
-fn decode_mandelbulb(_path: &'_ Path, entry: Entry<'_>) -> Result<DistanceEstimator, String> {
-    let items = entry.as_object().ok_or("not an object")?;
-
-    let iterations = match items.get("iterations") {
-        Some(v) => try_for!(v.decode(), "iterations"),
-        None => return Err("missing field 'iterations'".into()),
-    };
-
-    let threshold = match items.get("threshold") {
-        Some(v) => try_for!(v.decode(), "threshold"),
-        None => return Err("missing field 'threshold'".into()),
-    };
-
-    let power = match items.get("power") {
-        Some(v) => try_for!(v.decode(), "power"),
-        None => return Err("missing field 'power'".into()),
-    };
-
-    let constant = match items.get("constant") {
-        Some(v) => Some(try_for!(v.dynamic_decode(), "constant")),
-        None => None,
-    };
-
-    Ok(Box::new(Mandelbulb {
-        iterations: iterations,
-        threshold: threshold,
-        power: power,
-        constant: constant,
-    }))
-}
-
-fn decode_quaternion_julia(_path: &'_ Path, entry: Entry<'_>) -> Result<DistanceEstimator, String> {
-    let items = entry.as_object().ok_or("not an object")?;
-
-    let iterations = match items.get("iterations") {
-        Some(v) => try_for!(v.decode(), "iterations"),
-        None => return Err("missing field 'iterations'".into()),
-    };
-
-    let threshold = match items.get("threshold") {
-        Some(v) => try_for!(v.decode(), "threshold"),
-        None => return Err("missing field 'threshold'".into()),
-    };
-
-    let constant = match items.get("constant") {
-        Some(v) => try_for!(v.dynamic_decode(), "constant"),
-        None => return Err("missing field 'constant'".into()),
-    };
-
-    let slice_plane = match items.get("slice_plane") {
-        Some(v) => try_for!(v.decode(), "slice_plane"),
-        None => return Err("missing field 'slice_plane'".into()),
-    };
-
-    let ty = match items.get("type") {
-        Some(v) => try_for!(v.dynamic_decode(), "type"),
-        None => QuatMul::Regular,
-    };
-
-    Ok(Box::new(QuaternionJulia {
-        iterations: iterations,
-        threshold: threshold,
-        constant: constant,
-        slice_plane: slice_plane,
-        ty: ty,
-    }))
-}
-
-fn decode_quat_mul_regular(_path: &'_ Path, _entry: Entry<'_>) -> Result<QuatMul, String> {
-    Ok(QuatMul::Regular)
-}
-
-fn decode_quat_mul_cubic(_path: &'_ Path, _entry: Entry<'_>) -> Result<QuatMul, String> {
-    Ok(QuatMul::Cubic)
-}
-
-fn decode_quat_mul_bicomplex(_path: &'_ Path, _entry: Entry<'_>) -> Result<QuatMul, String> {
-    Ok(QuatMul::Bicomplex)
 }

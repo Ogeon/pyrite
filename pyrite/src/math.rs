@@ -1,14 +1,13 @@
-use std::path::Path;
+use std::{convert::TryFrom, error::Error, path::PathBuf};
 
 use crate::tracer;
 
-use crate::config::entry::Entry;
-use crate::config::{Decode, Prelude, Value};
+use crate::project::{ComplexExpression, Expression, FromComplexExpression, FromExpression};
 
 pub const DIST_EPSILON: f32 = 0.0001;
 
 macro_rules! make_operators {
-    ($($fn_name:ident : $struct_name:ident { $($arg:ident),+ } => $operation:expr),*) => (
+    ($($struct_name:ident { $($arg:ident),+ } => $operation:expr),*) => (
         pub enum Operator<T> {
             $(
                 $struct_name($struct_name<T>),
@@ -25,19 +24,7 @@ macro_rules! make_operators {
             }
         }
 
-        fn insert_operators<T: Decode + From<f32> + 'static>(context: &mut Prelude) {
-            let mut group = context.object("Math".into());
-            $(
-                {
-                    let mut object = group.object(stringify!($struct_name).into());
-                    object.add_decoder($fn_name::<T, NoOp>);
-                    object.add_decoder($fn_name::<T, Fresnel<T>>);
-                    object.arguments(vec![$(stringify!($arg).into()),+]);
-                }
-            )*
-        }
         $(
-
             pub struct $struct_name<T> {
                 $(
                     $arg: Box<T>
@@ -52,26 +39,6 @@ macro_rules! make_operators {
                     $operation
                 }
             }
-
-            fn $fn_name<T: Decode + From<f32> + 'static, E: Decode + 'static>(path: &'_ Path, entry: Entry<'_>) -> Result<Math<T, E>, String> {
-                let fields = entry.as_object().ok_or("not an object")?;
-
-                $(
-                    let $arg = match fields.get(stringify!($arg)) {
-                        Some(v) => try_for!(decode_value(path, v), stringify!($arg)),
-                        None => return Err(format!("missing field '{}'", stringify!($arg)))
-                    };
-                )+
-
-                Ok(
-                    Math::Operator(Operator::$struct_name($struct_name {
-                        $(
-                            $arg: Box::new($arg)
-                        ),+
-                    }))
-                )
-            }
-
         )*
     )
 }
@@ -378,30 +345,50 @@ pub mod utils {
     }
 }
 
-pub fn register_types<T: Decode + From<f32> + 'static>(context: &mut Prelude) {
-    insert_operators::<T>(context);
-    let mut object = context.object("Math".into());
-    let mut object = object.object("Curve".into());
-    object.add_decoder(decode_curve::<T, NoOp>);
-    object.add_decoder(decode_curve::<T, Fresnel<T>>);
-}
-
-pub fn register_specific_types<T: Decode + From<f32> + 'static>(context: &mut Prelude) {
-    let mut group = context.object("Math".into());
-    let mut object = group.object("Fresnel".into());
-    object.add_decoder(decode_fresnel::<T>);
-    object.arguments(vec!["ior".into(), "env_ior".into()]);
-}
-
 make_operators! {
-    decode_add: Add { a, b }         => a + b,
-    decode_sub: Sub { a, b }         => a - b,
-    decode_mul: Mul { a, b }         => a * b,
-    decode_div: Div { a, b }         => a / b,
-    decode_abs: Abs { a }            => a.abs(),
-    decode_min: Min { a, b }         => a.min(b),
-    decode_max: Max { a, b }         => a.max(b),
-    decode_mix: Mix { a, b, factor } => { let f = factor.min(1.0).max(0.0); a * (1.0 - f) + b * f }
+    Add { a, b }         => a + b,
+    Sub { a, b }         => a - b,
+    Mul { a, b }         => a * b,
+    Div { a, b }         => a / b,
+    // Abs { a }            => a.abs(),
+    // Min { a, b }         => a.min(b),
+    // Max { a, b }         => a.max(b),
+    Mix { a, b, factor } => { let f = factor.min(1.0).max(0.0); a * (1.0 - f) + b * f }
+}
+
+enum BinaryOperator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl<T: FromExpression> Operator<T> {
+    fn from_binary(
+        operator: BinaryOperator,
+        a: Expression,
+        b: Expression,
+        make_path: &impl Fn(&str) -> PathBuf,
+    ) -> Result<Self, Box<dyn Error>> {
+        Ok(match operator {
+            BinaryOperator::Add => Operator::Add(Add {
+                a: Box::new(a.parse(make_path)?),
+                b: Box::new(b.parse(make_path)?),
+            }),
+            BinaryOperator::Sub => Operator::Sub(Sub {
+                a: Box::new(a.parse(make_path)?),
+                b: Box::new(b.parse(make_path)?),
+            }),
+            BinaryOperator::Mul => Operator::Mul(Mul {
+                a: Box::new(a.parse(make_path)?),
+                b: Box::new(b.parse(make_path)?),
+            }),
+            BinaryOperator::Div => Operator::Div(Div {
+                a: Box::new(a.parse(make_path)?),
+                b: Box::new(b.parse(make_path)?),
+            }),
+        })
+    }
 }
 
 pub enum Math<T, E = NoOp> {
@@ -430,9 +417,69 @@ impl<T: From<f32>, E> From<f32> for Math<T, E> {
     }
 }
 
+impl<T, E> FromExpression for Math<T, E>
+where
+    T: From<f32> + FromComplexExpression,
+    E: FromComplexExpression,
+{
+    fn from_expression(
+        expression: Expression,
+        make_path: &impl Fn(&str) -> PathBuf,
+    ) -> Result<Self, Box<dyn Error>> {
+        match expression {
+            Expression::Number(number) => Ok(Self::from(number as f32)),
+            Expression::Complex(ComplexExpression::Add { a, b }) => Ok(Math::Operator(
+                Operator::from_binary(BinaryOperator::Add, *a, *b, make_path)?,
+            )),
+            Expression::Complex(ComplexExpression::Sub { a, b }) => Ok(Math::Operator(
+                Operator::from_binary(BinaryOperator::Sub, *a, *b, make_path)?,
+            )),
+            Expression::Complex(ComplexExpression::Mul { a, b }) => Ok(Math::Operator(
+                Operator::from_binary(BinaryOperator::Mul, *a, *b, make_path)?,
+            )),
+            Expression::Complex(ComplexExpression::Div { a, b }) => Ok(Math::Operator(
+                Operator::from_binary(BinaryOperator::Div, *a, *b, make_path)?,
+            )),
+            Expression::Complex(ComplexExpression::Mix { a, b, factor }) => {
+                Ok(Math::Operator(Operator::Mix(Mix {
+                    a: Box::new(a.parse(make_path)?),
+                    b: Box::new(b.parse(make_path)?),
+                    factor: Box::new(factor.parse(make_path)?),
+                })))
+            }
+            Expression::Complex(complex) => E::from_complex_expression(complex.clone(), make_path)
+                .map(Math::Extra)
+                .or_else(|_| T::from_complex_expression(complex, make_path).map(Math::Value)),
+            Expression::Boolean(_) => Err("Boolean values cannot be used in this context".into()),
+        }
+    }
+}
+
 pub type RenderMath<T> = Math<T, Fresnel<T>>;
 
 pub struct NoOp;
+
+impl TryFrom<ComplexExpression> for NoOp {
+    type Error = Box<dyn Error>;
+
+    fn try_from(value: ComplexExpression) -> Result<Self, Self::Error> {
+        Err(match value {
+            ComplexExpression::Vector { .. } => "vectors cannot be used in this context".into(),
+            ComplexExpression::Fresnel { .. } => "Fresnel cannot be used in this context".into(),
+            ComplexExpression::LightSource { .. } => {
+                "light sources cannot be used in this context".into()
+            }
+            ComplexExpression::Spectrum { .. } => "spectra cannot be used in this context".into(),
+            ComplexExpression::Rgb { .. } => "RGB cannot be used in this context".into(),
+            ComplexExpression::Texture { .. } => "textures cannot be used in this context".into(),
+            ComplexExpression::Add { .. } => "addition cannot be used in this context".into(),
+            ComplexExpression::Sub { .. } => "subtraction cannot be used in this context".into(),
+            ComplexExpression::Mul { .. } => "multiplication cannot be used in this context".into(),
+            ComplexExpression::Div { .. } => "division cannot be used in this context".into(),
+            ComplexExpression::Mix { .. } => "mix cannot be used in this context".into(),
+        })
+    }
+}
 
 impl<From> tracer::ParametricValue<From, f32> for NoOp {
     fn get(&self, _: &From) -> f32 {
@@ -449,29 +496,6 @@ impl<T: tracer::ParametricValue<From, f32>, From> tracer::ParametricValue<From, 
     fn get(&self, i: &From) -> f32 {
         self.points.get(self.input.get(i))
     }
-}
-
-fn decode_curve<T: Decode + From<f32> + 'static, E: Decode + 'static>(
-    path: &'_ Path,
-    entry: Entry<'_>,
-) -> Result<Math<T, E>, String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let input = match fields.get("input") {
-        Some(v) => try_for!(decode_value(path, v), "input"),
-        None => return Err("missing field 'input'".into()),
-    };
-
-    let points = match fields.get("points") {
-        Some(v) => try_for!(v.decode(), "points"),
-        None => return Err("missing field 'points'".into()),
-    };
-
-    Ok(Math::Curve(Curve {
-        input: Box::new(input),
-        points: utils::Interpolated { points },
-    })
-    .into())
 }
 
 pub struct Fresnel<T> {
@@ -496,35 +520,24 @@ impl<T: tracer::ParametricValue<tracer::RenderContext, f32>>
     }
 }
 
-fn decode_fresnel<T: Decode + From<f32> + 'static>(
-    path: &'_ Path,
-    entry: Entry<'_>,
-) -> Result<RenderMath<T>, String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let ior = match fields.get("ior") {
-        Some(v) => try_for!(decode_value(path, v), "ior"),
-        None => return Err("missing field 'ior'".into()),
-    };
-
-    let env_ior = match fields.get("env_ior") {
-        Some(v) => try_for!(decode_value(path, v), "env_ior"),
-        None => RenderMath::<T>::Value(1.0f32.into()),
-    };
-
-    Ok(RenderMath::Extra(Fresnel {
-        ior: Box::new(ior),
-        env_ior: Box::new(env_ior),
-    }))
-}
-
-fn decode_value<T: Decode + From<f32> + 'static>(
-    _path: &'_ Path,
-    entry: Entry<'_>,
-) -> Result<T, String> {
-    if let Some(&Value::Number(num)) = entry.as_value() {
-        Ok(num.as_float().into())
-    } else {
-        entry.dynamic_decode()
+impl<T> FromComplexExpression for Fresnel<T>
+where
+    T: From<f32> + FromComplexExpression,
+{
+    fn from_complex_expression(
+        value: ComplexExpression,
+        make_path: &impl Fn(&str) -> PathBuf,
+    ) -> Result<Self, Box<dyn Error>> {
+        match value {
+            ComplexExpression::Fresnel { ior, env_ior } => Ok(Fresnel {
+                ior: Box::new(ior.parse(make_path)?),
+                env_ior: Box::new(RenderMath::from_expression_or_else(
+                    env_ior.map(|e| *e),
+                    make_path,
+                    || 1.0f32.into(),
+                )?),
+            }),
+            _ => Err("expected a Fresnel expression".into()),
+        }
     }
 }

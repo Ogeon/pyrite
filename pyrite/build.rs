@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     read_rgb_response(&Path::new(&out_dir))?;
     read_xyz_response(&Path::new(&out_dir))?;
+    read_light_sources(&Path::new(&out_dir))?;
 
     println!("cargo:rerun-if-changed=build.rs");
     Ok(())
@@ -59,8 +60,8 @@ fn read_xyz_response(out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mut y_response = vec![];
     let mut z_response = vec![];
 
-    println!("cargo:rerun-if-changed=data/ciexyz64_1.csv");
-    for record_result in csv::Reader::from_path("data/ciexyz64_1.csv")?.deserialize() {
+    println!("cargo:rerun-if-changed=data/ciexyz65_1.csv");
+    for record_result in csv::Reader::from_path("data/ciexyz65_1.csv")?.deserialize() {
         let XyzResponse {
             wavelength,
             x,
@@ -93,4 +94,33 @@ struct XyzResponse {
     x: f32,
     y: f32,
     z: f32,
+}
+
+fn read_light_sources(out_dir: &Path) -> Result<(), Box<dyn Error>> {
+    let mut d65_spectrum = vec![];
+
+    println!("cargo:rerun-if-changed=data/d65.csv");
+    for record_result in csv::Reader::from_path("data/d65.csv")?.deserialize() {
+        let LightIntensity {
+            wavelength,
+            intensity,
+        } = record_result?;
+        d65_spectrum.push(quote!((#wavelength, #intensity)));
+    }
+
+    fs::write(
+        out_dir.join("light_source.rs"),
+        quote! {
+                pub const D65: &[(f32, f32)] = &[#(#d65_spectrum),*];
+        }
+        .to_string(),
+    )?;
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct LightIntensity {
+    wavelength: f32,
+    intensity: f32,
 }

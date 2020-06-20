@@ -1,0 +1,67 @@
+local ball = shape.sphere {radius = 1, position = vector(0, 0, 0)}
+
+local light_ball = ball:with{
+    material = material.emission {color = light_source.d65 * 3},
+    position = ball.position:with{y = 3, z = 1},
+}
+
+local color_ball = ball:with{material = material.diffuse {color = rgb(1, 0, 0)}}
+
+return {
+    image = {width = 1024, height = 256},
+
+    renderer = renderer.simple {
+        pixel_samples = 500,
+        spectrum_samples = 5,
+        spectrum_bins = 50,
+        tile_size = 32,
+        light_samples = 5,
+    },
+    camera = camera.perspective {
+        fov = 53,
+        transform = transform.look_at {
+            from = vector(0, 0, 15),
+            to = vector(0, 0, 0),
+        },
+    },
+
+    world = {
+        objects = {
+            shape.plane {
+                origin = vector {z = 1},
+                normal = vector {z = 1},
+                material = material.diffuse {color = 0.8},
+            },
+            light_ball:with{position = light_ball.position:with{x = -6.25}},
+            color_ball:with{
+                material = color_ball.material:with{color = rgb(1, 0, 0)},
+                position = color_ball.position:with{x = -6.25},
+            },
+            light_ball:with{position = light_ball.position:with{x = -3.75}},
+            color_ball:with{
+                material = color_ball.material:with{color = rgb(1, 1, 0)},
+                position = color_ball.position:with{x = -3.75},
+            },
+            light_ball:with{position = light_ball.position:with{x = -1.25}},
+            color_ball:with{
+                material = color_ball.material:with{color = rgb(0, 1, 0)},
+                position = color_ball.position:with{x = -1.25},
+            },
+            light_ball:with{position = light_ball.position:with{x = 1.25}},
+            color_ball:with{
+                material = color_ball.material:with{color = rgb(0, 1, 1)},
+                position = color_ball.position:with{x = 1.25},
+            },
+            light_ball:with{position = light_ball.position:with{x = 3.75}},
+            color_ball:with{
+                material = color_ball.material:with{color = rgb(0, 0, 1)},
+                position = color_ball.position:with{x = 3.75},
+            },
+            light_ball:with{position = light_ball.position:with{x = 6.25}},
+            color_ball:with{
+                material = color_ball.material:with{color = rgb(1, 0, 1)},
+                position = color_ball.position:with{x = 6.25},
+            },
+        },
+    },
+}

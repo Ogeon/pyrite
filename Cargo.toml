@@ -1,7 +1,6 @@
 [workspace]
 members = [
-    "pyrite",
-    "config"
+    "pyrite"
 ]
 
 [profile.release]

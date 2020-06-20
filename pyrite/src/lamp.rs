@@ -1,24 +1,17 @@
 use std;
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use cgmath::{InnerSpace, Point2, Point3, Vector3};
 use collision::Ray3;
 
 use rand::Rng;
 
-use crate::config::entry::Entry;
-use crate::config::Prelude;
-
 use crate::math::{
     utils::{sample_cone, sample_hemisphere, sample_sphere},
     RenderMath,
 };
 use crate::shapes::Shape;
-use crate::{
-    color::{decode_color, Color},
-    materials::Material,
-    world,
-};
+use crate::{color::Color, materials::Material};
 
 pub enum Lamp {
     Directional {
@@ -136,53 +129,4 @@ pub struct RaySample<'a> {
     pub ray: Ray3<f32>,
     pub surface: Surface<'a>,
     pub weight: f32,
-}
-
-pub fn register_types(context: &mut Prelude) {
-    let mut group = context.object("Light".into());
-    group
-        .object("Directional".into())
-        .add_decoder(decode_directional);
-    group.object("Point".into()).add_decoder(decode_point);
-}
-
-fn decode_directional(path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let direction: Vector3<_> = match fields.get("direction") {
-        Some(v) => try_for!(v.dynamic_decode(), "direction"),
-        None => return Err("missing field 'direction'".into()),
-    };
-
-    let width: f32 = match fields.get("width") {
-        Some(v) => try_for!(v.decode(), "width"),
-        None => 0.0,
-    };
-
-    let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(path, v), "color"),
-        None => return Err("missing field 'color'".into()),
-    };
-
-    Ok(world::Object::Lamp(Lamp::Directional {
-        direction: direction.normalize(),
-        width: (width.to_radians() / 2.0).cos(),
-        color,
-    }))
-}
-
-fn decode_point(path: &'_ Path, entry: Entry<'_>) -> Result<world::Object, String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let position = match fields.get("position") {
-        Some(v) => try_for!(v.dynamic_decode(), "position"),
-        None => return Err("missing field 'position'".into()),
-    };
-
-    let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(path, v), "color"),
-        None => return Err("missing field 'color'".into()),
-    };
-
-    Ok(world::Object::Lamp(Lamp::Point(position, color)))
 }

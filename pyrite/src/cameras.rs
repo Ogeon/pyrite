@@ -1,4 +1,4 @@
-use std::{f32::consts, path::Path};
+use std::{error::Error, f32::consts, path::PathBuf};
 
 use rand::Rng;
 
@@ -10,17 +10,7 @@ use collision::{Ray, Ray3};
 
 use crate::film::Area;
 
-use crate::config::entry::Entry;
-use crate::config::Prelude;
-
-use crate::{math::DIST_EPSILON, world::World};
-
-pub fn register_types(context: &mut Prelude) {
-    context
-        .object("Camera".into())
-        .object("Perspective".into())
-        .add_decoder(decode_perspective);
-}
+use crate::{math::DIST_EPSILON, project::FromExpression, world::World};
 
 pub enum Camera {
     Perspective {
@@ -32,6 +22,31 @@ pub enum Camera {
 }
 
 impl Camera {
+    pub fn from_project(
+        project_camera: crate::project::Camera,
+        make_path: &impl Fn(&str) -> PathBuf,
+    ) -> Result<Self, Box<dyn Error>> {
+        match project_camera {
+            crate::project::Camera::Perspective {
+                transform,
+                fov,
+                focus_distance,
+                aperture,
+            } => {
+                let fov: f32 = fov.parse(make_path)?;
+                let fov_radians: Rad<_> = cgmath::Deg(fov * 0.5f32).into();
+                let view_plane = fov_radians.cos() / fov_radians.sin();
+
+                Ok(Camera::Perspective {
+                    transform: transform.into_matrix(make_path)?,
+                    view_plane,
+                    focus_distance: f32::from_expression_or(focus_distance, make_path, 1.0)?,
+                    aperture: f32::from_expression_or(aperture, make_path, 0.0)?,
+                })
+            }
+        }
+    }
+
     pub fn to_view_area(&self, area: &Area<usize>, width: usize, height: usize) -> Area<f32> {
         let float_image_size = Vector2::new(width as f32, height as f32);
         let float_coord = Point2::new(area.from.x as f32, area.from.y as f32);
@@ -134,38 +149,4 @@ impl Camera {
             }
         }
     }
-}
-
-fn decode_perspective(_path: &'_ Path, entry: Entry<'_>) -> Result<Camera, String> {
-    let items = entry.as_object().ok_or("not an object")?;
-
-    let transform = match items.get("transform") {
-        Some(v) => try_for!(v.dynamic_decode(), "transform"),
-        None => Matrix4::identity(),
-    };
-
-    let fov: f32 = match items.get("fov") {
-        Some(v) => try_for!(v.decode(), "fov"),
-        None => return Err("missing field of view ('fov')".into()),
-    };
-
-    let focus_distance: f32 = match items.get("focus_distance") {
-        Some(v) => try_for!(v.decode(), "focus_distance"),
-        None => 1.0,
-    };
-
-    let aperture: f32 = match items.get("aperture") {
-        Some(v) => try_for!(v.decode(), "aperture"),
-        None => 0.0,
-    };
-
-    let a: Rad<_> = cgmath::Deg(fov / 2.0).into();
-    let dist = a.cos() / a.sin();
-
-    Ok(Camera::Perspective {
-        transform: transform,
-        view_plane: dist,
-        focus_distance: focus_distance,
-        aperture: aperture,
-    })
 }

@@ -1,20 +1,16 @@
-use std::path::Path;
+use std::{error::Error, path::PathBuf};
 
 use rand::Rng;
 
 use cgmath::{InnerSpace, Vector3};
 use collision::Ray3;
 
-use crate::tracer::{Emit, Light, Reflect, Reflection};
-
-use crate::config::entry::Entry;
-use crate::config::Prelude;
-
 use crate::{
-    color::{decode_color, Color},
-    math,
+    color::Color,
+    math::{self, RenderMath},
+    project::{FromExpression, Material as ProjectMaterial},
+    tracer::{Emit, Light, Reflect, Reflection},
 };
-use math::RenderMath;
 
 pub enum Material {
     Diffuse(Diffuse),
@@ -26,6 +22,56 @@ pub enum Material {
 }
 
 impl Material {
+    pub fn from_project(
+        project: ProjectMaterial,
+        make_path: &impl Fn(&str) -> PathBuf,
+    ) -> Result<Self, Box<dyn Error>> {
+        Ok(match project {
+            ProjectMaterial::Diffuse { color } => Material::Diffuse(Diffuse {
+                color: color.parse(make_path)?,
+            }),
+            ProjectMaterial::Emission { color } => Material::Emission(Emission {
+                color: color.parse(make_path)?,
+            }),
+            ProjectMaterial::Mirror { color } => Material::Mirror(Mirror {
+                color: color.parse(make_path)?,
+            }),
+            ProjectMaterial::Refractive {
+                color,
+                ior,
+                env_ior,
+                dispersion,
+                env_dispersion,
+            } => Material::Refractive(Refractive {
+                color: color.parse(make_path)?,
+                ior: ior.parse(make_path)?,
+                env_ior: f32::from_expression_or(env_ior, make_path, 1.0)?,
+                dispersion: f32::from_expression_or(dispersion, make_path, 0.0)?,
+                env_dispersion: f32::from_expression_or(env_dispersion, make_path, 0.0)?,
+            }),
+            ProjectMaterial::Mix { factor, a, b } => Material::Mix(Mix {
+                factor: factor.parse(make_path)?,
+                a: Box::new(Material::from_project(*a, make_path)?),
+                b: Box::new(Material::from_project(*b, make_path)?),
+            }),
+            ProjectMaterial::FresnelMix {
+                ior,
+                dispersion,
+                env_ior,
+                env_dispersion,
+                reflect,
+                refract,
+            } => Material::FresnelMix(FresnelMix {
+                ior: ior.parse(make_path)?,
+                env_ior: f32::from_expression_or(env_ior, make_path, 1.0)?,
+                dispersion: f32::from_expression_or(dispersion, make_path, 0.0)?,
+                env_dispersion: f32::from_expression_or(env_dispersion, make_path, 0.0)?,
+                reflect: Box::new(Material::from_project(*reflect, make_path)?),
+                refract: Box::new(Material::from_project(*refract, make_path)?),
+            }),
+        })
+    }
+
     pub fn reflect(
         &self,
         light: &mut Light,
@@ -55,6 +101,17 @@ impl Material {
             Material::Mix(material) => material.get_emission(light, ray_in, normal, rng),
             Material::FresnelMix(material) => material.get_emission(light, ray_in, normal, rng),
             Material::Diffuse(_) | Material::Mirror(_) | Material::Refractive(_) => None,
+        }
+    }
+
+    pub fn is_emissive(&self) -> bool {
+        match self {
+            Material::Emission(_) => true,
+            Material::Mix(material) => material.a.is_emissive() || material.b.is_emissive(),
+            Material::FresnelMix(material) => {
+                material.reflect.is_emissive() || material.refract.is_emissive()
+            }
+            Material::Diffuse(_) | Material::Mirror(_) | Material::Refractive(_) => false,
         }
     }
 }
@@ -340,181 +397,4 @@ fn refract<'a, R: Rng>(
     } else {
         return Reflect(Ray3::new(normal.origin, tdir), &color, tp, None);
     }
-}
-
-pub fn register_types(context: &mut Prelude) {
-    let mut group = context.object("Material".into());
-    {
-        let mut object = group.object("Diffuse".into());
-        object.add_decoder(decode_diffuse);
-        object.arguments(vec!["color".into()]);
-    }
-    {
-        let mut object = group.object("Emission".into());
-        object.add_decoder(decode_emission);
-        object.arguments(vec!["color".into()]);
-    }
-    {
-        let mut object = group.object("Mirror".into());
-        object.add_decoder(decode_mirror);
-        object.arguments(vec!["color".into()]);
-    }
-    {
-        let mut object = group.object("Mix".into());
-        object.add_decoder(decode_mix);
-        object.arguments(vec!["a".into(), "b".into(), "factor".into()]);
-    }
-    group
-        .object("FresnelMix".into())
-        .add_decoder(decode_fresnel_mix);
-    group
-        .object("Refractive".into())
-        .add_decoder(decode_refractive);
-}
-
-pub fn decode_diffuse(path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(path, v), "color"),
-        None => return Err("missing field 'color'".into()),
-    };
-
-    Ok((Material::Diffuse(Diffuse { color }), false))
-}
-
-pub fn decode_emission(path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(path, v), "color"),
-        None => return Err("missing field 'color'".into()),
-    };
-
-    Ok((Material::Emission(Emission { color }), true))
-}
-
-pub fn decode_mirror(path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(path, v), "color"),
-        None => return Err("missing field 'color'".into()),
-    };
-
-    Ok((Material::Mirror(Mirror { color }), false))
-}
-
-pub fn decode_mix(_path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let factor = match fields.get("factor") {
-        Some(v) => try_for!(v.decode(), "factor"),
-        None => return Err("missing field 'factor'".into()),
-    };
-
-    let (a, a_emissive): (Material, bool) = match fields.get("a") {
-        Some(v) => try_for!(v.dynamic_decode(), "a"),
-        None => return Err("missing field 'a'".into()),
-    };
-
-    let (b, b_emissive): (Material, bool) = match fields.get("b") {
-        Some(v) => try_for!(v.dynamic_decode(), "b"),
-        None => return Err("missing field 'b'".into()),
-    };
-
-    Ok((
-        Material::Mix(Mix {
-            factor,
-            a: Box::new(a),
-            b: Box::new(b),
-        }),
-        a_emissive || b_emissive,
-    ))
-}
-
-pub fn decode_fresnel_mix(_path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let ior = match fields.get("ior") {
-        Some(v) => try_for!(v.decode(), "ior"),
-        None => return Err("missing field 'ior'".into()),
-    };
-
-    let env_ior = match fields.get("env_ior") {
-        Some(v) => try_for!(v.decode(), "env_ior"),
-        None => 1.0,
-    };
-
-    let dispersion = match fields.get("dispersion") {
-        Some(v) => try_for!(v.decode(), "dispersion"),
-        None => 0.0,
-    };
-
-    let env_dispersion = match fields.get("env_dispersion") {
-        Some(v) => try_for!(v.decode(), "env_dispersion"),
-        None => 0.0,
-    };
-
-    let (reflect, reflect_emissive): (Material, bool) = match fields.get("reflect") {
-        Some(v) => try_for!(v.dynamic_decode(), "reflect"),
-        None => return Err("missing field 'reflect'".into()),
-    };
-
-    let (refract, refract_emissive): (Material, bool) = match fields.get("refract") {
-        Some(v) => try_for!(v.dynamic_decode(), "refract"),
-        None => return Err("missing field 'refract'".into()),
-    };
-
-    Ok((
-        Material::FresnelMix(FresnelMix {
-            ior,
-            dispersion,
-            env_ior,
-            env_dispersion,
-            reflect: Box::new(reflect),
-            refract: Box::new(refract),
-        }),
-        refract_emissive || reflect_emissive,
-    ))
-}
-
-pub fn decode_refractive(path: &'_ Path, entry: Entry<'_>) -> Result<(Material, bool), String> {
-    let fields = entry.as_object().ok_or("not an object")?;
-
-    let ior = match fields.get("ior") {
-        Some(v) => try_for!(v.decode(), "ior"),
-        None => return Err("missing field 'ior'".into()),
-    };
-
-    let env_ior = match fields.get("env_ior") {
-        Some(v) => try_for!(v.decode(), "env_ior"),
-        None => 1.0,
-    };
-
-    let dispersion = match fields.get("dispersion") {
-        Some(v) => try_for!(v.decode(), "dispersion"),
-        None => 0.0,
-    };
-
-    let env_dispersion = match fields.get("env_dispersion") {
-        Some(v) => try_for!(v.decode(), "env_dispersion"),
-        None => 0.0,
-    };
-
-    let color = match fields.get("color") {
-        Some(v) => try_for!(decode_color(path, v), "color"),
-        None => return Err("missing field 'color'".into()),
-    };
-
-    Ok((
-        Material::Refractive(Refractive {
-            ior,
-            dispersion,
-            env_ior,
-            env_dispersion,
-            color,
-        }),
-        false,
-    ))
 }

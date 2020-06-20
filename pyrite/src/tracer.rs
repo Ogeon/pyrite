@@ -183,7 +183,7 @@ pub fn trace<'w, R: Rng>(
                 } else {
                     None
                 };
-                let color = directional.unwrap_or_else(|| world.sky.color(&ray.direction));
+                let color = directional.unwrap_or_else(|| &world.sky);
                 path.push(Bounce {
                     ty: BounceType::Emission,
                     light,
