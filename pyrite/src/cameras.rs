@@ -1,4 +1,4 @@
-use std::{error::Error, f32::consts, path::PathBuf};
+use std::{error::Error, f32::consts};
 
 use rand::Rng;
 
@@ -10,7 +10,11 @@ use collision::{Ray, Ray3};
 
 use crate::film::Area;
 
-use crate::{math::DIST_EPSILON, project::FromExpression, world::World};
+use crate::{
+    math::DIST_EPSILON,
+    project::eval_context::{EvalContext, Evaluate, EvaluateOr},
+    world::World,
+};
 
 pub enum Camera {
     Perspective {
@@ -24,7 +28,7 @@ pub enum Camera {
 impl Camera {
     pub fn from_project(
         project_camera: crate::project::Camera,
-        make_path: &impl Fn(&str) -> PathBuf,
+        eval_context: EvalContext,
     ) -> Result<Self, Box<dyn Error>> {
         match project_camera {
             crate::project::Camera::Perspective {
@@ -33,15 +37,15 @@ impl Camera {
                 focus_distance,
                 aperture,
             } => {
-                let fov: f32 = fov.parse(make_path)?;
+                let fov: f32 = fov.evaluate(eval_context)?;
                 let fov_radians: Rad<_> = cgmath::Deg(fov * 0.5f32).into();
                 let view_plane = fov_radians.cos() / fov_radians.sin();
 
                 Ok(Camera::Perspective {
-                    transform: transform.into_matrix(make_path)?,
+                    transform: transform.evaluate(eval_context)?,
                     view_plane,
-                    focus_distance: f32::from_expression_or(focus_distance, make_path, 1.0)?,
-                    aperture: f32::from_expression_or(aperture, make_path, 0.0)?,
+                    focus_distance: focus_distance.evaluate_or(eval_context, 1.0)?,
+                    aperture: aperture.evaluate_or(eval_context, 0.0)?,
                 })
             }
         }

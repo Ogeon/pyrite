@@ -33,33 +33,33 @@ pub struct Vertex<S> {
     pub texture: Point2<S>,
 }
 
-pub enum Shape {
+pub enum Shape<'p> {
     Sphere {
         position: Point3<f32>,
         radius: f32,
-        material: Material,
+        material: Material<'p>,
     },
     Plane {
         shape: collision::Plane<f32>,
         tangent: Vector3<f32>,
         binormal: Vector3<f32>,
         texture_scale: f32,
-        material: Material,
+        material: Material<'p>,
     },
     Triangle {
         v1: Vertex<f32>,
         v2: Vertex<f32>,
         v3: Vertex<f32>,
-        material: Arc<Material>,
+        material: Arc<Material<'p>>,
     },
     RayMarched {
         estimator: DistanceEstimator,
         bounds: BoundingVolume,
-        material: Material,
+        material: Material<'p>,
     },
 }
 
-impl Shape {
+impl<'p> Shape<'p> {
     pub fn ray_intersect(&self, ray: &Ray3<f32>) -> Option<Intersection> {
         match *self {
             Sphere {
@@ -375,7 +375,7 @@ impl Shape {
     }
 }
 
-impl bkd_tree::Element for Arc<Shape> {
+impl<'p> bkd_tree::Element for Arc<Shape<'p>> {
     type Item = Intersection;
     type Ray = world::BkdRay;
 

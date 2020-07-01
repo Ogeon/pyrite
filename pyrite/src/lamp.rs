@@ -6,30 +6,27 @@ use collision::Ray3;
 
 use rand::Rng;
 
-use crate::math::{
-    utils::{sample_cone, sample_hemisphere, sample_sphere},
-    RenderMath,
-};
+use crate::math::utils::{sample_cone, sample_hemisphere, sample_sphere};
 use crate::shapes::Shape;
-use crate::{color::Color, materials::Material};
+use crate::{materials::Material, tracer::LightProgram};
 
-pub enum Lamp {
+pub enum Lamp<'p> {
     Directional {
         direction: Vector3<f32>,
         width: f32,
-        color: RenderMath<Color>,
+        color: LightProgram<'p>,
     },
-    Point(Point3<f32>, RenderMath<Color>),
-    Shape(Arc<Shape>),
+    Point(Point3<f32>, LightProgram<'p>),
+    Shape(Arc<Shape<'p>>),
 }
 
-impl Lamp {
+impl<'p> Lamp<'p> {
     pub fn sample(&self, rng: &mut impl Rng, target: Point3<f32>) -> Sample<'_> {
         match *self {
             Lamp::Directional {
                 direction,
                 width,
-                ref color,
+                color,
             } => {
                 let dir = if width > 0.0 {
                     sample_cone(rng, direction, width)
@@ -40,17 +37,17 @@ impl Lamp {
                 Sample {
                     direction: dir,
                     sq_distance: None,
-                    surface: Surface::Color(&color),
+                    surface: Surface::Color(color),
                     weight: 1.0,
                 }
             }
-            Lamp::Point(ref center, ref color) => {
+            Lamp::Point(ref center, color) => {
                 let v = center - target;
                 let distance = v.magnitude2();
                 Sample {
                     direction: v.normalize(),
                     sq_distance: Some(distance),
-                    surface: Surface::Color(&color),
+                    surface: Surface::Color(color),
                     weight: 4.0 * std::f32::consts::PI / distance,
                 }
             }
@@ -82,11 +79,11 @@ impl Lamp {
     pub fn sample_ray(&self, rng: &mut impl Rng) -> Option<RaySample<'_>> {
         match *self {
             Lamp::Directional { .. } => None,
-            Lamp::Point(center, ref color) => {
+            Lamp::Point(center, color) => {
                 let direction = sample_sphere(rng);
                 Some(RaySample {
                     ray: Ray3::new(center, direction),
-                    surface: Surface::Color(&color),
+                    surface: Surface::Color(color),
                     weight: (4.0 * std::f32::consts::PI),
                 })
             }
@@ -120,9 +117,9 @@ pub enum Surface<'a> {
     Physical {
         normal: Ray3<f32>,
         texture: Point2<f32>,
-        material: &'a Material,
+        material: &'a Material<'a>,
     },
-    Color(&'a RenderMath<Color>),
+    Color(LightProgram<'a>),
 }
 
 pub struct RaySample<'a> {

@@ -13,9 +13,13 @@ use crate::renderer::algorithm::contribute;
 use crate::renderer::{Renderer, Status, WorkPool};
 use crate::spatial::kd_tree::{self, KdTree};
 use crate::spatial::Dim3;
-use crate::tracer::{trace, Bounce, BounceType, Light, ParametricValue, RenderContext};
+use crate::tracer::{trace, Bounce, BounceType, Light, RenderContext};
 use crate::utils::{pairs, BatchRange};
-use crate::{math::DIST_EPSILON, world::World};
+use crate::{
+    math::DIST_EPSILON,
+    project::program::{ExecutionContext, Resources},
+    world::World,
+};
 
 pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     film: &Film,
@@ -25,6 +29,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     config: &Config,
     world: &World,
     camera: &Camera,
+    resources: Resources,
 ) {
     fn gen_rng() -> XorShiftRng {
         XorShiftRng::from_rng(rand::thread_rng()).expect("could not generate RNG")
@@ -57,6 +62,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
             |(tile, mut rng)| {
                 let mut all_bounces = vec![];
                 let mut bounces = Vec::with_capacity(renderer.bounces as usize);
+                let mut exe = ExecutionContext::new(resources);
 
                 for _ in 0..tile.area() as usize {
                     bounces.clear();
@@ -102,9 +108,10 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                     for bounce in bounces.drain(..) {
                         for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
                             used_additional =
-                                contribute(&bounce, sample, reflectance, true) && used_additional;
+                                contribute(&bounce, sample, reflectance, true, &mut exe)
+                                    && used_additional;
                         }
-                        contribute(&bounce, &mut sample, &mut reflectance, false);
+                        contribute(&bounce, &mut sample, &mut reflectance, false, &mut exe);
 
                         match bounce.ty {
                             BounceType::Diffuse(_, _) => {
@@ -304,6 +311,8 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
             workers.do_work(
                 camera_bounces.chunks(5000).map(|b| (b, gen_rng())),
                 |(bounces, mut rng)| {
+                    let mut exe = ExecutionContext::new(resources);
+
                     for hit in bounces {
                         let pixel = &hit.pixel;
                         let point = KdPoint(hit.bounce.normal.origin);
@@ -355,8 +364,8 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                         .dot(-hit.bounce.normal.direction)
                                         .max(0.0);
                                     weight /= ::std::f32::consts::PI;
-                                    hit.accumulate_reflectance(&mut samples, incident);
-                                    neighbor.accumulate_light(&mut samples);
+                                    hit.accumulate_reflectance(&mut samples, incident, &mut exe);
+                                    neighbor.accumulate_light(&mut samples, &mut exe);
                                 }
 
                                 for (mut sample, _) in samples {
@@ -409,7 +418,12 @@ struct CameraBounce<'a> {
 }
 
 impl<'a> CameraBounce<'a> {
-    fn accumulate_reflectance(&self, samples: &mut [(Sample, f32)], exit: Vector3<f32>) {
+    fn accumulate_reflectance(
+        &self,
+        samples: &mut [(Sample, f32)],
+        exit: Vector3<f32>,
+        exe: &mut ExecutionContext<'a>,
+    ) {
         let mut current = Some(self);
         let mut first_brdf = if let BounceType::Diffuse(brdf, _) = self.bounce.ty {
             Some((brdf, exit))
@@ -442,7 +456,7 @@ impl<'a> CameraBounce<'a> {
                     normal: normal.direction,
                     texture,
                 };
-                let c = color.get(&context);
+                let c = exe.run(color, &context).value;
                 *reflectance *= c * probability * brdf;
             }
 
@@ -480,7 +494,7 @@ struct LightBounce<'a> {
 }
 
 impl<'a> LightBounce<'a> {
-    fn accumulate_light(&self, samples: &mut [(Sample, f32)]) {
+    fn accumulate_light(&self, samples: &mut [(Sample, f32)], exe: &mut ExecutionContext<'a>) {
         let mut current = self.parent.as_ref().map(|p| &**p);
 
         for &mut (ref _sample, ref mut reflectance) in &mut *samples {
@@ -507,7 +521,7 @@ impl<'a> LightBounce<'a> {
                     texture,
                 };
 
-                let c = color.get(&context) * probability;
+                let c = exe.run(color, &context).value * probability;
 
                 if let BounceType::Emission = *ty {
                     sample.brightness = c * *reflectance;

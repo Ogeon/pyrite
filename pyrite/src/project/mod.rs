@@ -1,17 +1,29 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    convert::TryFrom,
-    error::Error,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, error::Error, path::Path};
 
-use rlua::Lua;
-use rlua_serde;
+use rlua::{FromLua, Lua};
 
-use cgmath::{Matrix4, Point3, Quaternion, SquareMatrix, Vector3};
-use serde::{Deserialize, Deserializer};
+use cgmath::{Matrix4, SquareMatrix, Vector3};
+use expressions::{ExpressionLoader, Expressions};
+use parse_context::{Parse, ParseContext};
+use tables::Tables;
 
-pub fn load_project<P: AsRef<Path>>(path: P) -> Result<Project, Box<dyn Error>> {
+use crate::parse_enum;
+
+use eval_context::{EvalContext, Evaluate};
+use meshes::{MeshId, MeshLoader, Meshes};
+use spectra::{Spectra, SpectrumLoader};
+use textures::{TextureLoader, Textures};
+
+pub mod eval_context;
+pub mod expressions;
+pub mod meshes;
+mod parse_context;
+pub mod program;
+pub mod spectra;
+mod tables;
+mod textures;
+
+pub fn load_project<'p, P: AsRef<Path>>(path: P) -> Result<ProjectData, Box<dyn Error>> {
     let project_dir = path
         .as_ref()
         .parent()
@@ -20,6 +32,7 @@ pub fn load_project<P: AsRef<Path>>(path: P) -> Result<Project, Box<dyn Error>> 
     let lua = Lua::new();
 
     lua.context(|context| {
+        // Set up the preferred require path
         context
             .load(&format!(
                 r#"package.path = "{};" .. package.path"#,
@@ -31,11 +44,20 @@ pub fn load_project<P: AsRef<Path>>(path: P) -> Result<Project, Box<dyn Error>> 
             .set_name("<pyrite>")?
             .exec()?;
 
+        // Register assign_id
+        let tables = std::sync::Arc::new(Tables::new());
+        let lua_tables = tables.clone();
+        let assign_id = context
+            .create_function(move |_context, table: rlua::Table| lua_tables.assign_id(&table))?;
+        context.globals().set("assign_id", assign_id)?;
+
+        // Load project building library
         context
             .load(include_str!("lib.lua"))
             .set_name("<pyrite>/lib.lua")?
             .exec()?;
 
+        // Run project file
         let project_file = std::fs::read_to_string(&path)?;
         let project = context
             .load(&project_file)
@@ -47,12 +69,58 @@ pub fn load_project<P: AsRef<Path>>(path: P) -> Result<Project, Box<dyn Error>> 
             )?
             .eval()?;
 
-        let project = rlua_serde::from_value(project)?;
-        Ok(project)
+        // Parse project config
+        let mut expressions = ExpressionLoader::new();
+        let mut meshes = MeshLoader::new(project_dir)?;
+        let mut spectra = SpectrumLoader::new();
+        let mut textures = TextureLoader::new(project_dir)?;
+        let parse_context = ParseContext::new(
+            &mut expressions,
+            &mut meshes,
+            &mut spectra,
+            &mut textures,
+            &tables,
+            rlua::Table::from_lua(project, context.clone())?,
+            &context,
+        );
+        let project = parse_context.parse()?;
+        while let Some((id, table)) = expressions.next_pending() {
+            let expression = ParseContext::new(
+                &mut expressions,
+                &mut meshes,
+                &mut spectra,
+                &mut textures,
+                &tables,
+                table,
+                &context,
+            )
+            .parse()?;
+            expressions.replace_pending(id, expression);
+        }
+
+        let expressions = expressions.into_expressions();
+        let meshes = meshes.into_meshes();
+        let spectra = spectra.into_spectra();
+        let textures = textures.into_textures();
+
+        Ok(ProjectData {
+            expressions,
+            meshes,
+            spectra,
+            textures,
+            project,
+        })
     })
 }
 
-#[derive(Deserialize)]
+pub struct ProjectData {
+    pub expressions: Expressions,
+    pub meshes: Meshes,
+    pub spectra: Spectra,
+    pub textures: Textures,
+    pub project: Project,
+}
+
 pub struct Project {
     pub image: Image,
     pub camera: Camera,
@@ -60,76 +128,156 @@ pub struct Project {
     pub world: World,
 }
 
-#[derive(Deserialize)]
+impl<'lua> Parse<'lua> for Project {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        Ok(Project {
+            image: context.parse_field("image")?,
+            camera: context.parse_field("camera")?,
+            renderer: context.parse_field("renderer")?,
+            world: context.parse_field("world")?,
+        })
+    }
+}
+
 pub struct Image {
     pub width: u32,
     pub height: u32,
     pub file: Option<String>,
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+impl<'lua> Parse<'lua> for Image {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        Ok(Image {
+            width: context.expect_field("width")?,
+            height: context.expect_field("height")?,
+            file: context.expect_field("file")?,
+        })
+    }
+}
+
 pub enum Camera {
     Perspective {
         transform: Transform,
-        fov: Expression,
-        focus_distance: Option<Expression>,
-        aperture: Option<Expression>,
+        fov: self::expressions::Expression,
+        focus_distance: Option<self::expressions::Expression>,
+        aperture: Option<self::expressions::Expression>,
     },
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+impl<'lua> Parse<'lua> for Camera {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        parse_enum!(context {
+            "perspective" => Ok(Camera::Perspective {
+                transform: context.parse_field("transform")?,
+                fov: context.parse_field("fov")?,
+                focus_distance: context.parse_field("focus_distance")?,
+                aperture: context.parse_field("aperture")?,
+            }),
+        })
+    }
+}
+
 pub enum Renderer {
     Simple {
-        #[serde(flatten)]
         shared: RendererShared,
     },
     Bidirectional {
-        #[serde(flatten)]
         shared: RendererShared,
-        light_bounces: Option<Expression>,
+        light_bounces: Option<u32>,
     },
     PhotonMapping {
-        #[serde(flatten)]
         shared: RendererShared,
-        radius: Option<Expression>,
-        photons: Option<Expression>,
-        photon_bounces: Option<Expression>,
-        photon_passes: Option<Expression>,
+        radius: Option<f32>,
+        photon_bounces: Option<u32>,
+        photons: Option<usize>,
+        photon_passes: Option<usize>,
     },
 }
 
-#[derive(Deserialize)]
-pub struct RendererShared {
-    pub pixel_samples: Expression,
-    pub threads: Option<Expression>,
-    pub bounces: Option<Expression>,
-    pub light_samples: Option<Expression>,
-    pub tile_size: Option<Expression>,
-    pub spectrum_samples: Option<Expression>,
-    pub spectrum_resolution: Option<Expression>,
+impl<'lua> Parse<'lua> for Renderer {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        let shared = RendererShared::parse(&mut context)?;
+
+        parse_enum!(context {
+            "simple" => Ok(Renderer::Simple {
+                shared,
+            }),
+            "bidirectional" => Ok(Renderer::Bidirectional {
+                shared,
+                light_bounces: context.expect_field("light_bounces")?,
+            }),
+            "photon_mapping" => Ok(Renderer::PhotonMapping {
+                shared,
+                radius: context.expect_field("radius")?,
+                photon_bounces: context.expect_field("photon_bounces")?,
+                photons: context.expect_field("photons")?,
+                photon_passes: context.expect_field("photon_passes")?,
+            })
+        })
+    }
 }
 
-#[derive(Deserialize)]
+pub struct RendererShared {
+    pub threads: Option<usize>,
+    pub bounces: Option<u32>,
+    pub pixel_samples: u32,
+    pub light_samples: Option<usize>,
+    pub spectrum_samples: Option<u32>,
+    pub spectrum_resolution: Option<usize>,
+    pub tile_size: Option<usize>,
+}
+
+impl RendererShared {
+    fn parse<'a, 'lua>(
+        context: &mut ParseContext<'a, 'lua, rlua::Table<'lua>>,
+    ) -> Result<Self, Box<dyn Error>> {
+        Ok(RendererShared {
+            threads: context.expect_field("threads")?,
+            bounces: context.expect_field("bounces")?,
+            pixel_samples: context.expect_field("pixel_samples")?,
+            light_samples: context.expect_field("light_samples")?,
+            spectrum_samples: context.expect_field("spectrum_samples")?,
+            spectrum_resolution: context.expect_field("spectrum_resolution")?,
+            tile_size: context.expect_field("tile_size")?,
+        })
+    }
+}
+
 pub struct World {
-    pub sky: Option<Expression>,
+    pub sky: Option<self::expressions::Expression>,
     pub objects: Vec<WorldObject>,
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+impl<'lua> Parse<'lua> for World {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        Ok(World {
+            sky: context.parse_field("sky")?,
+            objects: context.parse_array_field("objects")?,
+        })
+    }
+}
+
 pub enum WorldObject {
     Sphere {
-        position: Expression,
-        radius: Expression,
+        position: self::expressions::Expression,
+        radius: self::expressions::Expression,
         material: Material,
     },
     Plane {
-        origin: Expression,
-        normal: Expression,
-        binormal: Option<Expression>,
-        texture_scale: Option<Expression>,
+        origin: self::expressions::Expression,
+        normal: self::expressions::Expression,
+        binormal: Option<self::expressions::Expression>,
+        texture_scale: Option<self::expressions::Expression>,
         material: Material,
     },
     RayMarched {
@@ -138,398 +286,248 @@ pub enum WorldObject {
         material: Material,
     },
     Mesh {
-        file: String,
+        file: MeshId,
         materials: HashMap<String, Material>,
-        scale: Option<Expression>,
+        scale: Option<self::expressions::Expression>,
         transform: Option<Transform>,
     },
     DirectionalLight {
-        direction: Expression,
-        width: Expression,
-        color: Expression,
+        direction: self::expressions::Expression,
+        width: self::expressions::Expression,
+        color: self::expressions::Expression,
     },
     PointLight {
-        position: Expression,
-        color: Expression,
+        position: self::expressions::Expression,
+        color: self::expressions::Expression,
     },
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+impl<'lua> Parse<'lua> for WorldObject {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        parse_enum!(context {
+            "sphere" => Ok(WorldObject::Sphere {
+                position: context.parse_field("position")?,
+                radius: context.parse_field("radius")?,
+                material: context.parse_field("material")?,
+            }),
+            "plane" => Ok(WorldObject::Plane {
+                origin: context.parse_field("origin")?,
+                normal: context.parse_field("normal")?,
+                binormal: context.parse_field("binormal")?,
+                texture_scale: context.parse_field("texture_scale")?,
+                material: context.parse_field("material")?,
+            }),
+            "ray_marched" => Ok(WorldObject::RayMarched {
+                shape: context.parse_field("shape")?,
+                bounds: context.parse_field("bounds")?,
+                material: context.parse_field("material")?,
+            }),
+            "mesh" => Ok(WorldObject::Mesh {
+                file: context.meshes.load(context.expect_field::<String>("file")?)?,
+                materials: context.parse_map_field("materials")?,
+                scale: context.parse_field("scale")?,
+                transform: context.parse_field("transform")?,
+            }),
+            "directional_light" => Ok(WorldObject::DirectionalLight {
+                direction: context.parse_field("direction")?,
+                width: context.parse_field("width")?,
+                color: context.parse_field("color")?,
+            }),
+            "point_light" => Ok(WorldObject::PointLight {
+                position: context.parse_field("position")?,
+                color: context.parse_field("color")?,
+            }),
+        })
+    }
+}
+
 pub enum BoundingVolume {
     Box {
-        min: Expression,
-        max: Expression,
+        min: self::expressions::Expression,
+        max: self::expressions::Expression,
     },
     Sphere {
-        position: Expression,
-        radius: Expression,
+        position: self::expressions::Expression,
+        radius: self::expressions::Expression,
     },
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+impl<'lua> Parse<'lua> for BoundingVolume {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        parse_enum!(context {
+            "box" => Ok(BoundingVolume::Box {
+                min: context.parse_field("min")?,
+                max: context.parse_field("max")?,
+            }),
+            "sphere" => Ok(BoundingVolume::Sphere {
+                position: context.parse_field("position")?,
+                radius: context.parse_field("radius")?,
+            }),
+        })
+    }
+}
+
 pub enum Estimator {
     Mandelbulb {
-        iterations: Expression,
-        threshold: Expression,
-        power: Expression,
-        constant: Option<Expression>,
+        iterations: self::expressions::Expression,
+        threshold: self::expressions::Expression,
+        power: self::expressions::Expression,
+        constant: Option<self::expressions::Expression>,
     },
     QuaternionJulia {
-        iterations: Expression,
-        threshold: Expression,
-        constant: Expression,
-        slice_plane: Expression,
+        iterations: self::expressions::Expression,
+        threshold: self::expressions::Expression,
+        constant: self::expressions::Expression,
+        slice_plane: self::expressions::Expression,
         variant: JuliaType,
     },
 }
 
-#[derive(Deserialize)]
+impl<'lua> Parse<'lua> for Estimator {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        parse_enum!(context {
+            "mandelbulb" => Ok(Estimator::Mandelbulb {
+                iterations: context.parse_field("iterations")?,
+                threshold: context.parse_field("threshold")?,
+                power: context.parse_field("power")?,
+                constant: context.parse_field("constant")?,
+            }),
+            "quaternion_julia" => Ok(Estimator::QuaternionJulia {
+                iterations: context.parse_field("iterations")?,
+                threshold: context.parse_field("threshold")?,
+                constant: context.parse_field("constant")?,
+                slice_plane: context.parse_field("slice_plane")?,
+                variant: context.parse_field("variant")?,
+            }),
+        })
+    }
+}
+
 pub struct JuliaType {
     pub name: String,
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+impl<'lua> Parse<'lua> for JuliaType {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        Ok(JuliaType {
+            name: context.expect_field("name")?,
+        })
+    }
+}
+
 pub enum Material {
     Diffuse {
-        color: Expression,
+        color: self::expressions::Expression,
     },
     Emission {
-        color: Expression,
+        color: self::expressions::Expression,
     },
     Mirror {
-        color: Expression,
+        color: self::expressions::Expression,
     },
     Refractive {
-        color: Expression,
-        ior: Expression,
-        dispersion: Option<Expression>,
-        env_ior: Option<Expression>,
-        env_dispersion: Option<Expression>,
+        color: self::expressions::Expression,
+        ior: self::expressions::Expression,
+        dispersion: Option<self::expressions::Expression>,
+        env_ior: Option<self::expressions::Expression>,
+        env_dispersion: Option<self::expressions::Expression>,
     },
     Mix {
-        factor: Expression,
-        a: Box<Material>,
-        b: Box<Material>,
+        amount: self::expressions::Expression,
+        lhs: Box<Material>,
+        rhs: Box<Material>,
     },
     FresnelMix {
-        ior: Expression,
-        dispersion: Option<Expression>,
-        env_ior: Option<Expression>,
-        env_dispersion: Option<Expression>,
+        ior: self::expressions::Expression,
+        dispersion: Option<self::expressions::Expression>,
+        env_ior: Option<self::expressions::Expression>,
+        env_dispersion: Option<self::expressions::Expression>,
         reflect: Box<Material>,
         refract: Box<Material>,
     },
 }
 
-#[derive(Clone)]
-pub enum Expression {
-    Number(f64),
-    Boolean(bool),
-    Complex(ComplexExpression),
-}
+impl<'lua> Parse<'lua> for Material {
+    type Input = rlua::Table<'lua>;
 
-impl Expression {
-    pub fn parse<T: FromExpression>(
-        self,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<T, Box<dyn Error>> {
-        T::from_expression(self, make_path)
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        parse_enum!(context {
+            "diffuse" => Ok(Material::Diffuse {
+                color: context.parse_field("color")?,
+            }),
+            "emission" => Ok(Material::Emission {
+                color: context.parse_field("color")?,
+            }),
+            "mirror" => Ok(Material::Mirror {
+                color: context.parse_field("color")?,
+            }),
+            "refractive" => Ok(Material::Refractive {
+                color: context.parse_field("color")?,
+                ior: context.parse_field("ior")?,
+                env_ior: context.parse_field("env_ior")?,
+                dispersion: context.parse_field("dispersion")?,
+                env_dispersion: context.parse_field("env_dispersion")?,
+            }),
+            "mix" => Ok(Material::Mix {
+                amount: context.parse_field("amount")?,
+                lhs: Box::new(context.parse_field("lhs")?),
+                rhs: Box::new(context.parse_field("rhs")?),
+            }),
+            "fresnel_mix" => Ok(Material::FresnelMix {
+                ior: context.parse_field("ior")?,
+                env_ior: context.parse_field("env_ior")?,
+                dispersion: context.parse_field("dispersion")?,
+                env_dispersion: context.parse_field("env_dispersion")?,
+                reflect: Box::new(context.parse_field("reflect")?),
+                refract: Box::new(context.parse_field("refract")?),
+            }),
+        })
     }
 }
 
-impl<'de> Deserialize<'de> for Expression {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = serde_value::Value::deserialize(deserializer)?;
-
-        match value {
-            serde_value::Value::Bool(value) => Ok(Expression::Boolean(value)),
-            serde_value::Value::U8(value) => Ok(Expression::Number(value as f64)),
-            serde_value::Value::U16(value) => Ok(Expression::Number(value as f64)),
-            serde_value::Value::U32(value) => Ok(Expression::Number(value as f64)),
-            serde_value::Value::U64(value) => Ok(Expression::Number(value as f64)),
-            serde_value::Value::I8(value) => Ok(Expression::Number(value as f64)),
-            serde_value::Value::I16(value) => Ok(Expression::Number(value as f64)),
-            serde_value::Value::I32(value) => Ok(Expression::Number(value as f64)),
-            serde_value::Value::I64(value) => Ok(Expression::Number(value as f64)),
-            serde_value::Value::F32(value) => Ok(Expression::Number(value as f64)),
-            serde_value::Value::F64(value) => Ok(Expression::Number(value as f64)),
-            value => Ok(Expression::Complex(ComplexExpression::deserialize(
-                serde_value::ValueDeserializer::<D::Error>::new(value),
-            )?)),
-        }
-    }
-}
-
-#[derive(Deserialize, Clone)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ComplexExpression {
-    Vector {
-        x: rlua::Number,
-        y: rlua::Number,
-        z: rlua::Number,
-        w: rlua::Number,
-    },
-    Fresnel {
-        ior: Box<Expression>,
-        env_ior: Option<Box<Expression>>,
-    },
-    LightSource {
-        name: String,
-    },
-    Spectrum {
-        points: List<List<rlua::Number>>,
-    },
-    Rgb {
-        red: Box<Expression>,
-        green: Box<Expression>,
-        blue: Box<Expression>,
-    },
-    Texture {
-        path: String,
-    },
-    Add {
-        a: Box<Expression>,
-        b: Box<Expression>,
-    },
-    Sub {
-        a: Box<Expression>,
-        b: Box<Expression>,
-    },
-    Mul {
-        a: Box<Expression>,
-        b: Box<Expression>,
-    },
-    Div {
-        a: Box<Expression>,
-        b: Box<Expression>,
-    },
-    Mix {
-        a: Box<Expression>,
-        b: Box<Expression>,
-        factor: Box<Expression>,
-    },
-}
-
-#[derive(Clone)]
-pub struct List<T>(BTreeMap<usize, T>);
-
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for List<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Ok(List(BTreeMap::deserialize(deserializer)?))
-    }
-}
-
-impl<T> TryFrom<List<T>> for (T, T) {
-    type Error = Box<dyn Error>;
-
-    fn try_from(mut value: List<T>) -> Result<Self, Self::Error> {
-        let result = if let (Some(a), Some(b)) = (value.0.remove(&1), value.0.remove(&2)) {
-            if value.0.is_empty() {
-                Some((a, b))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        if let Some(result) = result {
-            Ok(result)
-        } else {
-            Err("expected exactly two values".into())
-        }
-    }
-}
-
-impl<T> TryFrom<List<T>> for Vec<T> {
-    type Error = Box<dyn Error>;
-
-    fn try_from(value: List<T>) -> Result<Self, Self::Error> {
-        let mut result = Vec::with_capacity(value.0.len());
-
-        for (index, (key, value)) in value.0.into_iter().enumerate() {
-            if key != index + 1 {
-                return Err("the list is not sequential".into());
-            }
-
-            result.push(value);
-        }
-
-        Ok(result)
-    }
-}
-
-pub trait FromExpression: Sized {
-    fn from_expression(
-        expression: Expression,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>>;
-
-    fn from_expression_or(
-        expression: Option<Expression>,
-        make_path: &impl Fn(&str) -> PathBuf,
-        default: Self,
-    ) -> Result<Self, Box<dyn Error>> {
-        expression
-            .map(|e| Self::from_expression(e, make_path))
-            .unwrap_or(Ok(default))
-    }
-
-    fn from_expression_or_else(
-        expression: Option<Expression>,
-        make_path: &impl Fn(&str) -> PathBuf,
-        get_default: impl FnOnce() -> Self,
-    ) -> Result<Self, Box<dyn Error>> {
-        expression
-            .map(|e| Self::from_expression(e, make_path))
-            .unwrap_or_else(|| Ok(get_default()))
-    }
-}
-
-impl FromExpression for f64 {
-    fn from_expression(
-        expression: Expression,
-        _make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        match expression {
-            Expression::Number(number) => Ok(number),
-            _ => Err("expected a number".into()),
-        }
-    }
-}
-impl FromExpression for f32 {
-    fn from_expression(
-        expression: Expression,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        let number: f64 = expression.parse(make_path)?;
-        Ok(number as f32)
-    }
-}
-
-impl FromExpression for u16 {
-    fn from_expression(
-        expression: Expression,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        let number: f64 = expression.parse(make_path)?;
-        Ok(number as u16)
-    }
-}
-
-impl FromExpression for u32 {
-    fn from_expression(
-        expression: Expression,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        let number: f64 = expression.parse(make_path)?;
-        Ok(number as u32)
-    }
-}
-
-impl FromExpression for usize {
-    fn from_expression(
-        expression: Expression,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        let number: f64 = expression.parse(make_path)?;
-        Ok(number as usize)
-    }
-}
-
-impl FromExpression for bool {
-    fn from_expression(
-        expression: Expression,
-        _make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        match expression {
-            Expression::Boolean(boolean) => Ok(boolean),
-            _ => Err("expected a Boolean value".into()),
-        }
-    }
-}
-
-impl FromExpression for Vector3<f32> {
-    fn from_expression(
-        expression: Expression,
-        _make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        match expression {
-            Expression::Complex(ComplexExpression::Vector { x, y, z, .. }) => {
-                Ok(Vector3::new(x as f32, y as f32, z as f32))
-            }
-            _ => Err("expected a vector".into()),
-        }
-    }
-}
-
-impl FromExpression for Point3<f32> {
-    fn from_expression(
-        expression: Expression,
-        _make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        match expression {
-            Expression::Complex(ComplexExpression::Vector { x, y, z, .. }) => {
-                Ok(Point3::new(x as f32, y as f32, z as f32))
-            }
-            _ => Err("expected a vector".into()),
-        }
-    }
-}
-
-impl FromExpression for Quaternion<f32> {
-    fn from_expression(
-        expression: Expression,
-        _make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        match expression {
-            Expression::Complex(ComplexExpression::Vector { x, y, z, w }) => {
-                Ok(Quaternion::new(x as f32, y as f32, z as f32, w as f32))
-            }
-            _ => Err("expected a vector".into()),
-        }
-    }
-}
-
-pub trait FromComplexExpression: Sized {
-    fn from_complex_expression(
-        expression: ComplexExpression,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>>;
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Transform {
     LookAt {
-        from: Expression,
-        to: Expression,
-        up: Option<Expression>,
+        from: self::expressions::Expression,
+        to: self::expressions::Expression,
+        up: Option<self::expressions::Expression>,
     },
 }
 
-impl Transform {
-    pub fn into_matrix(
-        self,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Matrix4<f32>, Box<dyn Error>> {
-        match self {
-            crate::project::Transform::LookAt { from, to, up } => Matrix4::look_at(
-                from.parse(make_path)?,
-                to.parse(make_path)?,
-                Vector3::from_expression_or_else(up, make_path, || Vector3::new(0.0, 1.0, 0.0))?,
-            )
-            .invert()
-            .ok_or("could not invert view matrix".into()),
-        }
+impl<'lua> Parse<'lua> for Transform {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        parse_enum!(context {
+            "look_at" => Ok(Transform::LookAt {
+                from: context.parse_field("from")?,
+                to: context.parse_field("to")?,
+                up: context.parse_field("up")?,
+            })
+        })
+    }
+}
+
+impl Evaluate<Matrix4<f32>> for Transform {
+    fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<Matrix4<f32>, Box<dyn Error>> {
+        Ok(match self {
+            Transform::LookAt { from, to, up } => {
+                let from = from.evaluate(context)?;
+                let to = to.evaluate(context)?;
+                let up: Option<_> = up.evaluate(context)?;
+                let up = up.unwrap_or(Vector3::new(0.0, 1.0, 0.0));
+
+                Matrix4::look_at(from, to, up)
+                    .invert()
+                    .ok_or("could not invert view matrix")?
+            }
+        })
     }
 }

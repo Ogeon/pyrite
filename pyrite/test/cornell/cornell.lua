@@ -48,7 +48,7 @@ return {
                 },
             },
             shape.ray_marched {
-                shape = ray_marched.mandelbulb {
+                shape = ray_marched.quaternion_julia {
                     iterations = 50,
                     threshold = 4,
                     constant = vector(-0.2, 0.8, 0, 0),

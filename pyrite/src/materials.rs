@@ -1,4 +1,4 @@
-use std::{error::Error, path::PathBuf};
+use std::error::Error;
 
 use rand::Rng;
 
@@ -6,35 +6,43 @@ use cgmath::{InnerSpace, Vector3};
 use collision::Ray3;
 
 use crate::{
-    color::Color,
-    math::{self, RenderMath},
-    project::{FromExpression, Material as ProjectMaterial},
-    tracer::{Emit, Light, Reflect, Reflection},
+    color::Light,
+    math,
+    project::{
+        eval_context::{EvalContext, Evaluate, EvaluateOr},
+        expressions::Expressions,
+        program::{Program, ProgramCompiler},
+        Material as ProjectMaterial,
+    },
+    tracer::{self, Emit, Reflect, Reflection, RenderContext},
 };
+use tracer::LightProgram;
 
-pub enum Material {
-    Diffuse(Diffuse),
-    Emission(Emission),
-    Mirror(Mirror),
-    Refractive(Refractive),
-    Mix(Mix),
-    FresnelMix(FresnelMix),
+pub enum Material<'p> {
+    Diffuse(Diffuse<'p>),
+    Emission(Emission<'p>),
+    Mirror(Mirror<'p>),
+    Refractive(Refractive<'p>),
+    Mix(Mix<'p>),
+    FresnelMix(FresnelMix<'p>),
 }
 
-impl Material {
+impl<'p> Material<'p> {
     pub fn from_project(
         project: ProjectMaterial,
-        make_path: &impl Fn(&str) -> PathBuf,
+        eval_context: EvalContext,
+        programs: ProgramCompiler<'p>,
+        expressions: &Expressions,
     ) -> Result<Self, Box<dyn Error>> {
         Ok(match project {
             ProjectMaterial::Diffuse { color } => Material::Diffuse(Diffuse {
-                color: color.parse(make_path)?,
+                color: programs.compile(&color, expressions)?,
             }),
             ProjectMaterial::Emission { color } => Material::Emission(Emission {
-                color: color.parse(make_path)?,
+                color: programs.compile(&color, expressions)?,
             }),
             ProjectMaterial::Mirror { color } => Material::Mirror(Mirror {
-                color: color.parse(make_path)?,
+                color: programs.compile(&color, expressions)?,
             }),
             ProjectMaterial::Refractive {
                 color,
@@ -43,16 +51,26 @@ impl Material {
                 dispersion,
                 env_dispersion,
             } => Material::Refractive(Refractive {
-                color: color.parse(make_path)?,
-                ior: ior.parse(make_path)?,
-                env_ior: f32::from_expression_or(env_ior, make_path, 1.0)?,
-                dispersion: f32::from_expression_or(dispersion, make_path, 0.0)?,
-                env_dispersion: f32::from_expression_or(env_dispersion, make_path, 0.0)?,
+                color: programs.compile(&color, expressions)?,
+                ior: ior.evaluate(eval_context)?,
+                env_ior: env_ior.evaluate_or(eval_context, 1.0)?,
+                dispersion: dispersion.evaluate_or(eval_context, 0.0)?,
+                env_dispersion: env_dispersion.evaluate_or(eval_context, 0.0)?,
             }),
-            ProjectMaterial::Mix { factor, a, b } => Material::Mix(Mix {
-                factor: factor.parse(make_path)?,
-                a: Box::new(Material::from_project(*a, make_path)?),
-                b: Box::new(Material::from_project(*b, make_path)?),
+            ProjectMaterial::Mix { amount, lhs, rhs } => Material::Mix(Mix {
+                factor: amount.evaluate(eval_context)?,
+                a: Box::new(Material::from_project(
+                    *lhs,
+                    eval_context,
+                    programs,
+                    expressions,
+                )?),
+                b: Box::new(Material::from_project(
+                    *rhs,
+                    eval_context,
+                    programs,
+                    expressions,
+                )?),
             }),
             ProjectMaterial::FresnelMix {
                 ior,
@@ -62,19 +80,29 @@ impl Material {
                 reflect,
                 refract,
             } => Material::FresnelMix(FresnelMix {
-                ior: ior.parse(make_path)?,
-                env_ior: f32::from_expression_or(env_ior, make_path, 1.0)?,
-                dispersion: f32::from_expression_or(dispersion, make_path, 0.0)?,
-                env_dispersion: f32::from_expression_or(env_dispersion, make_path, 0.0)?,
-                reflect: Box::new(Material::from_project(*reflect, make_path)?),
-                refract: Box::new(Material::from_project(*refract, make_path)?),
+                ior: ior.evaluate(eval_context)?,
+                env_ior: env_ior.evaluate_or(eval_context, 1.0)?,
+                dispersion: dispersion.evaluate_or(eval_context, 0.0)?,
+                env_dispersion: env_dispersion.evaluate_or(eval_context, 0.0)?,
+                reflect: Box::new(Material::from_project(
+                    *reflect,
+                    eval_context,
+                    programs,
+                    expressions,
+                )?),
+                refract: Box::new(Material::from_project(
+                    *refract,
+                    eval_context,
+                    programs,
+                    expressions,
+                )?),
             }),
         })
     }
 
     pub fn reflect(
         &self,
-        light: &mut Light,
+        light: &mut tracer::Light,
         ray_in: Ray3<f32>,
         normal: Ray3<f32>,
         rng: &mut impl Rng,
@@ -91,11 +119,11 @@ impl Material {
 
     pub fn get_emission(
         &self,
-        light: &mut Light,
+        light: &mut tracer::Light,
         ray_in: Vector3<f32>,
         normal: Ray3<f32>,
         rng: &mut impl Rng,
-    ) -> Option<&RenderMath<Color>> {
+    ) -> Option<Program<RenderContext, Light>> {
         match self {
             Material::Emission(material) => material.get_emission(),
             Material::Mix(material) => material.get_emission(light, ray_in, normal, rng),
@@ -116,11 +144,11 @@ impl Material {
     }
 }
 
-pub struct Diffuse {
-    pub color: RenderMath<Color>,
+pub struct Diffuse<'p> {
+    pub color: LightProgram<'p>,
 }
 
-impl Diffuse {
+impl<'p> Diffuse<'p> {
     fn reflect(&self, ray_in: Ray3<f32>, normal: Ray3<f32>, rng: &mut impl Rng) -> Reflection<'_> {
         let n = if ray_in.direction.dot(normal.direction) < 0.0 {
             normal.direction
@@ -131,7 +159,7 @@ impl Diffuse {
         let reflected = math::utils::sample_hemisphere(rng, n);
         Reflect(
             Ray3::new(normal.origin, reflected),
-            &self.color,
+            self.color,
             1.0,
             Some(lambertian),
         )
@@ -142,25 +170,25 @@ fn lambertian(_ray_in: Vector3<f32>, ray_out: Vector3<f32>, normal: Vector3<f32>
     2.0 * normal.dot(ray_out).abs()
 }
 
-pub struct Emission {
-    pub color: RenderMath<Color>,
+pub struct Emission<'p> {
+    pub color: LightProgram<'p>,
 }
 
-impl Emission {
+impl<'p> Emission<'p> {
     fn reflect(&self) -> Reflection<'_> {
-        Emit(&self.color)
+        Emit(self.color)
     }
 
-    fn get_emission(&self) -> Option<&RenderMath<Color>> {
-        Some(&self.color)
+    fn get_emission(&self) -> Option<Program<RenderContext, Light>> {
+        Some(self.color)
     }
 }
 
-pub struct Mirror {
-    pub color: RenderMath<Color>,
+pub struct Mirror<'p> {
+    pub color: LightProgram<'p>,
 }
 
-impl Mirror {
+impl<'p> Mirror<'p> {
     fn reflect(&self, ray_in: Ray3<f32>, normal: Ray3<f32>) -> Reflection<'_> {
         let mut n = if ray_in.direction.dot(normal.direction) < 0.0 {
             normal.direction
@@ -172,23 +200,23 @@ impl Mirror {
         n *= perp;
         Reflect(
             Ray3::new(normal.origin, ray_in.direction - n),
-            &self.color,
+            self.color,
             1.0,
             None,
         )
     }
 }
 
-pub struct Mix {
+pub struct Mix<'p> {
     factor: f32,
-    pub a: Box<Material>,
-    pub b: Box<Material>,
+    pub a: Box<Material<'p>>,
+    pub b: Box<Material<'p>>,
 }
 
-impl Mix {
+impl<'p> Mix<'p> {
     fn reflect(
         &self,
-        light: &mut Light,
+        light: &mut tracer::Light,
         ray_in: Ray3<f32>,
         normal: Ray3<f32>,
         rng: &mut impl Rng,
@@ -202,11 +230,11 @@ impl Mix {
 
     fn get_emission(
         &self,
-        light: &mut Light,
+        light: &mut tracer::Light,
         ray_in: Vector3<f32>,
         normal: Ray3<f32>,
         rng: &mut impl Rng,
-    ) -> Option<&RenderMath<Color>> {
+    ) -> Option<Program<RenderContext, Light>> {
         if self.factor < rng.gen() {
             self.a.get_emission(light, ray_in, normal, rng)
         } else {
@@ -215,19 +243,19 @@ impl Mix {
     }
 }
 
-pub struct FresnelMix {
+pub struct FresnelMix<'p> {
     ior: f32,
     dispersion: f32,
     env_ior: f32,
     env_dispersion: f32,
-    pub reflect: Box<Material>,
-    pub refract: Box<Material>,
+    pub reflect: Box<Material<'p>>,
+    pub refract: Box<Material<'p>>,
 }
 
-impl FresnelMix {
+impl<'p> FresnelMix<'p> {
     fn reflect(
         &self,
-        light: &mut Light,
+        light: &mut tracer::Light,
         ray_in: Ray3<f32>,
         normal: Ray3<f32>,
         rng: &mut impl Rng,
@@ -262,11 +290,11 @@ impl FresnelMix {
 
     fn get_emission(
         &self,
-        light: &mut Light,
+        light: &mut tracer::Light,
         ray_in: Vector3<f32>,
         normal: Ray3<f32>,
         rng: &mut impl Rng,
-    ) -> Option<&RenderMath<Color>> {
+    ) -> Option<Program<RenderContext, Light>> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
@@ -299,12 +327,12 @@ impl FresnelMix {
 fn fresnel_mix<'a, R: Rng>(
     ior: f32,
     env_ior: f32,
-    reflect: &'a Material,
-    refract: &'a Material,
+    reflect: &'a Material<'a>,
+    refract: &'a Material<'a>,
     ray_in: Vector3<f32>,
     normal: Ray3<f32>,
     rng: &mut R,
-) -> &'a Material {
+) -> &'a Material<'a> {
     let factor = if ray_in.dot(normal.direction) < 0.0 {
         math::utils::schlick(env_ior, ior, normal.direction, ray_in)
     } else {
@@ -318,18 +346,18 @@ fn fresnel_mix<'a, R: Rng>(
     }
 }
 
-pub struct Refractive {
-    color: RenderMath<Color>,
+pub struct Refractive<'p> {
+    color: LightProgram<'p>,
     ior: f32,
     dispersion: f32,
     env_ior: f32,
     env_dispersion: f32,
 }
 
-impl Refractive {
+impl<'p> Refractive<'p> {
     fn reflect(
         &self,
-        light: &mut Light,
+        light: &mut tracer::Light,
         ray_in: Ray3<f32>,
         normal: Ray3<f32>,
         rng: &mut impl Rng,
@@ -338,9 +366,9 @@ impl Refractive {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
             let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
-            refract(ior, env_ior, &self.color, ray_in, normal, rng)
+            refract(ior, env_ior, self.color, ray_in, normal, rng)
         } else {
-            refract(self.ior, self.env_ior, &self.color, ray_in, normal, rng)
+            refract(self.ior, self.env_ior, self.color, ray_in, normal, rng)
         }
     }
 }
@@ -348,7 +376,7 @@ impl Refractive {
 fn refract<'a, R: Rng>(
     ior: f32,
     env_ior: f32,
-    color: &'a RenderMath<Color>,
+    color: Program<'a, RenderContext, Light>,
     ray_in: Ray3<f32>,
     normal: Ray3<f32>,
     rng: &mut R,
@@ -370,7 +398,7 @@ fn refract<'a, R: Rng>(
     let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
     if cos2t < 0.0 {
         // Total internal reflection
-        return Reflect(Ray3::new(normal.origin, reflected), &color, 1.0, None);
+        return Reflect(Ray3::new(normal.origin, reflected), color, 1.0, None);
     }
 
     let s = if into { 1.0 } else { -1.0 } * (ddn * nnt + cos2t.sqrt());
@@ -393,8 +421,8 @@ fn refract<'a, R: Rng>(
     let tp = tr / (1.0 - p);
 
     if rng.gen::<f32>() < p {
-        return Reflect(Ray3::new(normal.origin, reflected), &color, rp, None);
+        return Reflect(Ray3::new(normal.origin, reflected), color, rp, None);
     } else {
-        return Reflect(Ray3::new(normal.origin, tdir), &color, tp, None);
+        return Reflect(Ray3::new(normal.origin, tdir), color, tp, None);
     }
 }

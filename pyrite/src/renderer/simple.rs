@@ -7,7 +7,10 @@ use crate::film::{Film, Sample};
 use crate::renderer::algorithm::contribute;
 use crate::renderer::{Renderer, Status, WorkPool};
 use crate::tracer::{trace, Light};
-use crate::world::World;
+use crate::{
+    project::program::{ExecutionContext, Resources},
+    world::World,
+};
 
 pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     film: &Film,
@@ -16,6 +19,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     renderer: &Renderer,
     world: &World,
     camera: &Camera,
+    resources: Resources,
 ) {
     fn gen_rng() -> XorShiftRng {
         XorShiftRng::from_rng(rand::thread_rng()).expect("could not generate RNG")
@@ -35,7 +39,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     workers.do_work(
         tiles.into_iter().map(|f| (f, gen_rng())),
         |(tile, rng)| {
-            render_tile(rng, tile, film, camera, world, renderer);
+            render_tile(rng, tile, film, camera, world, resources, renderer);
         },
         |_, _| {
             progress += 1;
@@ -53,10 +57,12 @@ fn render_tile<R: Rng>(
     film: &Film,
     camera: &Camera,
     world: &World,
+    resources: Resources,
     renderer: &Renderer,
 ) {
     let mut additional_samples = Vec::with_capacity(renderer.spectrum_samples as usize - 1);
     let mut path = Vec::with_capacity(renderer.bounces as usize);
+    let mut exe = ExecutionContext::new(resources);
 
     for _ in 0..(tile.area() * renderer.pixel_samples as usize) {
         additional_samples.clear();
@@ -100,11 +106,12 @@ fn render_tile<R: Rng>(
 
         for bounce in &path {
             for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
-                used_additional = contribute(bounce, sample, reflectance, true) && used_additional;
+                used_additional =
+                    contribute(bounce, sample, reflectance, true, &mut exe) && used_additional;
             }
 
             let (ref mut sample, ref mut reflectance) = main_sample;
-            contribute(bounce, sample, reflectance, false);
+            contribute(bounce, sample, reflectance, false, &mut exe);
         }
 
         film.expose(position, main_sample.0);

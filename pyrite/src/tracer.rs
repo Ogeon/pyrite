@@ -1,4 +1,4 @@
-use std;
+use std::{self, error::Error};
 
 use rand::Rng;
 
@@ -6,15 +6,17 @@ use cgmath::{EuclideanSpace, InnerSpace, Point2, Point3, Vector3};
 use collision::Ray3;
 
 use crate::{
-    color::Color,
+    color,
     lamp::{self, Lamp},
-    math::{RenderMath, DIST_EPSILON},
+    math::DIST_EPSILON,
+    project::program::{InputFn, Program, ProgramInput},
     world::World,
 };
 
 pub use self::Reflection::{Emit, Reflect};
 
 pub type Brdf = fn(ray_in: Vector3<f32>, ray_out: Vector3<f32>, normal: Vector3<f32>) -> f32;
+pub type LightProgram<'p> = Program<'p, RenderContext, color::Light>;
 
 pub trait ParametricValue<From, To>: Send + Sync {
     fn get(&self, i: &From) -> To;
@@ -27,8 +29,8 @@ impl<From> ParametricValue<From, f32> for f32 {
 }
 
 pub enum Reflection<'a> {
-    Emit(&'a RenderMath<Color>),
-    Reflect(Ray3<f32>, &'a RenderMath<Color>, f32, Option<Brdf>),
+    Emit(LightProgram<'a>),
+    Reflect(Ray3<f32>, LightProgram<'a>, f32, Option<Brdf>),
 }
 
 pub struct RenderContext {
@@ -38,10 +40,22 @@ pub struct RenderContext {
     pub texture: Point2<f32>,
 }
 
+impl ProgramInput for RenderContext {
+    fn normal() -> Result<InputFn<Self>, Box<dyn Error>> {
+        Ok(|_, this, _| this.normal.into())
+    }
+    fn incident() -> Result<InputFn<Self>, Box<dyn Error>> {
+        Ok(|_, this, _| this.incident.into())
+    }
+    fn texture_coordinates() -> Result<InputFn<Self>, Box<dyn Error>> {
+        Ok(|_, this, _| this.texture.into())
+    }
+}
+
 pub struct Bounce<'a> {
     pub ty: BounceType,
     pub light: Light,
-    pub color: &'a RenderMath<Color>,
+    pub color: LightProgram<'a>,
     pub incident: Vector3<f32>,
     pub normal: Ray3<f32>,
     pub texture: Point2<f32>,
@@ -75,7 +89,7 @@ impl BounceType {
 
 pub struct DirectLight<'a> {
     pub light: Light,
-    pub color: &'a RenderMath<Color>,
+    pub color: LightProgram<'a>,
     pub incident: Vector3<f32>,
     pub normal: Vector3<f32>,
     pub probability: f32,
@@ -183,7 +197,7 @@ pub fn trace<'w, R: Rng>(
                 } else {
                     None
                 };
-                let color = directional.unwrap_or_else(|| &world.sky);
+                let color = directional.unwrap_or_else(|| world.sky);
                 path.push(Bounce {
                     ty: BounceType::Emission,
                     light,
@@ -292,12 +306,12 @@ fn trace_direct<'w, R: Rng>(
     }
 }
 
-fn trace_directional<'w>(ray: Vector3<f32>, world: &'w World) -> Option<&'w RenderMath<Color>> {
+fn trace_directional<'w>(ray: Vector3<f32>, world: &'w World) -> Option<LightProgram<'w>> {
     for light in &world.lights {
         if let &Lamp::Directional {
             direction,
             width,
-            ref color,
+            color,
         } = light
         {
             if direction.dot(ray) >= width {

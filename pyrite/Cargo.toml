@@ -28,6 +28,7 @@ rlua = "0.17"
 rlua_serde = "0.4"
 serde = "^1.0"
 serde-value = "0.6"
+bumpalo = "^3.4"
 
 [build-dependencies]
 csv = "^1.1"

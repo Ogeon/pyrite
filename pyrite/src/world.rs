@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::{error::Error, sync::Arc};
 
 use rand::Rng;
@@ -11,28 +10,36 @@ use collision::Ray3;
 
 use crate::spatial::{bkd_tree, Dim3};
 
-use crate::color::Color;
 use crate::lamp::Lamp;
 use crate::materials::Material;
 use crate::{
-    math::{utils::ortho, RenderMath},
-    project::{FromExpression, WorldObject},
+    math::utils::ortho,
+    project::{
+        eval_context::{EvalContext, Evaluate, EvaluateOr},
+        expressions::{Expression, Expressions},
+        meshes::Meshes,
+        program::ProgramCompiler,
+        WorldObject,
+    },
     shapes::{distance_estimators::QuatMul, BoundingVolume, Intersection, Shape, Triangle, Vertex},
-    tracer::ParametricValue,
+    tracer::{LightProgram, ParametricValue},
 };
 
-pub struct World {
-    pub sky: RenderMath<Color>,
-    pub lights: Vec<Lamp>,
-    pub objects: bkd_tree::BkdTree<Arc<Shape>>,
+pub struct World<'p> {
+    pub sky: LightProgram<'p>,
+    pub lights: Vec<Lamp<'p>>,
+    pub objects: bkd_tree::BkdTree<Arc<Shape<'p>>>,
 }
 
-impl World {
+impl<'p> World<'p> {
     pub fn from_project(
         project: crate::project::World,
-        make_path: &impl Fn(&str) -> PathBuf,
+        eval_context: EvalContext,
+        programs: ProgramCompiler<'p>,
+        expressions: &Expressions,
+        meshes: &Meshes,
     ) -> Result<Self, Box<dyn Error>> {
-        let sky = RenderMath::from_expression_or_else(project.sky, make_path, || 0.0f32.into())?;
+        let sky = programs.compile(&project.sky.unwrap_or(Expression::Number(0.0)), expressions)?;
 
         let mut objects: Vec<Arc<Shape>> = Vec::new();
         let mut lights = Vec::new();
@@ -44,12 +51,13 @@ impl World {
                     radius,
                     material,
                 } => {
-                    let material = Material::from_project(material, make_path)?;
+                    let material =
+                        Material::from_project(material, eval_context, programs, expressions)?;
                     let emissive = material.is_emissive();
 
                     let shape = Arc::new(Shape::Sphere {
-                        position: position.parse(make_path)?,
-                        radius: radius.parse(make_path)?,
+                        position: position.evaluate(eval_context)?,
+                        radius: radius.evaluate(eval_context)?,
                         material,
                     });
 
@@ -65,21 +73,23 @@ impl World {
                     texture_scale,
                     material,
                 } => {
-                    let normal = normal.parse(make_path)?;
+                    let normal = normal.evaluate(eval_context)?;
                     let tangent = ortho(normal).normalize();
                     let binormal = normal.cross(tangent).normalize();
 
-                    let material = Material::from_project(material, make_path)?;
+                    let material =
+                        Material::from_project(material, eval_context, programs, expressions)?;
                     let emissive = material.is_emissive();
+                    let texture_scale: Option<_> = texture_scale.evaluate(eval_context)?;
 
                     let shape = Arc::new(Shape::Plane {
                         shape: collision::Plane::from_point_normal(
-                            origin.parse(make_path)?,
+                            origin.evaluate(eval_context)?,
                             normal,
                         ),
                         tangent,
                         binormal,
-                        texture_scale: f32::from_expression_or(texture_scale, make_path, 1.0)?,
+                        texture_scale: texture_scale.unwrap_or(1.0),
                         material,
                     });
 
@@ -93,17 +103,19 @@ impl World {
                     bounds,
                     material,
                 } => {
-                    let material = Material::from_project(material, make_path)?;
+                    let material =
+                        Material::from_project(material, eval_context, programs, expressions)?;
                     let emissive = material.is_emissive();
 
                     let bounds = match bounds {
-                        crate::project::BoundingVolume::Box { min, max } => {
-                            BoundingVolume::Box(min.parse(make_path)?, max.parse(make_path)?)
-                        }
+                        crate::project::BoundingVolume::Box { min, max } => BoundingVolume::Box(
+                            min.evaluate(eval_context)?,
+                            max.evaluate(eval_context)?,
+                        ),
                         crate::project::BoundingVolume::Sphere { position, radius } => {
                             BoundingVolume::Sphere(
-                                position.parse(make_path)?,
-                                radius.parse(make_path)?,
+                                position.evaluate(eval_context)?,
+                                radius.evaluate(eval_context)?,
                             )
                         }
                     };
@@ -115,10 +127,10 @@ impl World {
                             power,
                             constant,
                         } => Box::new(crate::shapes::distance_estimators::Mandelbulb {
-                            iterations: iterations.parse(make_path)?,
-                            threshold: threshold.parse(make_path)?,
-                            power: power.parse(make_path)?,
-                            constant: constant.map(|e| e.parse(make_path)).transpose()?,
+                            iterations: iterations.evaluate(eval_context)?,
+                            threshold: threshold.evaluate(eval_context)?,
+                            power: power.evaluate(eval_context)?,
+                            constant: constant.map(|e| e.evaluate(eval_context)).transpose()?,
                         }) as Box<dyn ParametricValue<_, _>>,
                         crate::project::Estimator::QuaternionJulia {
                             iterations,
@@ -127,10 +139,10 @@ impl World {
                             slice_plane,
                             variant,
                         } => Box::new(crate::shapes::distance_estimators::QuaternionJulia {
-                            iterations: iterations.parse(make_path)?,
-                            threshold: threshold.parse(make_path)?,
-                            constant: constant.parse(make_path)?,
-                            slice_plane: slice_plane.parse(make_path)?,
+                            iterations: iterations.evaluate(eval_context)?,
+                            threshold: threshold.evaluate(eval_context)?,
+                            constant: constant.evaluate(eval_context)?,
+                            slice_plane: slice_plane.evaluate(eval_context)?,
                             ty: match &*variant.name {
                                 "regular" => QuatMul::Regular,
                                 "cubic" => QuatMul::Cubic,
@@ -163,18 +175,17 @@ impl World {
                     scale,
                     transform,
                 } => {
-                    let path = make_path(&file);
-                    let transform = transform
-                        .map(|t| t.into_matrix(make_path))
-                        .unwrap_or_else(|| Ok(Matrix4::identity()))?;
-                    let scale = f32::from_expression_or(scale, make_path, 1.0)?;
-                    let obj = obj::Obj::load(path.as_ref()).map_err(|error| error.to_string())?;
+                    let transform =
+                        transform.evaluate_or_else(eval_context, || Matrix4::identity())?;
+                    let scale = scale.evaluate_or(eval_context, 1.0)?;
+                    let obj = meshes.get(file);
                     for object in &obj.objects {
                         println!("adding object '{}'", object.name);
 
                         let (object_material, emissive) = match materials.remove(&object.name) {
                             Some(m) => {
-                                let material = Material::from_project(m, make_path)?;
+                                let material =
+                                    Material::from_project(m, eval_context, programs, expressions)?;
                                 let emissive = material.is_emissive();
                                 (Arc::new(material), emissive)
                             }
@@ -192,7 +203,7 @@ impl World {
                                 match *shape {
                                     genmesh::Polygon::PolyTri(genmesh::Triangle { x, y, z }) => {
                                         let mut triangle =
-                                            make_triangle(&obj, x, y, z, object_material.clone());
+                                            make_triangle(obj, x, y, z, object_material.clone());
                                         triangle.scale(scale);
                                         triangle.transform(transform);
                                         let triangle = Arc::new(triangle);
@@ -213,13 +224,13 @@ impl World {
                     width,
                     color,
                 } => lights.push(Lamp::Directional {
-                    direction: direction.parse(make_path)?,
-                    width: width.parse(make_path)?,
-                    color: color.parse(make_path)?,
+                    direction: direction.evaluate(eval_context)?,
+                    width: width.evaluate(eval_context)?,
+                    color: programs.compile(&color, expressions)?,
                 }),
                 WorldObject::PointLight { position, color } => lights.push(Lamp::Point(
-                    position.parse(make_path)?,
-                    color.parse(make_path)?,
+                    position.evaluate(eval_context)?,
+                    programs.compile(&color, expressions)?,
                 )),
             }
         }
@@ -251,7 +262,7 @@ pub trait ObjectContainer {
     fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)>;
 }
 
-impl ObjectContainer for bkd_tree::BkdTree<Arc<Shape>> {
+impl<'p> ObjectContainer for bkd_tree::BkdTree<Arc<Shape<'p>>> {
     fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)> {
         let ray = BkdRay(*ray);
         self.find(&ray)
@@ -305,13 +316,13 @@ impl bkd_tree::Ray for BkdRay {
     }
 }
 
-fn make_triangle<M: obj::GenPolygon>(
+fn make_triangle<'p, M: obj::GenPolygon>(
     obj: &obj::Obj<'_, M>,
     obj::IndexTuple(v1, t1, n1): obj::IndexTuple,
     obj::IndexTuple(v2, t2, n2): obj::IndexTuple,
     obj::IndexTuple(v3, t3, n3): obj::IndexTuple,
-    material: Arc<Material>,
-) -> Shape {
+    material: Arc<Material<'p>>,
+) -> Shape<'p> {
     let v1 = obj.position[v1].into();
     let v2 = obj.position[v2].into();
     let v3 = obj.position[v3].into();

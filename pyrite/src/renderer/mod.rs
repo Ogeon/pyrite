@@ -1,12 +1,9 @@
-use std::{error::Error, path::PathBuf};
-
 use num_cpus;
 
 use crate::cameras;
 use crate::world;
 
-use crate::film::Film;
-use crate::project::FromExpression;
+use crate::{film::Film, project::program::Resources};
 
 mod algorithm;
 mod bidirectional;
@@ -28,13 +25,10 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn from_project(
-        project: crate::project::Renderer,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn from_project(project: crate::project::Renderer) -> Self {
         match project {
             crate::project::Renderer::Simple { shared } => {
-                Self::from_shared(shared, Algorithm::Simple, make_path)
+                Self::from_shared(shared, Algorithm::Simple)
             }
             crate::project::Renderer::Bidirectional {
                 shared,
@@ -42,9 +36,8 @@ impl Renderer {
             } => Self::from_shared(
                 shared,
                 Algorithm::Bidirectional(bidirectional::BidirParams {
-                    bounces: u32::from_expression_or(light_bounces, make_path, 8)?,
+                    bounces: light_bounces.unwrap_or(8),
                 }),
-                make_path,
             ),
             crate::project::Renderer::PhotonMapping {
                 shared,
@@ -55,32 +48,27 @@ impl Renderer {
             } => Self::from_shared(
                 shared,
                 Algorithm::PhotonMapping(photon_mapping::Config {
-                    radius: f32::from_expression_or(radius, make_path, 0.1)?,
-                    photon_bounces: u32::from_expression_or(photon_bounces, make_path, 8)?,
-                    photons: usize::from_expression_or(photons, make_path, 10000)?,
-                    photon_passes: usize::from_expression_or(photon_passes, make_path, 1)?,
+                    radius: radius.unwrap_or(0.1),
+                    photon_bounces: photon_bounces.unwrap_or(8),
+                    photons: photons.unwrap_or(10000),
+                    photon_passes: photon_passes.unwrap_or(1),
                 }),
-                make_path,
             ),
         }
     }
 
-    fn from_shared(
-        shared: crate::project::RendererShared,
-        algorithm: Algorithm,
-        make_path: &impl Fn(&str) -> PathBuf,
-    ) -> Result<Self, Box<dyn Error>> {
-        Ok(Self {
-            threads: usize::from_expression_or_else(shared.threads, make_path, || num_cpus::get())?,
-            bounces: u32::from_expression_or(shared.bounces, make_path, 8)?,
-            pixel_samples: shared.pixel_samples.parse(make_path)?,
-            light_samples: usize::from_expression_or(shared.light_samples, make_path, 4)?,
-            spectrum_samples: u32::from_expression_or(shared.spectrum_samples, make_path, 10)?,
-            spectrum_bins: usize::from_expression_or(shared.spectrum_resolution, make_path, 64)?,
+    fn from_shared(shared: crate::project::RendererShared, algorithm: Algorithm) -> Self {
+        Self {
+            threads: shared.threads.unwrap_or_else(|| num_cpus::get()),
+            bounces: shared.bounces.unwrap_or(8),
+            pixel_samples: shared.pixel_samples,
+            light_samples: shared.light_samples.unwrap_or(4),
+            spectrum_samples: shared.spectrum_samples.unwrap_or(10),
+            spectrum_bins: shared.spectrum_resolution.unwrap_or(64),
             spectrum_span: DEFAULT_SPECTRUM_SPAN,
-            tile_size: usize::from_expression_or(shared.tile_size, make_path, 32)?,
+            tile_size: shared.tile_size.unwrap_or(32),
             algorithm,
-        })
+        }
     }
 
     pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
@@ -90,15 +78,18 @@ impl Renderer {
         on_status: F,
         camera: &cameras::Camera,
         world: &world::World,
+        resources: Resources,
     ) {
         match self.algorithm {
-            Algorithm::Simple => simple::render(film, workers, on_status, self, world, camera),
-            Algorithm::Bidirectional(ref config) => {
-                bidirectional::render(film, workers, on_status, self, config, world, camera)
+            Algorithm::Simple => {
+                simple::render(film, workers, on_status, self, world, camera, resources)
             }
-            Algorithm::PhotonMapping(ref config) => {
-                photon_mapping::render(film, workers, on_status, self, config, world, camera)
-            }
+            Algorithm::Bidirectional(ref config) => bidirectional::render(
+                film, workers, on_status, self, config, world, camera, resources,
+            ),
+            Algorithm::PhotonMapping(ref config) => photon_mapping::render(
+                film, workers, on_status, self, config, world, camera, resources,
+            ),
         }
     }
 }

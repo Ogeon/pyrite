@@ -1,8 +1,17 @@
 _pyrite = {
-    binary_operator = function(type, a, b)
-        local properties = {type = type, a = a, b = b}
-        setmetatable(properties, _pyrite.expression_mt)
+    binary_operator = function(operator, lhs, rhs)
+        local properties = {
+            type = "binary",
+            operator = operator,
+            lhs = lhs,
+            rhs = rhs,
+        }
+        _pyrite.make_expression(properties)
         return properties
+    end,
+    make_object = function(object, meta)
+        setmetatable(object, meta)
+        assign_id(object)
     end,
 }
 
@@ -27,6 +36,9 @@ end
 
 _pyrite.basics_mt = {}
 _pyrite.basics_mt.__index = _pyrite.basics_mt
+_pyrite.make_basic = function(object)
+    _pyrite.make_object(object, _pyrite.basics_mt)
+end
 
 -- Shallow clones a table.
 function _pyrite.basics_mt:clone()
@@ -36,7 +48,7 @@ function _pyrite.basics_mt:clone()
     if self_type == "table" then
         cloned = {}
         for key, value in pairs(self) do cloned[key] = value end
-        setmetatable(cloned, getmetatable(self))
+        _pyrite.make_object(cloned, getmetatable(self))
     else
         cloned = self
     end
@@ -64,6 +76,9 @@ end
 
 _pyrite.expression_mt = setmetatable({}, {__index = _pyrite.basics_mt})
 _pyrite.expression_mt.__index = _pyrite.expression_mt
+_pyrite.make_expression = function(object)
+    _pyrite.make_object(object, _pyrite.expression_mt)
+end
 
 function _pyrite.expression_mt:__add(other)
     return _pyrite.binary_operator("add", self, other)
@@ -95,30 +110,30 @@ function _pyrite.expression_mt:fresnel_mix(other, ior)
             ior = ior,
         }
     end
-    setmetatable(properties, _pyrite.expression_mt)
+    _pyrite.make_expression(properties)
 
     return properties
 end
 fresnel_mix = _pyrite.expression_mt.fresnel_mix
 
-function _pyrite.expression_mt:mix(other, factor)
+function _pyrite.expression_mt:mix(other, amount)
     local properties
 
     if type(self) == "table" and self.type == nil then
         properties = self
         properties.type = "mix"
     else
-        properties = {type = "mix", a = self, b = other, factor = factor}
+        properties = {type = "mix", lhs = self, rhs = other, amount = amount}
     end
-    setmetatable(properties, _pyrite.expression_mt)
+    _pyrite.make_expression(properties)
 
     return properties
 end
 mix = _pyrite.expression_mt.mix
 
 function fresnel(ior, env_ior)
-    local properties = {type = "fresnel", ior = ior, env_ior = env_ior}
-    setmetatable(properties, _pyrite.expression_mt)
+    local properties = {type = "fresnel", ior = ior, env_ior = env_ior or 1}
+    _pyrite.make_expression(properties)
 
     return properties
 end
@@ -144,14 +159,15 @@ function vector(x, y, z, w)
             w = w or 0.0,
         }
     end
-    setmetatable(properties, _pyrite.expression_mt)
+    _pyrite.make_expression(properties)
 
     return properties
 end
 
 function spectrum(points)
+    if points._id == nil then assign_id(points); end
     local properties = {type = "spectrum", points = points}
-    setmetatable(properties, _pyrite.expression_mt)
+    _pyrite.make_expression(properties)
 
     return properties
 end
@@ -163,14 +179,14 @@ function rgb(red, green, blue)
         green = green or 0.0,
         blue = blue or 0.0,
     }
-    setmetatable(properties, _pyrite.expression_mt)
+    _pyrite.make_expression(properties)
 
     return properties
 end
 
 function texture(path)
     local properties = {type = "texture", path = path}
-    setmetatable(properties, _pyrite.expression_mt)
+    _pyrite.make_expression(properties)
 
     return properties
 end
@@ -178,22 +194,22 @@ end
 shape = {
     sphere = function(properties)
         properties.type = "sphere"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
     plane = function(properties)
         properties.type = "plane"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
     mesh = function(properties)
         properties.type = "mesh"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
     ray_marched = function(properties)
         properties.type = "ray_marched"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
 }
@@ -201,24 +217,24 @@ shape = {
 ray_marched = {
     quaternion_julia = function(properties)
         properties.type = "quaternion_julia"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
     mandelbulb = function(properties)
         properties.type = "mandelbulb"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
 }
 
 quaternion_julia = {}
 quaternion_julia.cubic = {type = "quaternion_julia", name = "cubic"}
-setmetatable(quaternion_julia.cubic, _pyrite.basics_mt)
+_pyrite.make_basic(quaternion_julia.cubic)
 
 bounds = {
     box = function(properties)
         properties.type = "box"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
 }
@@ -226,34 +242,35 @@ bounds = {
 material = {
     diffuse = function(properties)
         properties.type = "diffuse"
-        setmetatable(properties, _pyrite.expression_mt)
+        _pyrite.make_expression(properties)
         return properties
     end,
     emission = function(properties)
         properties.type = "emission"
-        setmetatable(properties, _pyrite.expression_mt)
+        _pyrite.make_expression(properties)
         return properties
     end,
     mirror = function(properties)
         properties.type = "mirror"
-        setmetatable(properties, _pyrite.expression_mt)
+        _pyrite.make_expression(properties)
         return properties
     end,
     refractive = function(properties)
         properties.type = "refractive"
-        setmetatable(properties, _pyrite.expression_mt)
+        _pyrite.make_expression(properties)
         return properties
     end,
 }
 
 light_source = {}
-light_source.d65 = {type = "light_source", name = "d65"}
-setmetatable(light_source.d65, _pyrite.expression_mt)
+light_source.d65 = {type = "light_source", light_source = {name = "d65"}}
+assign_id(light_source.d65.light_source);
+_pyrite.make_expression(light_source.d65)
 
 transform = {
     look_at = function(properties)
         properties.type = "look_at"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
 }
@@ -261,7 +278,7 @@ transform = {
 camera = {
     perspective = function(properties)
         properties.type = "perspective"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
 }
@@ -269,17 +286,17 @@ camera = {
 renderer = {
     simple = function(properties)
         properties.type = "simple"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
     bidirectional = function(properties)
         properties.type = "bidirectional"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
     photon_mapping = function(properties)
         properties.type = "photon_mapping"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
 }
@@ -287,7 +304,7 @@ renderer = {
 light = {
     point = function(properties)
         properties.type = "point_light"
-        setmetatable(properties, _pyrite.basics_mt)
+        _pyrite.make_basic(properties)
         return properties
     end,
 }

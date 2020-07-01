@@ -4,19 +4,28 @@ use std::time::Instant;
 
 use image;
 
-use std::io::{stdout, Write};
 use std::{
     error::Error,
+    io::{stdout, Write},
     ops::{Add, AddAssign, Div, Mul},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use cgmath::Vector2;
 
 use palette::{ComponentWise, LinSrgb, Pixel, Srgb, Xyz};
 
-use crate::film::{Film, Spectrum};
-use crate::math::utils::Interpolated;
+use bumpalo::Bump;
+
+use film::{Film, Spectrum};
+use math::utils::Interpolated;
+use project::{
+    eval_context::EvalContext,
+    expressions::Expressions,
+    meshes::Meshes,
+    program::{ProgramCompiler, Resources},
+    ProjectData,
+};
 
 mod cameras;
 mod color;
@@ -39,9 +48,16 @@ mod xyz;
 fn main() {
     let mut args = std::env::args();
     let name = args.next().unwrap_or("pyrite".into());
+    let arena = Bump::new();
 
     if let Some(project_path) = args.next() {
-        let project = match project::load_project(&project_path) {
+        let ProjectData {
+            expressions,
+            meshes,
+            spectra,
+            textures,
+            project,
+        } = match project::load_project(&project_path) {
             Ok(project) => project,
             Err(error) => {
                 eprintln!("error while loading project file: {}", error);
@@ -49,33 +65,51 @@ fn main() {
             }
         };
 
-        let project_dir = Path::new(&project_path)
-            .parent()
-            .expect("could not get the project path parent directory");
+        let programs = ProgramCompiler::new(&arena);
+        let resources = Resources {
+            spectra: &spectra,
+            textures: &textures,
+        };
 
-        match parse_project(project, |path| project_dir.join(path)) {
+        match parse_project(project, programs, &expressions, &meshes, resources) {
             Ok((image, context)) => render(image, context, project_path),
             Err(error) => eprintln!("error while parsing project: {}", error),
-        }
+        };
     } else {
         eprintln!("usage: {} project_file", name);
     }
 }
 
-fn parse_project(
+fn parse_project<'p>(
     project: project::Project,
-    make_path: impl Fn(&str) -> PathBuf,
-) -> Result<(project::Image, RenderContext), Box<dyn Error>> {
+    programs: ProgramCompiler<'p>,
+    expressions: &Expressions,
+    meshes: &Meshes,
+    resources: Resources<'p>,
+) -> Result<(project::Image, RenderContext<'p>), Box<dyn Error>> {
+    let eval_context = EvalContext { expressions };
+
     let config = RenderContext {
-        camera: cameras::Camera::from_project(project.camera, &make_path)?,
-        renderer: renderer::Renderer::from_project(project.renderer, &make_path)?,
-        world: world::World::from_project(project.world, &make_path)?,
+        camera: cameras::Camera::from_project(project.camera, eval_context)?,
+        renderer: renderer::Renderer::from_project(project.renderer),
+        world: world::World::from_project(
+            project.world,
+            eval_context,
+            programs,
+            expressions,
+            meshes,
+        )?,
+        resources,
     };
 
     Ok((project.image, config))
 }
 
-fn render<P: AsRef<Path>>(image_settings: project::Image, config: RenderContext, project_path: P) {
+fn render<P: AsRef<Path>>(
+    image_settings: project::Image,
+    config: RenderContext<'_>,
+    project_path: P,
+) {
     let image_size = Vector2::new(image_settings.width, image_settings.height);
 
     let mut pool = renderer::RayonPool;
@@ -155,6 +189,7 @@ fn render<P: AsRef<Path>>(image_settings: project::Image, config: RenderContext,
         },
         &config.camera,
         &config.world,
+        config.resources,
     );
 
     /*crossbeam::scope(|scope| {
@@ -295,8 +330,9 @@ where
     }
 }
 
-struct RenderContext {
+struct RenderContext<'p> {
     camera: cameras::Camera,
-    world: world::World,
+    world: world::World<'p>,
     renderer: renderer::Renderer,
+    resources: Resources<'p>,
 }

@@ -12,7 +12,11 @@ use crate::renderer::algorithm::contribute;
 use crate::renderer::{Renderer, Status, WorkPool};
 use crate::tracer::{trace, Bounce, BounceType, Light};
 use crate::utils::pairs;
-use crate::{math::DIST_EPSILON, world::World};
+use crate::{
+    math::DIST_EPSILON,
+    project::program::{ExecutionContext, Resources},
+    world::World,
+};
 
 pub struct BidirParams {
     pub bounces: u32,
@@ -26,6 +30,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     config: &BidirParams,
     world: &World,
     camera: &Camera,
+    resources: Resources,
 ) {
     fn gen_rng() -> XorShiftRng {
         XorShiftRng::from_rng(rand::thread_rng()).expect("could not generate RNG")
@@ -45,7 +50,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     workers.do_work(
         tiles.into_iter().map(|f| (f, gen_rng())),
         |(tile, rng)| {
-            render_tile(rng, tile, film, camera, world, renderer, config);
+            render_tile(rng, tile, film, camera, world, resources, renderer, config);
         },
         |_, _| {
             progress += 1;
@@ -63,11 +68,13 @@ fn render_tile<R: Rng>(
     film: &Film,
     camera: &Camera,
     world: &World,
+    resources: Resources,
     renderer: &Renderer,
     bidir_params: &BidirParams,
 ) {
     let mut lamp_path = Vec::with_capacity(bidir_params.bounces as usize + 1);
     let mut camera_path = Vec::with_capacity(renderer.bounces as usize);
+    let mut exe = ExecutionContext::new(resources);
 
     for _ in 0..(tile.area() * renderer.pixel_samples as usize) {
         lamp_path.clear();
@@ -183,12 +190,13 @@ fn render_tile<R: Rng>(
 
         for bounce in camera_path.drain(..) {
             for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
-                used_additional = contribute(&bounce, sample, reflectance, true) && used_additional;
+                used_additional =
+                    contribute(&bounce, sample, reflectance, true, &mut exe) && used_additional;
             }
 
             {
                 let (ref mut sample, ref mut reflectance) = main_sample;
-                contribute(&bounce, sample, reflectance, false);
+                contribute(&bounce, sample, reflectance, false, &mut exe);
             }
 
             for mut contribution in connect_paths(
@@ -198,6 +206,7 @@ fn render_tile<R: Rng>(
                 &lamp_path,
                 world,
                 used_additional,
+                &mut exe,
             ) {
                 contribution.weight = weight;
                 film.expose(position, contribution);
@@ -241,14 +250,15 @@ fn render_tile<R: Rng>(
                     for (i, bounce) in lamp_path[i..].iter().enumerate() {
                         for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
                             used_additional =
-                                contribute(bounce, sample, reflectance, true) && used_additional;
+                                contribute(bounce, sample, reflectance, true, &mut exe)
+                                    && used_additional;
                             if i == 0 {
                                 *reflectance *= brdf_in;
                             }
                         }
 
                         let (ref mut sample, ref mut reflectance) = main_sample;
-                        contribute(bounce, sample, reflectance, false);
+                        contribute(bounce, sample, reflectance, false, &mut exe);
                         if i == 0 {
                             *reflectance *= brdf_in;
                         }
@@ -267,13 +277,14 @@ fn render_tile<R: Rng>(
     }
 }
 
-fn connect_paths(
-    bounce: &Bounce<'_>,
+fn connect_paths<'a>(
+    bounce: &Bounce<'a>,
     main: &(Sample, f32),
     additional: &[(Sample, f32)],
-    path: &[Bounce<'_>],
+    path: &[Bounce<'a>],
     world: &World,
     use_additional: bool,
+    exe: &mut ExecutionContext<'a>,
 ) -> Vec<Sample> {
     let mut contributions = vec![];
     let bounce_brdf = match bounce.ty {
@@ -333,14 +344,15 @@ fn connect_paths(
 
         for (i, bounce) in path[i..].iter().enumerate() {
             for &mut (ref mut sample, ref mut reflectance) in &mut additional {
-                use_additional = contribute(bounce, sample, reflectance, true) && use_additional;
+                use_additional =
+                    contribute(bounce, sample, reflectance, true, exe) && use_additional;
                 if i == 0 {
                     *reflectance *= brdf_in;
                 }
             }
 
             let (ref mut sample, ref mut reflectance) = main;
-            contribute(bounce, sample, reflectance, false);
+            contribute(bounce, sample, reflectance, false, exe);
             if i == 0 {
                 *reflectance *= brdf_in;
             }
