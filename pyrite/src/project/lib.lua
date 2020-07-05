@@ -164,9 +164,8 @@ function vector(x, y, z, w)
     return properties
 end
 
-function spectrum(points)
-    if points._id == nil then assign_id(points); end
-    local properties = {type = "spectrum", points = points}
+function spectrum(properties)
+    properties.type = "spectrum"
     _pyrite.make_expression(properties)
 
     return properties
@@ -267,8 +266,7 @@ material = {
 }
 
 light_source = {}
-light_source.d65 = {type = "light_source", light_source = {name = "d65"}}
-assign_id(light_source.d65.light_source);
+light_source.d65 = {type = "light_source", name = "d65"}
 _pyrite.make_expression(light_source.d65)
 
 transform = {

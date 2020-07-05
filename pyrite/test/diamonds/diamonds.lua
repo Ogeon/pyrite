@@ -12,7 +12,7 @@ return {
     image = {width = 512, height = 300},
 
     renderer = renderer.simple {
-        pixel_samples = 100,
+        pixel_samples = 200,
         spectrum_samples = 1,
         spectrum_bins = 50,
         tile_size = 32,

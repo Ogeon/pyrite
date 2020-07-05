@@ -45,6 +45,22 @@ impl<'a, 'lua, T: FromLua<'lua>> ParseContext<'a, 'lua, T> {
     pub fn parse<U: Parse<'lua, Input = T>>(self) -> Result<U, Box<dyn Error>> {
         U::parse(self)
     }
+
+    pub fn clone(&mut self) -> ParseContext<'_, 'lua, T>
+    where
+        T: Clone,
+    {
+        ParseContext {
+            expressions: self.expressions,
+            meshes: self.meshes,
+            spectra: self.spectra,
+            textures: self.textures,
+            tables: self.tables,
+
+            current_value: self.current_value.clone(),
+            context: self.context,
+        }
+    }
 }
 
 impl<'a, 'lua> ParseContext<'a, 'lua, rlua::Value<'lua>> {
@@ -227,6 +243,16 @@ macro_rules! parse_enum {
             match &*variant {
                 $($variant => $result,)*
                 other => return Err(format!("unexpected variant '{}'", other).into()),
+            }
+        }
+    };
+    ($context:ident[$key:literal] {$($variant:literal => $result:expr),*$(,)?}) => {
+        {
+            let variant = $context.expect_field::<String>($key)?;
+
+            match &*variant {
+                $($variant => $result,)*
+                other => return Err(format!("unexpected value for {}: '{}'", $key, other).into()),
             }
         }
     };

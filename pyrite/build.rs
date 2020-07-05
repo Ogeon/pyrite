@@ -23,23 +23,38 @@ fn read_rgb_response(out_dir: &Path) -> Result<(), Box<dyn Error>> {
     // Uses data from http://scottburns.us/fast-rgb-to-spectrum-conversion-for-reflectances/
     println!("cargo:rerun-if-changed=data/srgb_cie1931.csv");
     let mut reader = csv::Reader::from_path("data/srgb_cie1931.csv")?;
-    for (offset, record_result) in reader.deserialize().enumerate() {
-        let wavelength = (360 + offset) as f32;
+    for record_result in reader.deserialize() {
         let RgbResponse { r, g, b } = record_result?;
-        r_response.push(quote!((#wavelength, #r)));
-        g_response.push(quote!((#wavelength, #g)));
-        b_response.push(quote!((#wavelength, #b)));
+        r_response.push(quote!(#r));
+        g_response.push(quote!(#g));
+        b_response.push(quote!(#b));
     }
+
+    let min_wavelength = 360.0;
+    let max_wavelength = min_wavelength + r_response.len() as f32;
 
     fs::write(
         out_dir.join("rgb_response.rs"),
         quote! {
             pub mod response {
-                use crate::math::utils::Interpolated;
+                use std::borrow::Cow;
+                use crate::project::spectra::Spectrum;
 
-                pub const RED: Interpolated<&[(f32, f32)]> = Interpolated{ points: &[#(#r_response),*] };
-                pub const GREEN: Interpolated<&[(f32, f32)]> = Interpolated{ points: &[#(#g_response),*] };
-                pub const BLUE: Interpolated<&[(f32, f32)]> = Interpolated{ points: &[#(#b_response),*] };
+                pub const RED: Spectrum = Spectrum::Array{
+                    min: #min_wavelength,
+                    max: #max_wavelength,
+                    points: Cow::Borrowed(&[#(#r_response),*])
+                };
+                pub const GREEN: Spectrum = Spectrum::Array{
+                    min: #min_wavelength,
+                    max: #max_wavelength,
+                    points: Cow::Borrowed(&[#(#g_response),*])
+                };
+                pub const BLUE: Spectrum = Spectrum::Array{
+                    min: #min_wavelength,
+                    max: #max_wavelength,
+                    points: Cow::Borrowed(&[#(#b_response),*])
+                };
             }
         }
         .to_string(),
@@ -60,6 +75,9 @@ fn read_xyz_response(out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mut y_response = vec![];
     let mut z_response = vec![];
 
+    let mut min_wavelength = std::f32::INFINITY;
+    let mut max_wavelength = 0.0f32;
+
     println!("cargo:rerun-if-changed=data/ciexyz65_1.csv");
     for record_result in csv::Reader::from_path("data/ciexyz65_1.csv")?.deserialize() {
         let XyzResponse {
@@ -68,18 +86,37 @@ fn read_xyz_response(out_dir: &Path) -> Result<(), Box<dyn Error>> {
             y,
             z,
         } = record_result?;
-        x_response.push(quote!((#wavelength, #x)));
-        y_response.push(quote!((#wavelength, #y)));
-        z_response.push(quote!((#wavelength, #z)));
+
+        min_wavelength = min_wavelength.min(wavelength);
+        max_wavelength = max_wavelength.max(wavelength);
+
+        x_response.push(quote!(#x));
+        y_response.push(quote!(#y));
+        z_response.push(quote!(#z));
     }
 
     fs::write(
         out_dir.join("xyz_response.rs"),
         quote! {
             pub mod response {
-                pub const X: &[(f32, f32)] = &[#(#x_response),*];
-                pub const Y: &[(f32, f32)] = &[#(#y_response),*];
-                pub const Z: &[(f32, f32)] = &[#(#z_response),*];
+                use std::borrow::Cow;
+                use crate::project::spectra::Spectrum;
+
+                pub const X: Spectrum = Spectrum::Array {
+                    min: #min_wavelength,
+                    max: #max_wavelength,
+                    points: Cow::Borrowed(&[#(#x_response),*])
+                };
+                pub const Y: Spectrum = Spectrum::Array {
+                    min: #min_wavelength,
+                    max: #max_wavelength,
+                    points: Cow::Borrowed(&[#(#y_response),*])
+                };
+                pub const Z: Spectrum = Spectrum::Array {
+                    min: #min_wavelength,
+                    max: #max_wavelength,
+                    points: Cow::Borrowed(&[#(#z_response),*])
+                };
             }
         }
         .to_string(),
@@ -99,19 +136,33 @@ struct XyzResponse {
 fn read_light_sources(out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mut d65_spectrum = vec![];
 
+    let mut min_wavelength = std::f32::INFINITY;
+    let mut max_wavelength = 0.0f32;
+
     println!("cargo:rerun-if-changed=data/d65.csv");
     for record_result in csv::Reader::from_path("data/d65.csv")?.deserialize() {
         let LightIntensity {
             wavelength,
             intensity,
         } = record_result?;
-        d65_spectrum.push(quote!((#wavelength, #intensity)));
+
+        min_wavelength = min_wavelength.min(wavelength);
+        max_wavelength = max_wavelength.max(wavelength);
+
+        d65_spectrum.push(quote!(#intensity));
     }
 
     fs::write(
         out_dir.join("light_source.rs"),
         quote! {
-                pub const D65: &[(f32, f32)] = &[#(#d65_spectrum),*];
+                use std::borrow::Cow;
+                use crate::project::spectra::Spectrum;
+
+                pub const D65: Spectrum = Spectrum::Array {
+                    min: #min_wavelength,
+                    max: #max_wavelength,
+                    points: Cow::Borrowed(&[#(#d65_spectrum),*])
+                };
         }
         .to_string(),
     )?;

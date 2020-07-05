@@ -10,13 +10,13 @@ use cgmath::{
 
 use palette::LinSrgb;
 
-use crate::texture::ColorEncoding;
+use crate::{light_source, texture::ColorEncoding};
 
 use super::{
     eval_context::{EvalContext, Evaluate},
     parse_context::{Parse, ParseContext},
     program::{ProgramFn, ProgramValue},
-    spectra::SpectrumId,
+    spectra::{Spectrum, SpectrumId},
     tables::{TableExt, TableId},
     textures::TextureId,
 };
@@ -255,16 +255,32 @@ impl<'lua> Parse<'lua> for ComplexExpression {
                 ior: context.parse_field("ior")?,
                 env_ior: context.parse_field("env_ior")?,
             }),
-            "spectrum" => Ok(ComplexExpression::Spectrum {
-                points: context
-                    .spectra
-                    .insert(context.expect_field("points")?, context.tables)?,
-            }),
-            "light_source" => Ok(ComplexExpression::Spectrum {
-                points: context
-                    .spectra
-                    .insert_static(context.expect_field("light_source")?)?,
-            }),
+            "spectrum" => {
+                let id = context.value().get_id()?;
+                let points = if let Some(points) = context.spectra.get(id) {
+                    points
+                } else {
+                    let spectrum = Spectrum::parse(context.clone())?;
+                    context.spectra.insert(id, spectrum)
+                };
+
+                Ok(ComplexExpression::Spectrum { points })
+            }
+            "light_source" => {
+                let id = context.value().get_id()?;
+                let points = if let Some(points) = context.spectra.get(id) {
+                    points
+                } else {
+                    let name: String = context.expect_field("name")?;
+                    let spectrum = match &*name {
+                        "d65" => light_source::D65,
+                        _ => return Err(format!("unknown builtin spectrum: {}", name).into()),
+                    };
+                    context.spectra.insert(id, spectrum)
+                };
+
+                Ok(ComplexExpression::Spectrum { points })
+            }
             "texture" => {
                 let encoding = match &*context.expect_field::<String>("encoding")? {
                     "linear" => ColorEncoding::Linear,

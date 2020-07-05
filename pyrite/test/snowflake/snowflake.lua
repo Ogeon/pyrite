@@ -8,7 +8,10 @@ local ice = {
 
 local background = {
     surface = material.diffuse {
-        color = spectrum {{400, 0.025}, {600, 0.0175}, {700, 0.01}} * 0.2,
+        color = spectrum {
+            format = "curve",
+            points = {{400, 0.025}, {600, 0.0175}, {700, 0.01}},
+        } * 0.2,
     },
 }
 
@@ -36,7 +39,10 @@ return {
     },
 
     world = {
-        sky = spectrum {{400, 0.3}, {600, 0.2}, {700, 0.1}},
+        sky = spectrum {
+            format = "curve",
+            points = {{400, 0.3}, {600, 0.2}, {700, 0.1}},
+        },
 
         objects = {
             shape.mesh {file = "snowflake.obj", materials = {snowflake = ice}},

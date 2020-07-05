@@ -1,4 +1,7 @@
-local glass_template = material.refractive {ior = 1.5, color = spectrum {}}
+local glass_template = material.refractive {
+    ior = 1.5,
+    color = spectrum {format = "curve"},
+}
 return {
     light = {surface = material.emission {color = light_source.d65 * 5}},
 

@@ -41,11 +41,14 @@ return {
                         reflect = material.mirror {color = 1},
                         refract = material.diffuse {
                             color = spectrum {
-                                {400, 0},
-                                {450, 0.3},
-                                {500, 0},
-                                {550, 1},
-                                {600, 0},
+                                format = "curve",
+                                points = {
+                                    {400, 0},
+                                    {450, 0.3},
+                                    {500, 0},
+                                    {550, 1},
+                                    {600, 0},
+                                },
                             },
                         },
                     },
@@ -57,10 +60,8 @@ return {
                 material = {
                     surface = material.diffuse {
                         color = spectrum {
-                            {580, 0},
-                            {600, 1},
-                            {610, 1},
-                            {650, 0},
+                            format = "curve",
+                            points = {{580, 0}, {600, 1}, {610, 1}, {650, 0}},
                         },
                     },
                 },

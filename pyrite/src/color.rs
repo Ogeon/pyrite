@@ -3,7 +3,6 @@ use std::error::Error;
 use palette::{LinSrgb, Srgb};
 
 use crate::{
-    math::utils::Interpolated,
     project::{
         expressions::Vector,
         program::{ProgramFn, ProgramValue},
@@ -55,13 +54,8 @@ impl ProgramValue<RenderContext> for Light {
     }
 
     fn spectrum() -> Result<Option<ProgramFn<RenderContext, Self>>, Box<dyn Error>> {
-        Ok(Some(|registers, input, resources| {
-            let spectrum = Interpolated {
-                points: resources.spectra.get(registers.pop()),
-            };
-            Light {
-                value: spectrum.get(input.wavelength),
-            }
+        Ok(Some(|registers, input, resources| Light {
+            value: resources.spectra.get(registers.pop()).get(input.wavelength),
         }))
     }
 

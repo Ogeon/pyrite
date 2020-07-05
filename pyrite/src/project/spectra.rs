@@ -4,10 +4,76 @@ use std::{
     error::Error,
 };
 
-use super::tables::{TableExt, TableId, Tables};
-use crate::light_source;
+use super::{
+    parse_context::{Parse, ParseContext},
+    tables::TableId,
+};
+use crate::{math::utils::Interpolated, parse_enum};
 
-type Spectrum = Cow<'static, [(f32, f32)]>;
+#[derive(Clone)]
+pub enum Spectrum {
+    Array {
+        min: f32,
+        max: f32,
+        points: Cow<'static, [f32]>,
+    },
+    Curve {
+        points: Vec<(f32, f32)>,
+    },
+}
+
+impl<'lua> Parse<'lua> for Spectrum {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        parse_enum!(context["format"] {
+            "array" => Ok(Spectrum::Array {
+                min: context.expect_field("min")?,
+                max: context.expect_field("max")?,
+                points: Cow::Owned(context.with_field("points", |points: ParseContext<rlua::Value>| {
+                    Ok(rlua_serde::from_value(points.value().clone())?)
+                })?)
+            }),
+            "curve" => Ok(Spectrum::Curve {
+                points: context.with_field("points", |points: ParseContext<rlua::Value>| {
+                    Ok(rlua_serde::from_value(points.value().clone())?)
+                })?
+            }),
+        })
+    }
+}
+
+impl Spectrum {
+    pub fn get(&self, wavelength: f32) -> f32 {
+        match self {
+            Spectrum::Array { min, max, points } => {
+                if points.is_empty() {
+                    return 0.0;
+                }
+
+                match wavelength {
+                    w if w <= *min => points[0],
+                    w if w >= *max => *points.last().unwrap(),
+                    w => {
+                        let normalized = (w - min) / (max - min);
+                        let float_index = normalized * (points.len() as f32 - 1.0);
+                        let min_float_index = float_index.floor();
+
+                        let min_index = min_float_index as usize;
+                        let max_index = float_index.ceil() as usize;
+
+                        let min_value = points[min_index];
+                        let max_value = points[max_index];
+
+                        let mix = float_index - min_float_index;
+                        min_value * (1.0 - mix) + max_value * mix
+                    }
+                }
+            }
+            Spectrum::Curve { points } => Interpolated { points }.get(wavelength),
+        }
+    }
+}
 
 pub struct Spectra {
     spectra: Vec<Spectrum>,
@@ -33,49 +99,28 @@ impl Spectra {
 
 pub struct SpectrumLoader {
     spectra: Spectra,
-    file_map: HashMap<TableId, SpectrumId>,
+    table_map: HashMap<TableId, SpectrumId>,
 }
 
 impl SpectrumLoader {
     pub fn new() -> Self {
         SpectrumLoader {
             spectra: Spectra::new(),
-            file_map: HashMap::new(),
+            table_map: HashMap::new(),
         }
     }
 
-    pub fn insert(
-        &mut self,
-        table: rlua::Table<'_>,
-        tables: &Tables,
-    ) -> Result<SpectrumId, Box<dyn Error>> {
-        let id = table.get_or_assign_id(tables)?;
+    pub fn get(&self, table_id: TableId) -> Option<SpectrumId> {
+        self.table_map.get(&table_id).cloned()
+    }
 
-        match self.file_map.entry(id) {
-            Entry::Occupied(entry) => Ok(*entry.get()),
+    pub fn insert<'lua>(&mut self, table_id: TableId, spectrum: Spectrum) -> SpectrumId {
+        match self.table_map.entry(table_id) {
+            Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
-                let spectrum = rlua_serde::from_value(rlua::Value::Table(table))?;
                 let id = self.spectra.insert(spectrum);
                 entry.insert(id);
-                Ok(id)
-            }
-        }
-    }
-
-    pub fn insert_static(&mut self, table: rlua::Table<'_>) -> Result<SpectrumId, Box<dyn Error>> {
-        let id = table.get_id()?;
-
-        match self.file_map.entry(id) {
-            Entry::Occupied(entry) => Ok(*entry.get()),
-            Entry::Vacant(entry) => {
-                let name: String = table.get("name")?;
-                let spectrum = match &*name {
-                    "d65" => light_source::D65,
-                    _ => return Err(format!("unknown builtin spectrum: {}", name).into()),
-                };
-                let id = self.spectra.insert(Cow::Borrowed(spectrum));
-                entry.insert(id);
-                Ok(id)
+                id
             }
         }
     }

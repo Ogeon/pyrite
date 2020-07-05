@@ -18,7 +18,6 @@ use palette::{ComponentWise, LinSrgb, Pixel, Srgb, Xyz};
 use bumpalo::Bump;
 
 use film::{Film, Spectrum};
-use math::utils::Interpolated;
 use project::{
     eval_context::EvalContext,
     expressions::Expressions,
@@ -254,9 +253,9 @@ fn render<P: AsRef<Path>>(
 fn spectrum_to_rgb(
     step_size: f32,
     spectrum: Spectrum,
-    red: &Interpolated,
-    green: &Interpolated,
-    blue: &Interpolated,
+    red: &project::spectra::Spectrum,
+    green: &project::spectra::Spectrum,
+    blue: &project::spectra::Spectrum,
 ) -> LinSrgb {
     spectrum_to_tristimulus(step_size, spectrum, red, green, blue)
 }
@@ -265,26 +264,20 @@ fn spectrum_to_xyz(step_size: f32, spectrum: Spectrum) -> Xyz {
     let color: Xyz = spectrum_to_tristimulus(
         step_size,
         spectrum,
-        &Interpolated {
-            points: xyz::response::X,
-        },
-        &Interpolated {
-            points: xyz::response::Y,
-        },
-        &Interpolated {
-            points: xyz::response::Z,
-        },
+        &xyz::response::X,
+        &xyz::response::Y,
+        &xyz::response::Z,
     );
 
     color * 3.444 // Scale up to better match D65 light source data
 }
 
-fn spectrum_to_tristimulus<T, P>(
+fn spectrum_to_tristimulus<T>(
     step_size: f32,
     spectrum: Spectrum,
-    first: &Interpolated<P>,
-    second: &Interpolated<P>,
-    third: &Interpolated<P>,
+    first: &project::spectra::Spectrum,
+    second: &project::spectra::Spectrum,
+    third: &project::spectra::Spectrum,
 ) -> T
 where
     T: ComponentWise<Scalar = f32>
@@ -296,24 +289,22 @@ where
         + Div<f32, Output = T>
         + AddAssign
         + Copy,
-    P: AsRef<[(f32, f32)]>,
 {
     let mut sum = T::from((0.0, 0.0, 0.0));
     let mut weight = 0.0;
 
     let (min, max) = spectrum.spectrum_width();
-    let num_segments = ((max - min) / step_size).ceil() as usize;
-    let segments = spectrum
-        .segments_between(min, max, num_segments)
-        .zip(first.segments_between(min, max, num_segments))
-        .zip(second.segments_between(min, max, num_segments))
-        .zip(third.segments_between(min, max, num_segments));
 
-    for (((spectrum, first), second), third) in segments {
-        let ((wl_min, spectrum_min), (wl_max, spectrum_max)) = spectrum;
-        let ((_, first_min), (_, first_max)) = first;
-        let ((_, second_min), (_, second_max)) = second;
-        let ((_, third_min), (_, third_max)) = third;
+    let mut wl_min = min;
+    let mut spectrum_min = spectrum.get(wl_min);
+
+    while wl_min < max {
+        let wl_max = wl_min + step_size;
+
+        let spectrum_max = spectrum.get(wl_max);
+        let (first_min, first_max) = (first.get(wl_min), first.get(wl_max));
+        let (second_min, second_max) = (second.get(wl_min), second.get(wl_max));
+        let (third_min, third_max) = (third.get(wl_min), third.get(wl_max));
 
         let start_resp = T::from((first_min, second_min, third_min));
         let end_resp = T::from((first_max, second_max, third_max));
@@ -321,6 +312,9 @@ where
         let w = wl_max - wl_min;
         sum += (start_resp * spectrum_min + end_resp * spectrum_max) * 0.5 * w;
         weight += w;
+
+        wl_min = wl_max;
+        spectrum_min = spectrum_max;
     }
 
     if weight == 0.0 {

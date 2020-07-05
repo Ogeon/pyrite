@@ -1,13 +1,13 @@
 local colors = require "colors"
 local lamp = require "lamp"
 
-local light = {surface = material.emission {color = spectrum(lamp.color)}}
+local light = {surface = material.emission {color = lamp.color}}
 
-local white = {surface = material.diffuse {color = spectrum(colors.white)}}
+local white = {surface = material.diffuse {color = colors.white}}
 
-local green = {surface = material.diffuse {color = spectrum(colors.green)}}
+local green = {surface = material.diffuse {color = colors.green}}
 
-local red = {surface = material.diffuse {color = spectrum(colors.red)}}
+local red = {surface = material.diffuse {color = colors.red}}
 
 return {
     image = {width = 512, height = 512},
