@@ -13,7 +13,7 @@ use std::{
 
 use cgmath::Vector2;
 
-use palette::{ComponentWise, LinSrgb, Pixel, Srgb, Xyz};
+use palette::{ComponentWise, FromColor, LinSrgb, Pixel, Srgb, Xyz};
 
 use bumpalo::Bump;
 
@@ -167,7 +167,7 @@ fn render<P: AsRef<Path>>(
                             Srgb::from_linear(color).into_format()
                         } else {
                             let color = spectrum_to_xyz(30.0, spectrum);
-                            Srgb::from(color).into_format()
+                            Srgb::from_color(color).into_format()
                         };
 
                         *pixel = image::Rgb(rgb.into_raw());
@@ -237,7 +237,7 @@ fn render<P: AsRef<Path>>(
             Srgb::from_linear(color).into_format()
         } else {
             let color = spectrum_to_xyz(2.0, spectrum);
-            Srgb::from(color).into_format()
+            Srgb::from_color(color).into_format()
         };
 
         *pixel = image::Rgb(rgb.into_raw());

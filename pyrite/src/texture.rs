@@ -2,8 +2,8 @@ use std::{fs::File, io::BufReader, path::Path};
 
 use cgmath::Point2;
 use palette::{
-    white_point::D65, Alpha, Component, LinLuma, LinLumaa, LinSrgb, LinSrgba, Pixel, Srgb,
-    SrgbLuma, SrgbLumaa, Srgba,
+    white_point::D65, Alpha, Component, IntoColor, IntoComponent, LinLuma, LinLumaa, LinSrgb,
+    LinSrgba, Pixel, Srgb, SrgbLuma, SrgbLumaa, Srgba,
 };
 
 /// Linearized image data.
@@ -141,9 +141,9 @@ impl Texture {
         let index = x + y * self.width;
 
         match self.format {
-            TextureFormat::Mono => LinLuma::from_raw_slice(&self.data)[index].into(),
-            TextureFormat::MonoAlpha => LinLumaa::from_raw_slice(&self.data)[index].into(),
-            TextureFormat::Rgb => LinSrgb::from_raw_slice(&self.data)[index].into(),
+            TextureFormat::Mono => LinLuma::from_raw_slice(&self.data)[index].into_color(),
+            TextureFormat::MonoAlpha => LinLumaa::from_raw_slice(&self.data)[index].into_color(),
+            TextureFormat::Rgb => LinSrgb::from_raw_slice(&self.data)[index].into_color(),
             TextureFormat::RgbAlpha => LinSrgba::from_raw_slice(&self.data)[index],
         }
     }
@@ -190,11 +190,11 @@ trait IntoLinearFloats {
     fn into_linear_floats(self) -> Self::LinearFloats;
 }
 
-impl<T: Component> SourceColor for Srgb<T> {
+impl<T: Component + IntoComponent<f32>> SourceColor for Srgb<T> {
     type LinearSourceColor = LinSrgb<T>;
 }
 
-impl<T: Component> IntoLinearFloats for Srgb<T> {
+impl<T: Component + IntoComponent<f32>> IntoLinearFloats for Srgb<T> {
     type LinearFloats = LinSrgb;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
@@ -202,7 +202,7 @@ impl<T: Component> IntoLinearFloats for Srgb<T> {
     }
 }
 
-impl<T: Component> IntoLinearFloats for LinSrgb<T> {
+impl<T: Component + IntoComponent<f32>> IntoLinearFloats for LinSrgb<T> {
     type LinearFloats = LinSrgb;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
@@ -210,11 +210,11 @@ impl<T: Component> IntoLinearFloats for LinSrgb<T> {
     }
 }
 
-impl<T: Component> SourceColor for SrgbLuma<T> {
+impl<T: Component + IntoComponent<f32>> SourceColor for SrgbLuma<T> {
     type LinearSourceColor = LinLuma<D65, T>;
 }
 
-impl<T: Component> IntoLinearFloats for SrgbLuma<T> {
+impl<T: Component + IntoComponent<f32>> IntoLinearFloats for SrgbLuma<T> {
     type LinearFloats = LinLuma;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
@@ -222,7 +222,7 @@ impl<T: Component> IntoLinearFloats for SrgbLuma<T> {
     }
 }
 
-impl<T: Component> IntoLinearFloats for LinLuma<D65, T> {
+impl<T: Component + IntoComponent<f32>> IntoLinearFloats for LinLuma<D65, T> {
     type LinearFloats = LinLuma;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
@@ -230,17 +230,17 @@ impl<T: Component> IntoLinearFloats for LinLuma<D65, T> {
     }
 }
 
-impl<C: SourceColor, T: Component> SourceColor for Alpha<C, T> {
+impl<C: SourceColor, T: Component + IntoComponent<f32>> SourceColor for Alpha<C, T> {
     type LinearSourceColor = Alpha<C::LinearSourceColor, T>;
 }
 
-impl<C: IntoLinearFloats, T: Component> IntoLinearFloats for Alpha<C, T> {
+impl<C: IntoLinearFloats, T: Component + IntoComponent<f32>> IntoLinearFloats for Alpha<C, T> {
     type LinearFloats = Alpha<C::LinearFloats, f32>;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
         Alpha {
             color: self.color.into_linear_floats(),
-            alpha: self.alpha.convert(),
+            alpha: self.alpha.into_component(),
         }
     }
 }
