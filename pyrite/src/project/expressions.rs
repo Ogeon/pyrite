@@ -4,15 +4,21 @@ use std::{
     ops::{Add, Div, Mul, Sub},
 };
 
+use cgmath::{
+    ElementWise, EuclideanSpace, Point2, Point3, Quaternion, Vector2, Vector3, Vector4, VectorSpace,
+};
+
+use palette::LinSrgb;
+
+use crate::texture::ColorEncoding;
+
 use super::{
     eval_context::{EvalContext, Evaluate},
     parse_context::{Parse, ParseContext},
+    program::{ProgramFn, ProgramValue},
     spectra::SpectrumId,
     tables::{TableExt, TableId},
     textures::TextureId,
-};
-use cgmath::{
-    ElementWise, EuclideanSpace, Point2, Point3, Quaternion, Vector3, Vector4, VectorSpace,
 };
 
 pub struct Expressions {
@@ -141,7 +147,7 @@ impl<T: ExpressionValue> Evaluate<T> for Expression {
 impl Evaluate<Point3<f32>> for Expression {
     fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<Point3<f32>, Box<dyn Error>> {
         let vector = match *self {
-            Expression::Number(number) => Vector::from_number(number),
+            Expression::Number(number) => <Vector as ExpressionValue>::from_number(number),
             Expression::Complex(id) => context.expressions.get(id).evaluate(context),
         };
 
@@ -152,7 +158,18 @@ impl Evaluate<Point3<f32>> for Expression {
 impl Evaluate<Vector3<f32>> for Expression {
     fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<Vector3<f32>, Box<dyn Error>> {
         let vector = match *self {
-            Expression::Number(number) => Vector::from_number(number),
+            Expression::Number(number) => <Vector as ExpressionValue>::from_number(number),
+            Expression::Complex(id) => context.expressions.get(id).evaluate(context),
+        };
+
+        Ok(vector?.into())
+    }
+}
+
+impl Evaluate<Vector2<f32>> for Expression {
+    fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<Vector2<f32>, Box<dyn Error>> {
+        let vector = match *self {
+            Expression::Number(number) => <Vector as ExpressionValue>::from_number(number),
             Expression::Complex(id) => context.expressions.get(id).evaluate(context),
         };
 
@@ -163,7 +180,7 @@ impl Evaluate<Vector3<f32>> for Expression {
 impl Evaluate<Quaternion<f32>> for Expression {
     fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<Quaternion<f32>, Box<dyn Error>> {
         let vector = match *self {
-            Expression::Number(number) => Vector::from_number(number),
+            Expression::Number(number) => <Vector as ExpressionValue>::from_number(number),
             Expression::Complex(id) => context.expressions.get(id).evaluate(context),
         };
 
@@ -203,6 +220,7 @@ pub enum ComplexExpression {
     Texture {
         texture: TextureId,
     },
+    DebugNormal,
 }
 
 impl<'lua> Parse<'lua> for ComplexExpression {
@@ -247,11 +265,20 @@ impl<'lua> Parse<'lua> for ComplexExpression {
                     .spectra
                     .insert_static(context.expect_field("light_source")?)?,
             }),
-            "texture" => Ok(ComplexExpression::Texture {
-                texture: context
-                    .textures
-                    .load(context.expect_field::<String>("path")?)?,
-            }),
+            "texture" => {
+                let encoding = match &*context.expect_field::<String>("encoding")? {
+                    "linear" => ColorEncoding::Linear,
+                    "srgb" => ColorEncoding::Srgb,
+                    encoding => Err(format!("unknown color encoding: {}", encoding))?,
+                };
+
+                Ok(ComplexExpression::Texture {
+                    texture: context
+                        .textures
+                        .load(context.expect_field::<String>("path")?, encoding)?,
+                })
+            }
+            "debug_normal" => Ok(ComplexExpression::DebugNormal),
             name => Err(format!("unexpected expression type: '{}'", name).into()),
         }
     }
@@ -300,6 +327,9 @@ impl<T: ExpressionValue> Evaluate<T> for ComplexExpression {
             }
             ComplexExpression::Texture { .. } => {
                 Err("cannot evaluate textures as constants".into())
+            }
+            ComplexExpression::DebugNormal { .. } => {
+                Err("cannot evaluate surface normals as constants".into())
             }
         }
     }
@@ -371,7 +401,7 @@ impl ExpressionValue for u16 {
     }
 
     fn mix(lhs: Self, rhs: Self, amount: f32) -> Result<Self, Box<dyn Error>> {
-        Ok(f32::mix(lhs as f32, rhs as f32, amount)? as u16)
+        Ok(<f32 as ExpressionValue>::mix(lhs as f32, rhs as f32, amount)? as u16)
     }
 }
 
@@ -399,6 +429,102 @@ impl ExpressionValue for Vector {
 
     fn mix(lhs: Self, rhs: Self, amount: f32) -> Result<Self, Box<dyn Error>> {
         Ok(Vector(lhs.0.lerp(rhs.0, amount.min(1.0).max(0.0))))
+    }
+}
+
+impl<I> ProgramValue<I> for Vector {
+    fn from_number(number: f32) -> Result<Self, Box<dyn Error>> {
+        Ok(Vector(Vector4::new(number, number, number, number)))
+    }
+    fn from_vector(x: f32, y: f32, z: f32, w: f32) -> Result<Self, Box<dyn Error>> {
+        Ok(Vector(Vector4::new(x, y, z, w)))
+    }
+    fn number() -> Result<Option<ProgramFn<I, Self>>, Box<dyn Error>> {
+        Ok(Some(|registers, _, _| {
+            let number = registers.pop();
+            Vector(Vector4::new(number, number, number, number))
+        }))
+    }
+    fn vector() -> Result<Option<ProgramFn<I, Self>>, Box<dyn Error>> {
+        Ok(None)
+    }
+    fn rgb() -> Result<Option<ProgramFn<I, Self>>, Box<dyn Error>> {
+        Ok(Some(|registers, _, _| {
+            let blue: f32 = registers.pop();
+            let green: f32 = registers.pop();
+            let red: f32 = registers.pop();
+
+            let x = (red * 2.0) - 1.0;
+            let y = (green * 2.0) - 1.0;
+            let z = (blue * 2.0) - 1.0;
+
+            Vector(Vector4::new(x, y, z, 0.0))
+        }))
+    }
+    fn spectrum() -> Result<Option<ProgramFn<I, Self>>, Box<dyn Error>> {
+        Err("spectra cannot be used as vectors".into())
+    }
+    fn texture() -> Result<Option<ProgramFn<I, Self>>, Box<dyn Error>> {
+        Ok(Some(|registers, _, resources| {
+            let texture = resources.textures.get(registers.pop());
+            let uv: Vector = registers.pop();
+
+            let LinSrgb {
+                red, green, blue, ..
+            } = texture.get_color(uv.into()).color;
+
+            let x = (red * 2.0) - 1.0;
+            let y = (green * 2.0) - 1.0;
+            let z = (blue * 2.0) - 1.0;
+
+            Vector(Vector4::new(x, y, z, 0.0))
+        }))
+    }
+    fn add() -> Result<ProgramFn<I, Self>, Box<dyn Error>> {
+        Ok(|registers, _, _| {
+            let rhs: Vector = registers.pop();
+            let lhs: Vector = registers.pop();
+            lhs + rhs
+        })
+    }
+    fn sub() -> Result<ProgramFn<I, Self>, Box<dyn Error>> {
+        Ok(|registers, _, _| {
+            let rhs: Vector = registers.pop();
+            let lhs: Vector = registers.pop();
+            lhs - rhs
+        })
+    }
+    fn mul() -> Result<ProgramFn<I, Self>, Box<dyn Error>> {
+        Ok(|registers, _, _| {
+            let rhs: Vector = registers.pop();
+            let lhs: Vector = registers.pop();
+            lhs * rhs
+        })
+    }
+    fn div() -> Result<ProgramFn<I, Self>, Box<dyn Error>> {
+        Ok(|registers, _, _| {
+            let rhs: Vector = registers.pop();
+            let lhs: Vector = registers.pop();
+            lhs / rhs
+        })
+    }
+    fn mix() -> Result<ProgramFn<I, Self>, Box<dyn Error>> {
+        Ok(|registers, _, _| {
+            let amount = registers.pop::<f32>().min(1.0).max(0.0);
+            let rhs: Vector = registers.pop();
+            let lhs: Vector = registers.pop();
+            Vector(lhs.0.lerp(rhs.0, amount))
+        })
+    }
+    fn fresnel() -> Result<ProgramFn<I, Self>, Box<dyn Error>> {
+        Ok(|registers, _, _| {
+            let incident: Vector = registers.pop();
+            let normal: Vector = registers.pop();
+            let env_ior: f32 = registers.pop();
+            let ior: f32 = registers.pop();
+            let value = crate::math::fresnel(ior, env_ior, normal.into(), incident.into());
+            Vector(Vector4::new(value, value, value, value))
+        })
     }
 }
 
@@ -431,6 +557,12 @@ impl Div for Vector {
 
     fn div(self, rhs: Self) -> Self::Output {
         Vector(self.0.div_element_wise(rhs.0))
+    }
+}
+
+impl Into<Vector2<f32>> for Vector {
+    fn into(self) -> Vector2<f32> {
+        self.0.truncate().truncate()
     }
 }
 

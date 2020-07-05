@@ -262,6 +262,15 @@ pub mod utils {
         v.cross(unit)
     }
 
+    /// Creates two orthogonal vectors that forms the basis of a vector space
+    /// together with the input vector. If the input vector is `x`, the output
+    /// vectors are `(y, z)`.
+    pub fn basis(x: Vector3<f32>) -> (Vector3<f32>, Vector3<f32>) {
+        let z = ortho(x).normalize();
+        let y = z.cross(x).normalize();
+        (y, z)
+    }
+
     pub fn sample_cone<R: ?Sized + Rng>(
         rng: &mut R,
         direction: Vector3<f32>,

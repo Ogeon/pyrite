@@ -81,6 +81,7 @@ fn render_tile<R: Rng>(
             world,
             renderer.bounces,
             renderer.light_samples,
+            &mut exe,
         );
 
         let mut main_sample = (

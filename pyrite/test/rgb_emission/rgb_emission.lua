@@ -1,7 +1,7 @@
 local ball = shape.sphere {radius = 1, position = vector(0, 2, 0)}
 
 local color_ball = ball:with{
-    material = material.emission {color = rgb(1, 0, 0)},
+    material = {surface = material.emission {color = rgb(1, 0, 0)}},
 }
 
 return {
@@ -28,30 +28,54 @@ return {
             shape.plane {
                 origin = vector {z = 1},
                 normal = vector {z = 1},
-                material = material.diffuse {color = 0.8},
+                material = {surface = material.diffuse {color = 0.8}},
             },
             color_ball:with{
-                material = color_ball.material:with{color = rgb(1, 0, 0)},
+                material = {
+                    surface = color_ball.material.surface:with{
+                        color = rgb(1, 0, 0),
+                    },
+                },
                 position = color_ball.position:with{x = -6.25},
             },
             color_ball:with{
-                material = color_ball.material:with{color = rgb(1, 1, 0)},
+                material = {
+                    surface = color_ball.material.surface:with{
+                        color = rgb(1, 1, 0),
+                    },
+                },
                 position = color_ball.position:with{x = -3.75},
             },
             color_ball:with{
-                material = color_ball.material:with{color = rgb(0, 1, 0)},
+                material = {
+                    surface = color_ball.material.surface:with{
+                        color = rgb(0, 1, 0),
+                    },
+                },
                 position = color_ball.position:with{x = -1.25},
             },
             color_ball:with{
-                material = color_ball.material:with{color = rgb(0, 1, 1)},
+                material = {
+                    surface = color_ball.material.surface:with{
+                        color = rgb(0, 1, 1),
+                    },
+                },
                 position = color_ball.position:with{x = 1.25},
             },
             color_ball:with{
-                material = color_ball.material:with{color = rgb(0, 0, 1)},
+                material = {
+                    surface = color_ball.material.surface:with{
+                        color = rgb(0, 0, 1),
+                    },
+                },
                 position = color_ball.position:with{x = 3.75},
             },
             color_ball:with{
-                material = color_ball.material:with{color = rgb(1, 0, 1)},
+                material = {
+                    surface = color_ball.material.surface:with{
+                        color = rgb(1, 0, 1),
+                    },
+                },
                 position = color_ball.position:with{x = 6.25},
             },
         },

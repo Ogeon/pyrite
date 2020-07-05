@@ -5,7 +5,9 @@ use rand::Rng;
 use genmesh;
 use obj;
 
-use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point2, SquareMatrix, Vector3};
+use cgmath::{
+    EuclideanSpace, InnerSpace, Matrix3, Matrix4, Point2, SquareMatrix, Vector2, Vector3,
+};
 use collision::Ray3;
 
 use crate::spatial::{bkd_tree, Dim3};
@@ -13,7 +15,6 @@ use crate::spatial::{bkd_tree, Dim3};
 use crate::lamp::Lamp;
 use crate::materials::Material;
 use crate::{
-    math::utils::ortho,
     project::{
         eval_context::{EvalContext, Evaluate, EvaluateOr},
         expressions::{Expression, Expressions},
@@ -21,7 +22,9 @@ use crate::{
         program::ProgramCompiler,
         WorldObject,
     },
-    shapes::{distance_estimators::QuatMul, BoundingVolume, Intersection, Shape, Triangle, Vertex},
+    shapes::{
+        distance_estimators::QuatMul, BoundingVolume, Intersection, Normal, Shape, Triangle, Vertex,
+    },
     tracer::{LightProgram, ParametricValue},
 };
 
@@ -49,15 +52,18 @@ impl<'p> World<'p> {
                 WorldObject::Sphere {
                     position,
                     radius,
+                    texture_scale,
                     material,
                 } => {
                     let material =
                         Material::from_project(material, eval_context, programs, expressions)?;
                     let emissive = material.is_emissive();
+                    let texture_scale: Option<_> = texture_scale.evaluate(eval_context)?;
 
                     let shape = Arc::new(Shape::Sphere {
                         position: position.evaluate(eval_context)?,
                         radius: radius.evaluate(eval_context)?,
+                        texture_scale: texture_scale.unwrap_or(Vector2::new(1.0, 1.0)),
                         material,
                     });
 
@@ -69,13 +75,12 @@ impl<'p> World<'p> {
                 WorldObject::Plane {
                     origin,
                     normal,
-                    binormal,
                     texture_scale,
                     material,
                 } => {
-                    let normal = normal.evaluate(eval_context)?;
-                    let tangent = ortho(normal).normalize();
-                    let binormal = normal.cross(tangent).normalize();
+                    let normal: Vector3<f32> = normal.evaluate(eval_context)?;
+                    let normal = normal.normalize();
+                    let (binormal, tangent) = crate::math::utils::basis(normal);
 
                     let material =
                         Material::from_project(material, eval_context, programs, expressions)?;
@@ -87,9 +92,11 @@ impl<'p> World<'p> {
                             origin.evaluate(eval_context)?,
                             normal,
                         ),
-                        tangent,
-                        binormal,
-                        texture_scale: texture_scale.unwrap_or(1.0),
+                        normal: Normal::new(
+                            normal,
+                            Matrix3::from_cols(binormal, tangent, normal).into(),
+                        ),
+                        texture_scale: texture_scale.unwrap_or(Vector2::new(1.0, 1.0)),
                         material,
                     });
 
@@ -352,20 +359,30 @@ fn make_triangle<'p, M: obj::GenPolygon>(
         .map(|t3| obj.texture[t3].into())
         .unwrap_or(Point2::origin());
 
+    let delta_position1 = v2 - v1;
+    let delta_position2 = v3 - v1;
+
+    let delta_texture1 = t2 - t1;
+    let delta_texture2 = t3 - t1;
+
+    let r = 1.0 / (delta_texture1.x * delta_texture2.y - delta_texture1.y * delta_texture2.x);
+    let tangent = (delta_position1 * delta_texture2.y - delta_position2 * delta_texture1.y) * r;
+    let bitangent = (delta_position2 * delta_texture1.x - delta_position1 * delta_texture2.x) * r;
+
     Triangle {
         v1: Vertex {
             position: v1,
-            normal: n1,
+            normal: Normal::new(n1, Matrix3::from_cols(tangent, bitangent, n1).into()),
             texture: t1,
         },
         v2: Vertex {
             position: v2,
-            normal: n2,
+            normal: Normal::new(n2, Matrix3::from_cols(tangent, bitangent, n2).into()),
             texture: t2,
         },
         v3: Vertex {
             position: v3,
-            normal: n3,
+            normal: Normal::new(n3, Matrix3::from_cols(tangent, bitangent, n3).into()),
             texture: t3,
         },
         material,

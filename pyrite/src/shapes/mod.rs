@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::f32::{INFINITY, NEG_INFINITY};
 
 use cgmath::{
-    ElementWise, EuclideanSpace, InnerSpace, Matrix3, Matrix4, Point2, Point3, SquareMatrix,
-    Transform, Vector3,
+    ElementWise, EuclideanSpace, InnerSpace, Matrix3, Matrix4, Point2, Point3, Quaternion,
+    Transform, Vector2, Vector3,
 };
 use collision::{Continuous, Ray3};
 
@@ -27,29 +27,29 @@ pub mod distance_estimators;
 
 type DistanceEstimator = Box<dyn ParametricValue<Point3<f32>, f32>>;
 
-pub struct Vertex<S> {
-    pub position: Point3<S>,
-    pub normal: Vector3<S>,
-    pub texture: Point2<S>,
+pub struct Vertex {
+    pub position: Point3<f32>,
+    pub normal: Normal,
+    pub texture: Point2<f32>,
 }
 
 pub enum Shape<'p> {
     Sphere {
         position: Point3<f32>,
         radius: f32,
+        texture_scale: Vector2<f32>,
         material: Material<'p>,
     },
     Plane {
         shape: collision::Plane<f32>,
-        tangent: Vector3<f32>,
-        binormal: Vector3<f32>,
-        texture_scale: f32,
+        normal: Normal,
+        texture_scale: Vector2<f32>,
         material: Material<'p>,
     },
     Triangle {
-        v1: Vertex<f32>,
-        v2: Vertex<f32>,
-        v3: Vertex<f32>,
+        v1: Vertex,
+        v2: Vertex,
+        v3: Vertex,
         material: Arc<Material<'p>>,
     },
     RayMarched {
@@ -65,38 +65,55 @@ impl<'p> Shape<'p> {
             Sphere {
                 ref position,
                 radius,
+                texture_scale,
                 ..
             } => {
+                use cgmath::Rad;
+
                 let sphere = collision::Sphere {
                     radius,
                     center: position.clone(),
                 };
-                sphere.intersection(ray).map(|intersection| Intersection {
-                    distance: (intersection - ray.origin).magnitude(),
-                    position: intersection,
-                    normal: (intersection - position).normalize(),
-                    texture: Point2::origin(),
+
+                sphere.intersection(ray).map(|intersection| {
+                    let normal = (intersection - position).normalize();
+                    let latitude = normal.y.acos();
+                    let longitude = normal.x.atan2(normal.z);
+
+                    let rotation = Matrix3::from_angle_y(Rad(longitude))
+                        * Matrix3::from_angle_x(Rad(latitude - std::f32::consts::PI * 0.5));
+
+                    let texture_coordinates = Vector2::new(
+                        longitude * std::f32::consts::FRAC_1_PI * 0.5,
+                        1.0 - (latitude * std::f32::consts::FRAC_1_PI),
+                    );
+
+                    Intersection {
+                        distance: (intersection - ray.origin).magnitude(),
+                        position: intersection,
+                        normal: Normal::new(normal, rotation.into()),
+                        texture: Point2::from_vec(
+                            texture_coordinates.div_element_wise(texture_scale),
+                        ),
+                    }
                 })
             }
             Plane {
                 ref shape,
-                tangent,
-                binormal,
+                normal,
                 texture_scale,
                 ..
             } => shape.intersection(ray).map(|intersection| {
-                let Vector3 {
-                    x: tex_x, y: tex_y, ..
-                } = Matrix3::from_cols(tangent, binormal, shape.n)
-                    .invert()
-                    .expect("could not invert plane texture space")
-                    * intersection.to_vec();
+                let world_space = intersection.to_vec();
+                let normal_space = normal.into_space(world_space);
+
+                let texture_coordinates = normal_space.truncate();
 
                 Intersection {
                     distance: (intersection - ray.origin).magnitude(),
                     position: intersection,
-                    normal: shape.n,
-                    texture: Point2::new(tex_x, tex_y) / texture_scale,
+                    normal,
+                    texture: Point2::from_vec(texture_coordinates.div_element_wise(texture_scale)),
                 }
             }),
             Triangle {
@@ -136,14 +153,14 @@ impl<'p> Shape<'p> {
                 let dist = e2.dot(q) * inv_det;
                 if dist > EPSILON {
                     let hit_position = ray.origin + ray.direction * dist;
-                    let normal = v1.normal * (1.0 - (u + v)) + v2.normal * u + v3.normal * v;
+                    let normal = Normal::on_triangle(v1.normal, v2.normal, v3.normal, u, v);
                     let texture = (v1.texture * (1.0 - (u + v)))
                         .add_element_wise(v2.texture * u)
                         .add_element_wise(v3.texture * v);
                     Some(Intersection {
                         distance: dist,
                         position: hit_position,
-                        normal: normal.normalize(),
+                        normal,
                         texture,
                     })
                 } else {
@@ -183,7 +200,7 @@ impl<'p> Shape<'p> {
                     Some(Intersection {
                         distance: total_distance,
                         position: p,
-                        normal: n,
+                        normal: Normal::from_vector(n),
                         texture: Point2::origin(),
                     })
                 } else {
@@ -207,12 +224,20 @@ impl<'p> Shape<'p> {
             Sphere {
                 ref position,
                 radius,
+                texture_scale,
                 ..
             } => {
                 let sphere_point = math::utils::sample_sphere(rng);
+                let latitude = sphere_point.y.acos();
+                let longitude = sphere_point.x.atan2(sphere_point.z);
+                let texture_coordinates = Vector2::new(
+                    longitude * std::f32::consts::FRAC_1_PI * 0.5,
+                    1.0 - (latitude * std::f32::consts::FRAC_1_PI),
+                );
+
                 Some((
                     Ray3::new(position + sphere_point * radius, sphere_point),
-                    Point2::origin(),
+                    Point2::from_vec(texture_coordinates.div_element_wise(texture_scale)),
                 ))
             }
             Plane { .. } => None,
@@ -235,12 +260,12 @@ impl<'p> Shape<'p> {
                 };
 
                 let position = v1.position + a * u + b * v;
-                let normal = v1.normal * (1.0 - (u + v)) + v2.normal * u + v3.normal * v;
+                let normal = Normal::on_triangle(v1.normal, v2.normal, v3.normal, u, v);
                 let texture = (v1.texture * (1.0 - (u + v)))
                     .add_element_wise(v2.texture * u)
                     .add_element_wise(v3.texture * v);
 
-                Some((Ray3::new(position, normal.normalize()), texture))
+                Some((Ray3::new(position, normal.vector), texture))
             }
             RayMarched { .. } => None,
         }
@@ -269,7 +294,7 @@ impl<'p> Shape<'p> {
                     let intersection = self.ray_intersect(&Ray3::new(*target, ray_dir)).map(
                         |Intersection {
                              position, normal, ..
-                         }| Ray3::new(position, normal),
+                         }| Ray3::new(position, normal.vector),
                     );
 
                     if let Some(intersection) = intersection {
@@ -363,9 +388,9 @@ impl<'p> Shape<'p> {
                 ref mut v3,
                 ..
             } => {
-                v1.normal = transform.transform_vector(v1.normal);
-                v2.normal = transform.transform_vector(v2.normal);
-                v3.normal = transform.transform_vector(v3.normal);
+                v1.normal = v1.normal.transform(transform);
+                v2.normal = v2.normal.transform(transform);
+                v3.normal = v3.normal.transform(transform);
                 v1.position = transform.transform_point(v1.position);
                 v2.position = transform.transform_point(v2.position);
                 v3.position = transform.transform_point(v3.position);
@@ -433,8 +458,63 @@ impl<'p> bkd_tree::Element for Arc<Shape<'p>> {
 pub struct Intersection {
     pub distance: f32,
     pub position: Point3<f32>,
-    pub normal: Vector3<f32>,
+    pub normal: Normal,
     pub texture: Point2<f32>,
+}
+
+#[derive(Copy, Clone)]
+pub struct Normal {
+    vector: Vector3<f32>,
+    from_space: Quaternion<f32>,
+}
+
+impl Normal {
+    pub fn new(vector: Vector3<f32>, from_space: Quaternion<f32>) -> Self {
+        Normal { vector, from_space }
+    }
+
+    pub fn from_vector(vector: Vector3<f32>) -> Self {
+        let (x, y) = crate::math::utils::basis(vector);
+        Normal {
+            vector,
+            from_space: Matrix3::from_cols(x, y, vector).into(),
+        }
+    }
+
+    pub fn on_triangle(n1: Normal, n2: Normal, n3: Normal, u: f32, v: f32) -> Self {
+        let vector = n1.vector * (1.0 - (u + v)) + n2.vector * u + n3.vector * v;
+        let from_space = n1.from_space * (1.0 - (u + v)) + n2.from_space * u + n3.from_space * v;
+
+        Normal {
+            vector: vector.normalize(),
+            from_space: from_space.normalize(),
+        }
+    }
+
+    pub fn vector(&self) -> Vector3<f32> {
+        self.vector
+    }
+
+    pub fn from_space(&self, vector: Vector3<f32>) -> Vector3<f32> {
+        self.from_space * vector
+    }
+
+    pub fn into_space(&self, vector: Vector3<f32>) -> Vector3<f32> {
+        self.from_space.conjugate() * vector
+    }
+
+    pub fn transform(&self, transform: Matrix4<f32>) -> Self {
+        let vector = transform.transform_vector(self.vector).normalize();
+        let x = transform
+            .transform_vector(self.from_space(Vector3::unit_x()))
+            .normalize();
+        let y = transform
+            .transform_vector(self.from_space(Vector3::unit_y()))
+            .normalize();
+        let from_space = Matrix3::from_cols(x, y, vector).into();
+
+        Normal { vector, from_space }
+    }
 }
 
 pub enum BoundingVolume {

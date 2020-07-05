@@ -3,15 +3,17 @@ use std::{collections::HashMap, error::Error, path::Path};
 use rlua::{FromLua, Lua};
 
 use cgmath::{Matrix4, SquareMatrix, Vector3};
-use expressions::{ExpressionLoader, Expressions};
-use parse_context::{Parse, ParseContext};
-use tables::Tables;
+
+use path_slash::PathBufExt;
 
 use crate::parse_enum;
 
 use eval_context::{EvalContext, Evaluate};
+use expressions::{ExpressionLoader, Expressions};
 use meshes::{MeshId, MeshLoader, Meshes};
+use parse_context::{Parse, ParseContext};
 use spectra::{Spectra, SpectrumLoader};
+use tables::Tables;
 use textures::{TextureLoader, Textures};
 
 pub mod eval_context;
@@ -38,7 +40,7 @@ pub fn load_project<'p, P: AsRef<Path>>(path: P) -> Result<ProjectData, Box<dyn 
                 r#"package.path = "{};" .. package.path"#,
                 project_dir
                     .join("?.lua")
-                    .to_str()
+                    .to_slash()
                     .expect("could not convert project path to UTF8")
             ))
             .set_name("<pyrite>")?
@@ -71,9 +73,9 @@ pub fn load_project<'p, P: AsRef<Path>>(path: P) -> Result<ProjectData, Box<dyn 
 
         // Parse project config
         let mut expressions = ExpressionLoader::new();
-        let mut meshes = MeshLoader::new(project_dir)?;
+        let mut meshes = MeshLoader::new(project_dir);
         let mut spectra = SpectrumLoader::new();
-        let mut textures = TextureLoader::new(project_dir)?;
+        let mut textures = TextureLoader::new(project_dir);
         let parse_context = ParseContext::new(
             &mut expressions,
             &mut meshes,
@@ -271,12 +273,12 @@ pub enum WorldObject {
     Sphere {
         position: self::expressions::Expression,
         radius: self::expressions::Expression,
+        texture_scale: Option<self::expressions::Expression>,
         material: Material,
     },
     Plane {
         origin: self::expressions::Expression,
         normal: self::expressions::Expression,
-        binormal: Option<self::expressions::Expression>,
         texture_scale: Option<self::expressions::Expression>,
         material: Material,
     },
@@ -310,12 +312,12 @@ impl<'lua> Parse<'lua> for WorldObject {
             "sphere" => Ok(WorldObject::Sphere {
                 position: context.parse_field("position")?,
                 radius: context.parse_field("radius")?,
+                texture_scale: context.parse_field("texture_scale")?,
                 material: context.parse_field("material")?,
             }),
             "plane" => Ok(WorldObject::Plane {
                 origin: context.parse_field("origin")?,
                 normal: context.parse_field("normal")?,
-                binormal: context.parse_field("binormal")?,
                 texture_scale: context.parse_field("texture_scale")?,
                 material: context.parse_field("material")?,
             }),
@@ -423,7 +425,23 @@ impl<'lua> Parse<'lua> for JuliaType {
     }
 }
 
-pub enum Material {
+pub struct Material {
+    pub surface: SurfaceMaterial,
+    pub normal_map: Option<expressions::Expression>,
+}
+
+impl<'lua> Parse<'lua> for Material {
+    type Input = rlua::Table<'lua>;
+
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+        Ok(Material {
+            surface: context.parse_field("surface")?,
+            normal_map: context.parse_field("normal_map")?,
+        })
+    }
+}
+
+pub enum SurfaceMaterial {
     Diffuse {
         color: self::expressions::Expression,
     },
@@ -442,46 +460,46 @@ pub enum Material {
     },
     Mix {
         amount: self::expressions::Expression,
-        lhs: Box<Material>,
-        rhs: Box<Material>,
+        lhs: Box<SurfaceMaterial>,
+        rhs: Box<SurfaceMaterial>,
     },
     FresnelMix {
         ior: self::expressions::Expression,
         dispersion: Option<self::expressions::Expression>,
         env_ior: Option<self::expressions::Expression>,
         env_dispersion: Option<self::expressions::Expression>,
-        reflect: Box<Material>,
-        refract: Box<Material>,
+        reflect: Box<SurfaceMaterial>,
+        refract: Box<SurfaceMaterial>,
     },
 }
 
-impl<'lua> Parse<'lua> for Material {
+impl<'lua> Parse<'lua> for SurfaceMaterial {
     type Input = rlua::Table<'lua>;
 
     fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
         parse_enum!(context {
-            "diffuse" => Ok(Material::Diffuse {
+            "diffuse" => Ok(SurfaceMaterial::Diffuse {
                 color: context.parse_field("color")?,
             }),
-            "emission" => Ok(Material::Emission {
+            "emission" => Ok(SurfaceMaterial::Emission {
                 color: context.parse_field("color")?,
             }),
-            "mirror" => Ok(Material::Mirror {
+            "mirror" => Ok(SurfaceMaterial::Mirror {
                 color: context.parse_field("color")?,
             }),
-            "refractive" => Ok(Material::Refractive {
+            "refractive" => Ok(SurfaceMaterial::Refractive {
                 color: context.parse_field("color")?,
                 ior: context.parse_field("ior")?,
                 env_ior: context.parse_field("env_ior")?,
                 dispersion: context.parse_field("dispersion")?,
                 env_dispersion: context.parse_field("env_dispersion")?,
             }),
-            "mix" => Ok(Material::Mix {
+            "mix" => Ok(SurfaceMaterial::Mix {
                 amount: context.parse_field("amount")?,
                 lhs: Box::new(context.parse_field("lhs")?),
                 rhs: Box::new(context.parse_field("rhs")?),
             }),
-            "fresnel_mix" => Ok(Material::FresnelMix {
+            "fresnel_mix" => Ok(SurfaceMaterial::FresnelMix {
                 ior: context.parse_field("ior")?,
                 env_ior: context.parse_field("env_ior")?,
                 dispersion: context.parse_field("dispersion")?,

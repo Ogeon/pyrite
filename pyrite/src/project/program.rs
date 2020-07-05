@@ -220,6 +220,26 @@ impl<'p> ProgramCompiler<'p> {
                         instructions.push(Instruction::Function(texture));
                     }
                 }
+                ComplexExpression::DebugNormal => {
+                    if let Some(rgb) = T::rgb()? {
+                        stack.push(StackEntry::Function(rgb));
+                    }
+                    instructions.push(Instruction::Input(I::normal()?));
+                    instructions.push(Instruction::Input(|registers, _, _| {
+                        let normal: Vector3<f32> = registers.pop::<Vector>().into();
+                        Value::Number(normal.z * 0.5 + 0.5)
+                    }));
+                    instructions.push(Instruction::Input(I::normal()?));
+                    instructions.push(Instruction::Input(|registers, _, _| {
+                        let normal: Vector3<f32> = registers.pop::<Vector>().into();
+                        Value::Number(normal.y * 0.5 + 0.5)
+                    }));
+                    instructions.push(Instruction::Input(I::normal()?));
+                    instructions.push(Instruction::Input(|registers, _, _| {
+                        let normal: Vector3<f32> = registers.pop::<Vector>().into();
+                        Value::Number(normal.x * 0.5 + 0.5)
+                    }));
+                }
             }
         }
 
@@ -416,6 +436,12 @@ impl From<Light> for Value {
 impl From<SpectrumId> for Value {
     fn from(spectrum: SpectrumId) -> Self {
         Value::Spectrum(spectrum)
+    }
+}
+
+impl From<Vector> for Value {
+    fn from(vector: Vector) -> Self {
+        Value::Vector(vector)
     }
 }
 

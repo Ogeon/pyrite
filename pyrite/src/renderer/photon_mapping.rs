@@ -80,6 +80,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                         world,
                         renderer.bounces,
                         renderer.light_samples,
+                        &mut exe,
                     );
                     let p = 1.0 / renderer.bounces as f32;
 
@@ -180,6 +181,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                 |(num_rays, mut rng)| {
                     let mut processed = vec![];
                     let mut bounces = Vec::with_capacity(renderer.bounces as usize);
+                    let mut exe = ExecutionContext::new(resources);
 
                     for _ in 0..num_rays {
                         bounces.clear();
@@ -221,6 +223,7 @@ pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                     world,
                                     config.photon_bounces,
                                     0,
+                                    &mut exe,
                                 );
                                 let p = 1.0 / config.photon_bounces as f32;
 

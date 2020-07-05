@@ -129,6 +129,7 @@ fn render_tile<R: Rng>(
                     world,
                     bidir_params.bounces,
                     0,
+                    &mut exe,
                 );
 
                 pairs(&mut lamp_path, |to, from| {
@@ -160,6 +161,7 @@ fn render_tile<R: Rng>(
             world,
             renderer.bounces,
             renderer.light_samples,
+            &mut exe,
         );
 
         let total = (camera_path.len() * lamp_path.len()) as f32;

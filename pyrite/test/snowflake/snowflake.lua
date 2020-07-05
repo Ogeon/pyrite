@@ -1,7 +1,15 @@
-local ice = material.refractive {ior = 1.30144, dispersion = 0.00287, color = 1}
+local ice = {
+    surface = material.refractive {
+        ior = 1.30144,
+        dispersion = 0.00287,
+        color = 1,
+    },
+}
 
-local background = material.diffuse {
-    color = spectrum {{400, 0.025}, {600, 0.0175}, {700, 0.01}} * 0.2,
+local background = {
+    surface = material.diffuse {
+        color = spectrum {{400, 0.025}, {600, 0.0175}, {700, 0.01}} * 0.2,
+    },
 }
 
 return {
@@ -36,12 +44,16 @@ return {
             shape.sphere {
                 position = vector(0, 150, 50),
                 radius = 30,
-                material = material.emission {color = light_source.d65 * 6},
+                material = {
+                    surface = material.emission {color = light_source.d65 * 6},
+                },
             },
             shape.sphere {
                 position = vector(100, -100, 50),
                 radius = 10,
-                material = material.emission {color = light_source.d65 * 3},
+                material = {
+                    surface = material.emission {color = light_source.d65 * 3},
+                },
             },
             shape.sphere {
                 radius = 200,

@@ -9,7 +9,7 @@ use crate::{
     color,
     lamp::{self, Lamp},
     math::DIST_EPSILON,
-    project::program::{InputFn, Program, ProgramInput},
+    project::program::{ExecutionContext, InputFn, Program, ProgramInput},
     world::World,
 };
 
@@ -31,6 +31,24 @@ impl<From> ParametricValue<From, f32> for f32 {
 pub enum Reflection<'a> {
     Emit(LightProgram<'a>),
     Reflect(Ray3<f32>, LightProgram<'a>, f32, Option<Brdf>),
+}
+
+pub struct NormalInput {
+    pub normal: Vector3<f32>,
+    pub incident: Vector3<f32>,
+    pub texture: Point2<f32>,
+}
+
+impl ProgramInput for NormalInput {
+    fn normal() -> Result<InputFn<Self>, Box<dyn Error>> {
+        Ok(|_, this, _| this.normal.into())
+    }
+    fn incident() -> Result<InputFn<Self>, Box<dyn Error>> {
+        Ok(|_, this, _| this.incident.into())
+    }
+    fn texture_coordinates() -> Result<InputFn<Self>, Box<dyn Error>> {
+        Ok(|_, this, _| this.texture.into())
+    }
 }
 
 pub struct RenderContext {
@@ -127,13 +145,21 @@ pub fn trace<'w, R: Rng>(
     world: &'w World,
     bounces: u32,
     light_samples: usize,
+    exe: &mut ExecutionContext<'w>,
 ) {
     let mut sample_light = true;
 
     for _ in 0..bounces {
         match world.intersect(&ray) {
             Some((intersection, material)) => {
-                let normal = Ray3::new(intersection.position, intersection.normal);
+                let normal_input = NormalInput {
+                    incident: ray.direction,
+                    normal: intersection.normal.vector(),
+                    texture: intersection.texture,
+                };
+                let normal_direction =
+                    material.apply_normal_map(intersection.normal, normal_input, exe);
+                let normal = Ray3::new(intersection.position, normal_direction);
 
                 match material.reflect(&mut light, ray, normal, rng) {
                     Reflect(out_ray, color, prob, brdf) => {

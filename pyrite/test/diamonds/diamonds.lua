@@ -1,10 +1,12 @@
-local diamond = material.refractive {
-    ior = 2.37782,
-    dispersion = 0.01371,
-    color = 1,
+local diamond = {
+    surface = material.refractive {
+        ior = 2.37782,
+        dispersion = 0.01371,
+        color = 1,
+    },
 }
 
-local plexi = material.mirror {color = mix(0, 0.2, fresnel(1.1))}
+local plexi = {surface = material.mirror {color = mix(0, 0.2, fresnel(1.1))}}
 
 return {
     image = {width = 512, height = 300},
@@ -35,9 +37,13 @@ return {
 
                 materials = {
                     diamonds = diamond,
-                    light_left = material.emission {color = light_source.d65},
-                    light_right = material.emission {
-                        color = light_source.d65 * 2,
+                    light_left = {
+                        surface = material.emission {color = light_source.d65},
+                    },
+                    light_right = {
+                        surface = material.emission {
+                            color = light_source.d65 * 2,
+                        },
                     },
                     bottom = plexi,
                 },

@@ -2,7 +2,8 @@ use std::{fs::File, io::BufReader, path::Path};
 
 use cgmath::Point2;
 use palette::{
-    Alpha, Component, LinLuma, LinLumaa, LinSrgb, LinSrgba, Pixel, Srgb, SrgbLuma, SrgbLumaa, Srgba,
+    white_point::D65, Alpha, Component, LinLuma, LinLumaa, LinSrgb, LinSrgba, Pixel, Srgb,
+    SrgbLuma, SrgbLumaa, Srgba,
 };
 
 /// Linearized image data.
@@ -14,7 +15,10 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> image::ImageResult<Texture> {
+    pub fn from_path<P: AsRef<Path>>(
+        path: P,
+        encoding: ColorEncoding,
+    ) -> image::ImageResult<Texture> {
         use image::GenericImageView;
 
         let path = path.as_ref();
@@ -27,43 +31,43 @@ impl Texture {
         let (format, data) = match image {
             image::DynamicImage::ImageLuma8(image) => (
                 TextureFormat::Mono,
-                convert_pixels::<SrgbLuma<u8>, _>(&image.into_raw()),
+                convert_pixels::<SrgbLuma<u8>, _>(&image.into_raw(), encoding),
             ),
             image::DynamicImage::ImageLumaA8(image) => (
                 TextureFormat::MonoAlpha,
-                convert_pixels::<SrgbLumaa<u8>, _>(&image.into_raw()),
+                convert_pixels::<SrgbLumaa<u8>, _>(&image.into_raw(), encoding),
             ),
             image::DynamicImage::ImageRgb8(image) => (
                 TextureFormat::Rgb,
-                convert_pixels::<Srgb<u8>, _>(&image.into_raw()),
+                convert_pixels::<Srgb<u8>, _>(&image.into_raw(), encoding),
             ),
             image::DynamicImage::ImageRgba8(image) => (
                 TextureFormat::RgbAlpha,
-                convert_pixels::<Srgba<u8>, _>(&image.into_raw()),
+                convert_pixels::<Srgba<u8>, _>(&image.into_raw(), encoding),
             ),
             image::DynamicImage::ImageBgr8(image) => (
                 TextureFormat::Rgb,
-                convert_pixels::<Bgr, _>(&image.into_raw()),
+                convert_pixels::<Bgr, _>(&image.into_raw(), encoding),
             ),
             image::DynamicImage::ImageBgra8(image) => (
                 TextureFormat::RgbAlpha,
-                convert_pixels::<Alpha<Bgr, _>, _>(&image.into_raw()),
+                convert_pixels::<Alpha<Bgr, _>, _>(&image.into_raw(), encoding),
             ),
             image::DynamicImage::ImageLuma16(image) => (
                 TextureFormat::Mono,
-                convert_pixels::<SrgbLuma<u16>, _>(&image.into_raw()),
+                convert_pixels::<SrgbLuma<u16>, _>(&image.into_raw(), encoding),
             ),
             image::DynamicImage::ImageLumaA16(image) => (
                 TextureFormat::MonoAlpha,
-                convert_pixels::<SrgbLumaa<u16>, _>(&image.into_raw()),
+                convert_pixels::<SrgbLumaa<u16>, _>(&image.into_raw(), encoding),
             ),
             image::DynamicImage::ImageRgb16(image) => (
                 TextureFormat::Rgb,
-                convert_pixels::<Srgb<u16>, _>(&image.into_raw()),
+                convert_pixels::<Srgb<u16>, _>(&image.into_raw(), encoding),
             ),
             image::DynamicImage::ImageRgba16(image) => (
                 TextureFormat::RgbAlpha,
-                convert_pixels::<Srgba<u16>, _>(&image.into_raw()),
+                convert_pixels::<Srgba<u16>, _>(&image.into_raw(), encoding),
             ),
         };
 
@@ -145,27 +149,52 @@ impl Texture {
     }
 }
 
-fn convert_pixels<C, T>(pixels: &[T]) -> Vec<f32>
+pub enum ColorEncoding {
+    Linear,
+    Srgb,
+}
+
+fn convert_pixels<C, T>(pixels: &[T], encoding: ColorEncoding) -> Vec<f32>
 where
     C: SourceColor + Pixel<T> + Copy,
+    C::LinearSourceColor: Pixel<T> + Copy,
     T: Component,
 {
-    let pixels = C::from_raw_slice(pixels);
-    let linear_pixels = pixels
-        .into_iter()
-        .map(|&pixel| pixel.into_linear_floats())
-        .collect::<Vec<_>>();
+    let linear_pixels = match encoding {
+        ColorEncoding::Linear => {
+            let pixels = C::LinearSourceColor::from_raw_slice(pixels);
+            pixels
+                .into_iter()
+                .map(|&pixel| pixel.into_linear_floats())
+                .collect::<Vec<_>>()
+        }
+        ColorEncoding::Srgb => {
+            let pixels = C::from_raw_slice(pixels);
+            pixels
+                .into_iter()
+                .map(|&pixel| pixel.into_linear_floats())
+                .collect::<Vec<_>>()
+        }
+    };
 
     Pixel::into_raw_slice(&linear_pixels).into()
 }
 
-trait SourceColor {
+trait SourceColor: IntoLinearFloats {
+    type LinearSourceColor: IntoLinearFloats<LinearFloats = Self::LinearFloats>;
+}
+
+trait IntoLinearFloats {
     type LinearFloats: Pixel<f32>;
 
     fn into_linear_floats(self) -> Self::LinearFloats;
 }
 
 impl<T: Component> SourceColor for Srgb<T> {
+    type LinearSourceColor = LinSrgb<T>;
+}
+
+impl<T: Component> IntoLinearFloats for Srgb<T> {
     type LinearFloats = LinSrgb;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
@@ -173,7 +202,19 @@ impl<T: Component> SourceColor for Srgb<T> {
     }
 }
 
+impl<T: Component> IntoLinearFloats for LinSrgb<T> {
+    type LinearFloats = LinSrgb;
+
+    fn into_linear_floats(self) -> Self::LinearFloats {
+        self.into_format()
+    }
+}
+
 impl<T: Component> SourceColor for SrgbLuma<T> {
+    type LinearSourceColor = LinLuma<D65, T>;
+}
+
+impl<T: Component> IntoLinearFloats for SrgbLuma<T> {
     type LinearFloats = LinLuma;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
@@ -181,7 +222,19 @@ impl<T: Component> SourceColor for SrgbLuma<T> {
     }
 }
 
+impl<T: Component> IntoLinearFloats for LinLuma<D65, T> {
+    type LinearFloats = LinLuma;
+
+    fn into_linear_floats(self) -> Self::LinearFloats {
+        self.into_format()
+    }
+}
+
 impl<C: SourceColor, T: Component> SourceColor for Alpha<C, T> {
+    type LinearSourceColor = Alpha<C::LinearSourceColor, T>;
+}
+
+impl<C: IntoLinearFloats, T: Component> IntoLinearFloats for Alpha<C, T> {
     type LinearFloats = Alpha<C::LinearFloats, f32>;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
@@ -201,10 +254,30 @@ struct Bgr {
 }
 
 impl SourceColor for Bgr {
+    type LinearSourceColor = LinBgr;
+}
+
+impl IntoLinearFloats for Bgr {
     type LinearFloats = LinSrgb;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
         Srgb::new(self.red, self.green, self.blue).into_linear_floats()
+    }
+}
+
+#[derive(Pixel, Clone, Copy)]
+#[repr(C)]
+struct LinBgr {
+    blue: u8,
+    green: u8,
+    red: u8,
+}
+
+impl IntoLinearFloats for LinBgr {
+    type LinearFloats = LinSrgb;
+
+    fn into_linear_floats(self) -> Self::LinearFloats {
+        LinSrgb::new(self.red, self.green, self.blue).into_linear_floats()
     }
 }
 

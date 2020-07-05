@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::texture::Texture;
+use crate::texture::{ColorEncoding, Texture};
 
 pub struct Textures {
     textures: Vec<Texture>,
@@ -35,23 +35,27 @@ pub struct TextureLoader {
 }
 
 impl TextureLoader {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, Box<dyn Error>> {
-        let project_dir = path.as_ref().canonicalize()?;
+    pub fn new(path: impl AsRef<Path>) -> Self {
+        let project_dir = path.as_ref().into();
 
-        Ok(TextureLoader {
+        TextureLoader {
             textures: Textures::new(),
             file_map: HashMap::new(),
             project_dir,
-        })
+        }
     }
 
-    pub fn load(&mut self, path: impl AsRef<Path>) -> Result<TextureId, Box<dyn Error>> {
-        let path = self.project_dir.join(path);
+    pub fn load(
+        &mut self,
+        path: impl AsRef<Path>,
+        encoding: ColorEncoding,
+    ) -> Result<TextureId, Box<dyn Error>> {
+        let path = self.project_dir.join(path).canonicalize()?;
 
         match self.file_map.entry(path) {
             Entry::Occupied(entry) => Ok(*entry.get()),
             Entry::Vacant(entry) => {
-                let texture = Texture::from_path(entry.key()).map_err(|error| {
+                let texture = Texture::from_path(entry.key(), encoding).map_err(|error| {
                     format!("could not load {}: {}", entry.key().display(), error)
                 })?;
                 let id = self.textures.insert(texture);

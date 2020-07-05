@@ -1,5 +1,4 @@
 [package]
-
 name = "pyrite"
 version = "0.0.0"
 authors = ["Erik Hedvall <hello@erikhedvall.nu>"]
@@ -7,7 +6,6 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [[bin]]
-
 name = "pyrite"
 path = "src/main.rs"
 
@@ -29,6 +27,7 @@ rlua_serde = "0.4"
 serde = "^1.0"
 serde-value = "0.6"
 bumpalo = "^3.4"
+path-slash = "0.1"
 
 [build-dependencies]
 csv = "^1.1"

@@ -184,8 +184,12 @@ function rgb(red, green, blue)
     return properties
 end
 
-function texture(path)
-    local properties = {type = "texture", path = path}
+function texture(path, encoding)
+    local properties = {
+        type = "texture",
+        path = path,
+        encoding = encoding or "srgb",
+    }
     _pyrite.make_expression(properties)
 
     return properties

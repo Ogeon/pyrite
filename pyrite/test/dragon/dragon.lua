@@ -26,11 +26,13 @@ return {
                 file = "dragon.obj",
 
                 materials = {
-                    dragon = material.refractive {
-                        ior = 1.5,
-                        _ior = 2.37782,
-                        dispersion = 0.01371,
-                        color = 1,
+                    dragon = {
+                        surface = material.refractive {
+                            ior = 1.5,
+                            _ior = 2.37782,
+                            dispersion = 0.01371,
+                            color = 1,
+                        },
                     },
                 },
 
@@ -44,19 +46,19 @@ return {
             shape.plane {
                 origin = vector(),
                 normal = vector {z = 1},
-                material = material.diffuse {color = 0.4},
+                material = {surface = material.diffuse {color = 0.4}},
             },
 
             shape.plane {
                 origin = vector {y = -10},
                 normal = vector {y = -1},
-                material = material.diffuse {color = 0.4},
+                material = {surface = material.diffuse {color = 0.4}},
             },
 
             shape.plane {
                 origin = vector {x = -11},
                 normal = vector {x = 1},
-                material = material.diffuse {color = 0.4},
+                material = {surface = material.diffuse {color = 0.4}},
             },
 
             light.point {

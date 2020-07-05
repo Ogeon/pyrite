@@ -10,15 +10,79 @@ use crate::{
     math,
     project::{
         eval_context::{EvalContext, Evaluate, EvaluateOr},
-        expressions::Expressions,
-        program::{Program, ProgramCompiler},
-        Material as ProjectMaterial,
+        expressions::{Expressions, Vector},
+        program::{ExecutionContext, Program, ProgramCompiler},
+        SurfaceMaterial as ProjectMaterial,
     },
-    tracer::{self, Emit, Reflect, Reflection, RenderContext},
+    shapes::Normal,
+    tracer::{self, Emit, LightProgram, NormalInput, Reflect, Reflection, RenderContext},
 };
-use tracer::LightProgram;
 
-pub enum Material<'p> {
+pub struct Material<'p> {
+    surface: SurfaceMaterial<'p>,
+    normal_map: Option<Program<'p, NormalInput, Vector>>,
+}
+
+impl<'p> Material<'p> {
+    pub fn from_project(
+        project: crate::project::Material,
+        eval_context: EvalContext,
+        programs: ProgramCompiler<'p>,
+        expressions: &Expressions,
+    ) -> Result<Self, Box<dyn Error>> {
+        let crate::project::Material {
+            surface,
+            normal_map,
+        } = project;
+
+        Ok(Material {
+            surface: SurfaceMaterial::from_project(surface, eval_context, programs, expressions)?,
+            normal_map: normal_map
+                .map(|normal_map| programs.compile(&normal_map, expressions))
+                .transpose()?,
+        })
+    }
+
+    pub fn reflect(
+        &self,
+        light: &mut tracer::Light,
+        ray_in: Ray3<f32>,
+        normal: Ray3<f32>,
+        rng: &mut impl Rng,
+    ) -> Reflection<'_> {
+        self.surface.reflect(light, ray_in, normal, rng)
+    }
+
+    pub fn get_emission(
+        &self,
+        light: &mut tracer::Light,
+        ray_in: Vector3<f32>,
+        normal: Ray3<f32>,
+        rng: &mut impl Rng,
+    ) -> Option<Program<RenderContext, Light>> {
+        self.surface.get_emission(light, ray_in, normal, rng)
+    }
+
+    pub fn is_emissive(&self) -> bool {
+        self.surface.is_emissive()
+    }
+
+    pub fn apply_normal_map(
+        &self,
+        normal: Normal,
+        input: NormalInput,
+        exe: &mut ExecutionContext<'p>,
+    ) -> Vector3<f32> {
+        if let Some(normal_map) = self.normal_map {
+            let new_normal: Vector3<f32> = exe.run(normal_map, &input).into();
+            normal.from_space(new_normal).normalize()
+        } else {
+            normal.vector()
+        }
+    }
+}
+
+pub enum SurfaceMaterial<'p> {
     Diffuse(Diffuse<'p>),
     Emission(Emission<'p>),
     Mirror(Mirror<'p>),
@@ -27,7 +91,7 @@ pub enum Material<'p> {
     FresnelMix(FresnelMix<'p>),
 }
 
-impl<'p> Material<'p> {
+impl<'p> SurfaceMaterial<'p> {
     pub fn from_project(
         project: ProjectMaterial,
         eval_context: EvalContext,
@@ -35,13 +99,13 @@ impl<'p> Material<'p> {
         expressions: &Expressions,
     ) -> Result<Self, Box<dyn Error>> {
         Ok(match project {
-            ProjectMaterial::Diffuse { color } => Material::Diffuse(Diffuse {
+            ProjectMaterial::Diffuse { color } => SurfaceMaterial::Diffuse(Diffuse {
                 color: programs.compile(&color, expressions)?,
             }),
-            ProjectMaterial::Emission { color } => Material::Emission(Emission {
+            ProjectMaterial::Emission { color } => SurfaceMaterial::Emission(Emission {
                 color: programs.compile(&color, expressions)?,
             }),
-            ProjectMaterial::Mirror { color } => Material::Mirror(Mirror {
+            ProjectMaterial::Mirror { color } => SurfaceMaterial::Mirror(Mirror {
                 color: programs.compile(&color, expressions)?,
             }),
             ProjectMaterial::Refractive {
@@ -50,22 +114,22 @@ impl<'p> Material<'p> {
                 env_ior,
                 dispersion,
                 env_dispersion,
-            } => Material::Refractive(Refractive {
+            } => SurfaceMaterial::Refractive(Refractive {
                 color: programs.compile(&color, expressions)?,
                 ior: ior.evaluate(eval_context)?,
                 env_ior: env_ior.evaluate_or(eval_context, 1.0)?,
                 dispersion: dispersion.evaluate_or(eval_context, 0.0)?,
                 env_dispersion: env_dispersion.evaluate_or(eval_context, 0.0)?,
             }),
-            ProjectMaterial::Mix { amount, lhs, rhs } => Material::Mix(Mix {
+            ProjectMaterial::Mix { amount, lhs, rhs } => SurfaceMaterial::Mix(Mix {
                 factor: amount.evaluate(eval_context)?,
-                a: Box::new(Material::from_project(
+                a: Box::new(SurfaceMaterial::from_project(
                     *lhs,
                     eval_context,
                     programs,
                     expressions,
                 )?),
-                b: Box::new(Material::from_project(
+                b: Box::new(SurfaceMaterial::from_project(
                     *rhs,
                     eval_context,
                     programs,
@@ -79,18 +143,18 @@ impl<'p> Material<'p> {
                 env_dispersion,
                 reflect,
                 refract,
-            } => Material::FresnelMix(FresnelMix {
+            } => SurfaceMaterial::FresnelMix(FresnelMix {
                 ior: ior.evaluate(eval_context)?,
                 env_ior: env_ior.evaluate_or(eval_context, 1.0)?,
                 dispersion: dispersion.evaluate_or(eval_context, 0.0)?,
                 env_dispersion: env_dispersion.evaluate_or(eval_context, 0.0)?,
-                reflect: Box::new(Material::from_project(
+                reflect: Box::new(SurfaceMaterial::from_project(
                     *reflect,
                     eval_context,
                     programs,
                     expressions,
                 )?),
-                refract: Box::new(Material::from_project(
+                refract: Box::new(SurfaceMaterial::from_project(
                     *refract,
                     eval_context,
                     programs,
@@ -108,12 +172,12 @@ impl<'p> Material<'p> {
         rng: &mut impl Rng,
     ) -> Reflection<'_> {
         match self {
-            Material::Diffuse(material) => material.reflect(ray_in, normal, rng),
-            Material::Emission(material) => material.reflect(),
-            Material::Mirror(material) => material.reflect(ray_in, normal),
-            Material::Refractive(material) => material.reflect(light, ray_in, normal, rng),
-            Material::Mix(material) => material.reflect(light, ray_in, normal, rng),
-            Material::FresnelMix(material) => material.reflect(light, ray_in, normal, rng),
+            SurfaceMaterial::Diffuse(material) => material.reflect(ray_in, normal, rng),
+            SurfaceMaterial::Emission(material) => material.reflect(),
+            SurfaceMaterial::Mirror(material) => material.reflect(ray_in, normal),
+            SurfaceMaterial::Refractive(material) => material.reflect(light, ray_in, normal, rng),
+            SurfaceMaterial::Mix(material) => material.reflect(light, ray_in, normal, rng),
+            SurfaceMaterial::FresnelMix(material) => material.reflect(light, ray_in, normal, rng),
         }
     }
 
@@ -125,21 +189,27 @@ impl<'p> Material<'p> {
         rng: &mut impl Rng,
     ) -> Option<Program<RenderContext, Light>> {
         match self {
-            Material::Emission(material) => material.get_emission(),
-            Material::Mix(material) => material.get_emission(light, ray_in, normal, rng),
-            Material::FresnelMix(material) => material.get_emission(light, ray_in, normal, rng),
-            Material::Diffuse(_) | Material::Mirror(_) | Material::Refractive(_) => None,
+            SurfaceMaterial::Emission(material) => material.get_emission(),
+            SurfaceMaterial::Mix(material) => material.get_emission(light, ray_in, normal, rng),
+            SurfaceMaterial::FresnelMix(material) => {
+                material.get_emission(light, ray_in, normal, rng)
+            }
+            SurfaceMaterial::Diffuse(_)
+            | SurfaceMaterial::Mirror(_)
+            | SurfaceMaterial::Refractive(_) => None,
         }
     }
 
     pub fn is_emissive(&self) -> bool {
         match self {
-            Material::Emission(_) => true,
-            Material::Mix(material) => material.a.is_emissive() || material.b.is_emissive(),
-            Material::FresnelMix(material) => {
+            SurfaceMaterial::Emission(_) => true,
+            SurfaceMaterial::Mix(material) => material.a.is_emissive() || material.b.is_emissive(),
+            SurfaceMaterial::FresnelMix(material) => {
                 material.reflect.is_emissive() || material.refract.is_emissive()
             }
-            Material::Diffuse(_) | Material::Mirror(_) | Material::Refractive(_) => false,
+            SurfaceMaterial::Diffuse(_)
+            | SurfaceMaterial::Mirror(_)
+            | SurfaceMaterial::Refractive(_) => false,
         }
     }
 }
@@ -209,8 +279,8 @@ impl<'p> Mirror<'p> {
 
 pub struct Mix<'p> {
     factor: f32,
-    pub a: Box<Material<'p>>,
-    pub b: Box<Material<'p>>,
+    pub a: Box<SurfaceMaterial<'p>>,
+    pub b: Box<SurfaceMaterial<'p>>,
 }
 
 impl<'p> Mix<'p> {
@@ -248,8 +318,8 @@ pub struct FresnelMix<'p> {
     dispersion: f32,
     env_ior: f32,
     env_dispersion: f32,
-    pub reflect: Box<Material<'p>>,
-    pub refract: Box<Material<'p>>,
+    pub reflect: Box<SurfaceMaterial<'p>>,
+    pub refract: Box<SurfaceMaterial<'p>>,
 }
 
 impl<'p> FresnelMix<'p> {
@@ -327,12 +397,12 @@ impl<'p> FresnelMix<'p> {
 fn fresnel_mix<'a, R: Rng>(
     ior: f32,
     env_ior: f32,
-    reflect: &'a Material<'a>,
-    refract: &'a Material<'a>,
+    reflect: &'a SurfaceMaterial<'a>,
+    refract: &'a SurfaceMaterial<'a>,
     ray_in: Vector3<f32>,
     normal: Ray3<f32>,
     rng: &mut R,
-) -> &'a Material<'a> {
+) -> &'a SurfaceMaterial<'a> {
     let factor = if ray_in.dot(normal.direction) < 0.0 {
         math::utils::schlick(env_ior, ior, normal.direction, ray_in)
     } else {

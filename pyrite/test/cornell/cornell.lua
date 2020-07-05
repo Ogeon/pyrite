@@ -1,13 +1,13 @@
 local colors = require "colors"
 local lamp = require "lamp"
 
-local light = material.emission {color = spectrum(lamp.color)}
+local light = {surface = material.emission {color = spectrum(lamp.color)}}
 
-local white = material.diffuse {color = spectrum(colors.white)}
+local white = {surface = material.diffuse {color = spectrum(colors.white)}}
 
-local green = material.diffuse {color = spectrum(colors.green)}
+local green = {surface = material.diffuse {color = spectrum(colors.green)}}
 
-local red = material.diffuse {color = spectrum(colors.red)}
+local red = {surface = material.diffuse {color = spectrum(colors.red)}}
 
 return {
     image = {width = 512, height = 512},
@@ -61,10 +61,12 @@ return {
                     max = vector(-1, 2, 2),
                 },
 
-                material = fresnel_mix {
-                    refract = material.diffuse {color = 0.8},
-                    reflect = material.mirror {color = 1},
-                    ior = 1.5,
+                material = {
+                    surface = fresnel_mix {
+                        refract = material.diffuse {color = 0.8},
+                        reflect = material.mirror {color = 1},
+                        ior = 1.5,
+                    },
                 },
             },
         },

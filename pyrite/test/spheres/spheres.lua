@@ -23,26 +23,30 @@ return {
             shape.sphere {
                 radius = 50.0,
                 position = vector(0, -50, 10),
-                material = material.diffuse {color = 1},
+                material = {surface = material.diffuse {color = 1}},
             },
 
             ball:with{
                 position = ball.position:with{y = 1.5},
-                material = material.emission({color = light_source.d65 * 3}),
+                material = {
+                    surface = material.emission {color = light_source.d65 * 3},
+                },
             },
 
             ball:with{
                 position = ball.position:with{x = -3},
-                material = fresnel_mix {
-                    ior = 1.5,
-                    reflect = material.mirror {color = 1},
-                    refract = material.diffuse {
-                        color = spectrum {
-                            {400, 0},
-                            {450, 0.3},
-                            {500, 0},
-                            {550, 1},
-                            {600, 0},
+                material = {
+                    surface = fresnel_mix {
+                        ior = 1.5,
+                        reflect = material.mirror {color = 1},
+                        refract = material.diffuse {
+                            color = spectrum {
+                                {400, 0},
+                                {450, 0.3},
+                                {500, 0},
+                                {550, 1},
+                                {600, 0},
+                            },
                         },
                     },
                 },
@@ -50,8 +54,15 @@ return {
 
             ball:with{
                 position = ball.position:with{x = 3},
-                material = material.diffuse {
-                    color = spectrum {{580, 0}, {600, 1}, {610, 1}, {650, 0}},
+                material = {
+                    surface = material.diffuse {
+                        color = spectrum {
+                            {580, 0},
+                            {600, 1},
+                            {610, 1},
+                            {650, 0},
+                        },
+                    },
                 },
             },
         },

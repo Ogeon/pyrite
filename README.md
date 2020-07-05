@@ -45,7 +45,7 @@ Projects are configured using Lua to get access to more flexibility and convenie
 
 The format is still in flux, so the examples in `pyrite/test/` are the best source of information (outside the renderer code) for now.
 
-## Acknowledgements
+## Sources And Acknowledgements
 
 This project uses data and a few example assets from external sources:
 
@@ -61,6 +61,8 @@ Example assets:
 * Stanford Dragon: <http://graphics.stanford.edu/data/3Dscanrep/>
 * ColorChecker image: <https://commons.wikimedia.org/wiki/File:ColorChecker100423.jpg>
 * Tile floor textures: <https://cc0textures.com/view?id=Tiles012>
+* Tactile paving textures: https://cc0textures.com/view?id=TactilePaving002
+* Fabric textures: https://cc0textures.com/view?id=Fabric008
 
 ## Contributing
 

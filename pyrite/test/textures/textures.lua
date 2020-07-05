@@ -1,5 +1,5 @@
 local light_ball = shape.sphere {
-    material = material.emission {color = light_source.d65 * 20},
+    material = {surface = material.emission {color = light_source.d65 * 20}},
     position = vector(0, 0, 0),
     radius = 1,
 }
@@ -29,7 +29,17 @@ return {
             shape.plane {
                 origin = vector(),
                 normal = vector {y = 1},
-                material = material.diffuse {color = texture("tiles/color.jpg")},
+                material = {
+                    surface = fresnel_mix {
+                        ior = 1.5,
+                        reflect = material.mirror {color = 1},
+                        refract = material.diffuse {
+                            color = texture("tiles/color.jpg"),
+                        },
+                    },
+                    normal_map = texture("tiles/normal.jpg", "linear") *
+                        vector(1, -1, 1),
+                },
                 texture_scale = 5,
             },
             light_ball:with{position = vector(-1, 12, 2), radius = 3},
@@ -37,8 +47,38 @@ return {
             shape.mesh {
                 file = "color_checker.obj",
                 materials = {
-                    color_checker = material.diffuse {
-                        color = texture("color_checker.jpg"),
+                    color_checker = {
+                        surface = material.diffuse {
+                            color = texture("color_checker.jpg"),
+                        },
+                    },
+                },
+            },
+            shape.sphere {
+                position = vector(-3, 1, 0),
+                radius = 1,
+                texture_scale = vector(0.5, 1),
+                material = {
+                    surface = material.diffuse {
+                        color = texture("tactile_paving/color.jpg"),
+                    },
+                    normal_map = texture("tactile_paving/normal.jpg", "linear") *
+                        vector(1, -1, 1),
+                },
+            },
+            shape.mesh {
+                file = "cube.obj",
+                transform = transform.look_at {
+                    from = vector(2, 0.5, 1),
+                    to = vector(-1, 0.5, 2),
+                },
+                materials = {
+                    cube = {
+                        surface = material.diffuse {
+                            color = texture("fabric/color.jpg"),
+                        },
+                        normal_map = texture("fabric/normal.jpg", "linear") *
+                            vector(1, -1, 0.1), -- artificially enhances the contrast
                     },
                 },
             },

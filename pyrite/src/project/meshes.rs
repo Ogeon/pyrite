@@ -34,18 +34,18 @@ pub struct MeshLoader {
 }
 
 impl MeshLoader {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, Box<dyn Error>> {
-        let project_dir = path.as_ref().canonicalize()?;
+    pub fn new(path: impl AsRef<Path>) -> Self {
+        let project_dir = path.as_ref().into();
 
-        Ok(MeshLoader {
+        MeshLoader {
             meshes: Meshes::new(),
             file_map: HashMap::new(),
             project_dir,
-        })
+        }
     }
 
     pub fn load(&mut self, path: impl AsRef<Path>) -> Result<MeshId, Box<dyn Error>> {
-        let path = self.project_dir.join(path);
+        let path = self.project_dir.join(path).canonicalize()?;
 
         match self.file_map.entry(path) {
             Entry::Occupied(entry) => Ok(*entry.get()),
