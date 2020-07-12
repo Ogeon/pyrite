@@ -1,7 +1,7 @@
 local colors = require "colors"
 local lamp = require "lamp"
 
-local light = {surface = material.emission {color = lamp.color}}
+local light = {surface = material.emission {color = lamp.color * 3}}
 
 local white = {surface = material.diffuse {color = colors.white}}
 
@@ -10,7 +10,7 @@ local green = {surface = material.diffuse {color = colors.green}}
 local red = {surface = material.diffuse {color = colors.red}}
 
 return {
-    image = {width = 512, height = 512},
+    image = {width = 512, height = 512, white = blackbody(4000)},
 
     renderer = renderer.bidirectional {
         pixel_samples = 300,

@@ -17,12 +17,13 @@ use palette::{ComponentWise, FromColor, LinSrgb, Pixel, Srgb, Xyz};
 
 use bumpalo::Bump;
 
+use color::{Light, WavelengthInput};
 use film::{Film, Spectrum};
 use project::{
     eval_context::EvalContext,
     expressions::Expressions,
     meshes::Meshes,
-    program::{ProgramCompiler, Resources},
+    program::{ExecutionContext, Program, ProgramCompiler, ProgramInput, Resources},
     ProjectData,
 };
 
@@ -85,7 +86,7 @@ fn parse_project<'p>(
     expressions: &Expressions,
     meshes: &Meshes,
     resources: Resources<'p>,
-) -> Result<(project::Image, RenderContext<'p>), Box<dyn Error>> {
+) -> Result<(ImageSettings<'p>, RenderContext<'p>), Box<dyn Error>> {
     let eval_context = EvalContext { expressions };
 
     let config = RenderContext {
@@ -101,11 +102,13 @@ fn parse_project<'p>(
         resources,
     };
 
-    Ok((project.image, config))
+    let image = ImageSettings::from_project(project.image, programs, expressions)?;
+
+    Ok((image, config))
 }
 
 fn render<P: AsRef<Path>>(
-    image_settings: project::Image,
+    image_settings: ImageSettings<'_>,
     config: RenderContext<'_>,
     project_path: P,
 ) {
@@ -140,6 +143,58 @@ fn render<P: AsRef<Path>>(
         config.renderer.spectrum_span,
     );
 
+    let mut filter_exe = ExecutionContext::new(config.resources);
+    let mut filter = image_settings.filter.map(|white| {
+        move |intensity: f32, wavelength: f32| {
+            intensity
+                * filter_exe
+                    .run(white, &SpectrumSamplingInput { wavelength })
+                    .value
+        }
+    });
+
+    let mut white_balance_exe = ExecutionContext::new(config.resources);
+    let mut white_balance = image_settings.white.map(|white| {
+        let mut wavelength = config.renderer.spectrum_span.0;
+        let mut max = 0.0f32;
+        let mut d65_max = 0.0f32;
+
+        while wavelength < config.renderer.spectrum_span.1 {
+            max = max.max(
+                white_balance_exe
+                    .run(white, &SpectrumSamplingInput { wavelength })
+                    .value,
+            );
+            d65_max = d65_max.max(light_source::D65.get(wavelength));
+            wavelength += 1.0;
+        }
+
+        move |intensity: f32, wavelength: f32| {
+            let white_intensity = white_balance_exe
+                .run(white, &SpectrumSamplingInput { wavelength })
+                .value
+                / max;
+            let neutral = intensity / white_intensity.max(0.000001);
+            neutral * (light_source::D65.get(wavelength) / d65_max)
+        }
+    });
+
+    let mut spectrum_get = |spectrum: &Spectrum, wavelength: f32| {
+        let intensity = spectrum.get(wavelength);
+
+        let filtered = if let Some(filter) = &mut filter {
+            filter(intensity, wavelength)
+        } else {
+            intensity
+        };
+
+        if let Some(white_balance) = &mut white_balance {
+            white_balance(filtered, wavelength)
+        } else {
+            filtered
+        }
+    };
+
     let mut last_print: Option<Instant> = None;
     let mut last_image: Instant = Instant::now();
 
@@ -166,7 +221,12 @@ fn render<P: AsRef<Path>>(
                             let color = spectrum_to_rgb(30.0, spectrum, &red, &green, &blue);
                             Srgb::from_linear(color).into_format()
                         } else {
-                            let color = spectrum_to_xyz(30.0, spectrum);
+                            let color = spectrum_to_xyz(
+                                spectrum.spectrum_width(),
+                                30.0,
+                                spectrum,
+                                |s, w| spectrum_get(s, w),
+                            );
                             Srgb::from_color(color).into_format()
                         };
 
@@ -236,7 +296,9 @@ fn render<P: AsRef<Path>>(
             let color = spectrum_to_rgb(2.0, spectrum, &red, &green, &blue);
             Srgb::from_linear(color).into_format()
         } else {
-            let color = spectrum_to_xyz(2.0, spectrum);
+            let color = spectrum_to_xyz(spectrum.spectrum_width(), 2.0, spectrum, |s, w| {
+                spectrum_get(s, w)
+            });
             Srgb::from_color(color).into_format()
         };
 
@@ -257,13 +319,28 @@ fn spectrum_to_rgb(
     green: &project::spectra::Spectrum,
     blue: &project::spectra::Spectrum,
 ) -> LinSrgb {
-    spectrum_to_tristimulus(step_size, spectrum, red, green, blue)
-}
-
-fn spectrum_to_xyz(step_size: f32, spectrum: Spectrum) -> Xyz {
-    let color: Xyz = spectrum_to_tristimulus(
+    spectrum_to_tristimulus(
+        spectrum.spectrum_width(),
         step_size,
         spectrum,
+        Spectrum::get,
+        red,
+        green,
+        blue,
+    )
+}
+
+fn spectrum_to_xyz<S>(
+    spectrum_width: (f32, f32),
+    step_size: f32,
+    spectrum: S,
+    sample: impl FnMut(&S, f32) -> f32,
+) -> Xyz {
+    let color: Xyz = spectrum_to_tristimulus(
+        spectrum_width,
+        step_size,
+        spectrum,
+        sample,
         &xyz::response::X,
         &xyz::response::Y,
         &xyz::response::Z,
@@ -272,9 +349,11 @@ fn spectrum_to_xyz(step_size: f32, spectrum: Spectrum) -> Xyz {
     color * 3.444 // Scale up to better match D65 light source data
 }
 
-fn spectrum_to_tristimulus<T>(
+fn spectrum_to_tristimulus<T, S>(
+    (min, max): (f32, f32),
     step_size: f32,
-    spectrum: Spectrum,
+    spectrum: S,
+    mut sample: impl FnMut(&S, f32) -> f32,
     first: &project::spectra::Spectrum,
     second: &project::spectra::Spectrum,
     third: &project::spectra::Spectrum,
@@ -293,15 +372,13 @@ where
     let mut sum = T::from((0.0, 0.0, 0.0));
     let mut weight = 0.0;
 
-    let (min, max) = spectrum.spectrum_width();
-
     let mut wl_min = min;
-    let mut spectrum_min = spectrum.get(wl_min);
+    let mut spectrum_min = sample(&spectrum, wl_min);
 
     while wl_min < max {
         let wl_max = wl_min + step_size;
 
-        let spectrum_max = spectrum.get(wl_max);
+        let spectrum_max = sample(&spectrum, wl_max);
         let (first_min, first_max) = (first.get(wl_min), first.get(wl_max));
         let (second_min, second_max) = (second.get(wl_min), second.get(wl_max));
         let (third_min, third_max) = (third.get(wl_min), third.get(wl_max));
@@ -329,4 +406,62 @@ struct RenderContext<'p> {
     world: world::World<'p>,
     renderer: renderer::Renderer,
     resources: Resources<'p>,
+}
+
+struct ImageSettings<'a> {
+    width: u32,
+    height: u32,
+    file: Option<String>,
+    filter: Option<Program<'a, SpectrumSamplingInput, Light>>,
+    white: Option<Program<'a, SpectrumSamplingInput, Light>>,
+}
+
+impl<'a> ImageSettings<'a> {
+    fn from_project(
+        project: project::Image,
+        programs: ProgramCompiler<'a>,
+        expressions: &Expressions,
+    ) -> Result<Self, Box<dyn Error>> {
+        let project::Image {
+            width,
+            height,
+            file,
+            filter,
+            white,
+        } = project;
+
+        Ok(ImageSettings {
+            width,
+            height,
+            file,
+            filter: filter
+                .map(|filter| programs.compile(&filter, expressions))
+                .transpose()?,
+            white: white
+                .map(|white| programs.compile(&white, expressions))
+                .transpose()?,
+        })
+    }
+}
+
+struct SpectrumSamplingInput {
+    wavelength: f32,
+}
+
+impl ProgramInput for SpectrumSamplingInput {
+    fn normal() -> Result<project::program::InputFn<Self>, Box<dyn Error>> {
+        Err("the surface normal cannot be used while sampling a constant spectrum".into())
+    }
+    fn incident() -> Result<project::program::InputFn<Self>, Box<dyn Error>> {
+        Err("the incident vector cannot be used while sampling a constant spectrum".into())
+    }
+    fn texture_coordinates() -> Result<project::program::InputFn<Self>, Box<dyn Error>> {
+        Err("texture coordinates cannot be used while sampling a constant spectrum".into())
+    }
+}
+
+impl WavelengthInput for SpectrumSamplingInput {
+    fn wavelength(&self) -> f32 {
+        self.wavelength
+    }
 }

@@ -19,7 +19,7 @@ use crate::math::{self, DIST_EPSILON};
 use crate::spatial::{bkd_tree, Dim3};
 use crate::world;
 
-pub use self::Shape::{Plane, RayMarched, Sphere, Triangle};
+pub(crate) use self::Shape::{Plane, RayMarched, Sphere, Triangle};
 
 const EPSILON: f32 = DIST_EPSILON;
 
@@ -33,7 +33,7 @@ pub struct Vertex {
     pub texture: Point2<f32>,
 }
 
-pub enum Shape<'p> {
+pub(crate) enum Shape<'p> {
     Sphere {
         position: Point3<f32>,
         radius: f32,

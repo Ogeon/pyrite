@@ -214,6 +214,9 @@ pub enum ComplexExpression {
         ior: Expression,
         env_ior: Expression,
     },
+    Blackbody {
+        temperature: Expression,
+    },
     Spectrum {
         points: SpectrumId,
     },
@@ -255,6 +258,9 @@ impl<'lua> Parse<'lua> for ComplexExpression {
                 ior: context.parse_field("ior")?,
                 env_ior: context.parse_field("env_ior")?,
             }),
+            "blackbody" => Ok(ComplexExpression::Blackbody {
+                temperature: context.parse_field("temperature")?,
+            }),
             "spectrum" => {
                 let id = context.value().get_id()?;
                 let points = if let Some(points) = context.spectra.get(id) {
@@ -273,6 +279,7 @@ impl<'lua> Parse<'lua> for ComplexExpression {
                 } else {
                     let name: String = context.expect_field("name")?;
                     let spectrum = match &*name {
+                        "a" => light_source::A,
                         "d65" => light_source::D65,
                         _ => return Err(format!("unknown builtin spectrum: {}", name).into()),
                     };
@@ -337,6 +344,9 @@ impl<T: ExpressionValue> Evaluate<T> for ComplexExpression {
             }
             ComplexExpression::Fresnel { .. } => {
                 Err("cannot evaluate Fresnel functions as constants".into())
+            }
+            ComplexExpression::Blackbody { .. } => {
+                Err("cannot evaluate black-body functions as constants".into())
             }
             ComplexExpression::Spectrum { .. } => {
                 Err("cannot evaluate spectra as constants".into())
@@ -541,6 +551,9 @@ impl<I> ProgramValue<I> for Vector {
             let value = crate::math::fresnel(ior, env_ior, normal.into(), incident.into());
             Vector(Vector4::new(value, value, value, value))
         })
+    }
+    fn blackbody() -> Result<ProgramFn<I, Self>, Box<dyn Error>> {
+        Err("black-body functions cannot be used as vectors".into())
     }
 }
 

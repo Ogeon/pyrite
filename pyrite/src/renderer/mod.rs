@@ -71,7 +71,7 @@ impl Renderer {
         }
     }
 
-    pub fn render<W: WorkPool, F: FnMut(Status<'_>)>(
+    pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
         &self,
         film: &Film,
         workers: &mut W,

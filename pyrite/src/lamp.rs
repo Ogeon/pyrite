@@ -10,7 +10,7 @@ use crate::math::utils::{sample_cone, sample_hemisphere, sample_sphere};
 use crate::shapes::Shape;
 use crate::{materials::Material, tracer::LightProgram};
 
-pub enum Lamp<'p> {
+pub(crate) enum Lamp<'p> {
     Directional {
         direction: Vector3<f32>,
         width: f32,
@@ -106,14 +106,14 @@ impl<'p> Lamp<'p> {
     }
 }
 
-pub struct Sample<'a> {
+pub(crate) struct Sample<'a> {
     pub direction: Vector3<f32>,
     pub sq_distance: Option<f32>,
     pub surface: Surface<'a>,
     pub weight: f32,
 }
 
-pub enum Surface<'a> {
+pub(crate) enum Surface<'a> {
     Physical {
         normal: Ray3<f32>,
         texture: Point2<f32>,
@@ -122,7 +122,7 @@ pub enum Surface<'a> {
     Color(LightProgram<'a>),
 }
 
-pub struct RaySample<'a> {
+pub(crate) struct RaySample<'a> {
     pub ray: Ray3<f32>,
     pub surface: Surface<'a>,
     pub weight: f32,

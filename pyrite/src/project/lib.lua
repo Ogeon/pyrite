@@ -164,6 +164,13 @@ function vector(x, y, z, w)
     return properties
 end
 
+function blackbody(temperature)
+    local properties = {type = "blackbody", temperature = temperature}
+    _pyrite.make_expression(properties)
+
+    return properties
+end
+
 function spectrum(properties)
     properties.type = "spectrum"
     _pyrite.make_expression(properties)
@@ -268,6 +275,8 @@ material = {
 light_source = {}
 light_source.d65 = {type = "light_source", name = "d65"}
 _pyrite.make_expression(light_source.d65)
+light_source.a = {type = "light_source", name = "a"}
+_pyrite.make_expression(light_source.a)
 
 transform = {
     look_at = function(properties)

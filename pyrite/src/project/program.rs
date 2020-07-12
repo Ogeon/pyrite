@@ -10,26 +10,26 @@ use super::{
 use crate::color::Light;
 use cgmath::{Point2, Vector3};
 
-pub type ProgramFn<I, T> = for<'a> fn(&'a mut Registers, &'a I, Resources<'a>) -> T;
-pub type InputFn<I> = for<'a> fn(&'a mut Registers, &'a I, Resources<'a>) -> Value;
+pub(crate) type ProgramFn<I, T> = for<'a> fn(&'a mut Registers, &'a I, Resources<'a>) -> T;
+pub(crate) type InputFn<I> = for<'a> fn(&'a mut Registers, &'a I, Resources<'a>) -> Value;
 
 #[derive(Copy, Clone)]
-pub struct Resources<'a> {
+pub(crate) struct Resources<'a> {
     pub spectra: &'a Spectra,
     pub textures: &'a Textures,
 }
 
 #[derive(Copy, Clone)]
-pub struct ProgramCompiler<'p> {
+pub(crate) struct ProgramCompiler<'p> {
     arena: &'p Bump,
 }
 
 impl<'p> ProgramCompiler<'p> {
-    pub fn new(arena: &'p Bump) -> Self {
+    pub(crate) fn new(arena: &'p Bump) -> Self {
         ProgramCompiler { arena }
     }
 
-    pub fn compile<I, T>(
+    pub(crate) fn compile<I, T>(
         &self,
         expression: &Expression,
         expressions: &Expressions,
@@ -207,6 +207,10 @@ impl<'p> ProgramCompiler<'p> {
                         )),
                     }
                 }
+                ComplexExpression::Blackbody { temperature } => {
+                    stack.push(StackEntry::Function(T::blackbody()?));
+                    stack.push(StackEntry::Expression(temperature));
+                }
                 ComplexExpression::Spectrum { points } => {
                     instructions.push(Instruction::Push(Value::Spectrum(*points)));
                     if let Some(spectrum) = T::spectrum()? {
@@ -279,7 +283,7 @@ fn into_constant_vector(
     }
 }
 
-pub trait ProgramValue<I>: Copy + Send + Sized {
+pub(crate) trait ProgramValue<I>: Copy + Send + Sized {
     fn from_number(number: f32) -> Result<Self, Box<dyn Error>>;
     fn from_vector(x: f32, y: f32, z: f32, w: f32) -> Result<Self, Box<dyn Error>>;
     fn number() -> Result<Option<ProgramFn<I, Self>>, Box<dyn Error>>;
@@ -293,6 +297,7 @@ pub trait ProgramValue<I>: Copy + Send + Sized {
     fn div() -> Result<ProgramFn<I, Self>, Box<dyn Error>>;
     fn mix() -> Result<ProgramFn<I, Self>, Box<dyn Error>>;
     fn fresnel() -> Result<ProgramFn<I, Self>, Box<dyn Error>>;
+    fn blackbody() -> Result<ProgramFn<I, Self>, Box<dyn Error>>;
 }
 
 impl<I> ProgramValue<I> for f32 {
@@ -367,9 +372,12 @@ impl<I> ProgramValue<I> for f32 {
             crate::math::fresnel(ior, env_ior, normal.into(), incident.into())
         })
     }
+    fn blackbody() -> Result<ProgramFn<I, Self>, Box<dyn Error>> {
+        Err("black-body functions cannot be used as numbers".into())
+    }
 }
 
-pub trait ProgramInput {
+pub(crate) trait ProgramInput {
     fn normal() -> Result<InputFn<Self>, Box<dyn Error>>;
     fn incident() -> Result<InputFn<Self>, Box<dyn Error>>;
     fn texture_coordinates() -> Result<InputFn<Self>, Box<dyn Error>>;
@@ -387,7 +395,7 @@ impl<'p, I, T> Clone for Program<'p, I, T> {
 
 impl<'p, I, T> Copy for Program<'p, I, T> {}
 
-pub enum Instruction<'p, I, T> {
+pub(crate) enum Instruction<'p, I, T> {
     Push(Value),
     Input(InputFn<I>),
     Function(ProgramFn<I, T>),
@@ -457,7 +465,7 @@ impl From<Vector3<f32>> for Value {
     }
 }
 
-pub enum AnyProgram<'p, I> {
+pub(crate) enum AnyProgram<'p, I> {
     Number(Program<'p, I, f32>),
     Vector(Program<'p, I, Vector>),
     Light(Program<'p, I, Light>),
@@ -495,7 +503,7 @@ pub struct ExecutionContext<'p> {
 }
 
 impl<'p> ExecutionContext<'p> {
-    pub fn new(resources: Resources<'p>) -> Self {
+    pub(crate) fn new(resources: Resources<'p>) -> Self {
         ExecutionContext {
             registers: Registers::new(),
             resources,
@@ -503,7 +511,7 @@ impl<'p> ExecutionContext<'p> {
     }
 
     #[inline]
-    pub fn run<I, T>(&mut self, program: Program<'p, I, T>, input: &I) -> T
+    pub(crate) fn run<I, T>(&mut self, program: Program<'p, I, T>, input: &I) -> T
     where
         T: RegisterValue,
         AnyProgram<'p, I>: From<Program<'p, I, T>>,

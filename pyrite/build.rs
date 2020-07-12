@@ -135,6 +135,7 @@ struct XyzResponse {
 
 fn read_light_sources(out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mut d65_spectrum = vec![];
+    let mut a_spectrum = vec![];
 
     let mut min_wavelength = std::f32::INFINITY;
     let mut max_wavelength = 0.0f32;
@@ -152,6 +153,20 @@ fn read_light_sources(out_dir: &Path) -> Result<(), Box<dyn Error>> {
         d65_spectrum.push(quote!(#intensity));
     }
 
+    println!("cargo:rerun-if-changed=data/a.csv");
+    for record_result in csv::Reader::from_path("data/a.csv")?.deserialize() {
+        let LightIntensity {
+            wavelength,
+            intensity,
+        } = record_result?;
+        let intensity = intensity / 100.0;
+
+        min_wavelength = min_wavelength.min(wavelength);
+        max_wavelength = max_wavelength.max(wavelength);
+
+        a_spectrum.push(quote!(#intensity));
+    }
+
     fs::write(
         out_dir.join("light_source.rs"),
         quote! {
@@ -162,6 +177,12 @@ fn read_light_sources(out_dir: &Path) -> Result<(), Box<dyn Error>> {
                     min: #min_wavelength,
                     max: #max_wavelength,
                     points: Cow::Borrowed(&[#(#d65_spectrum),*])
+                };
+
+                pub const A: Spectrum = Spectrum::Array {
+                    min: #min_wavelength,
+                    max: #max_wavelength,
+                    points: Cow::Borrowed(&[#(#a_spectrum),*])
                 };
         }
         .to_string(),

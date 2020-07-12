@@ -16,7 +16,7 @@ use crate::{
     world::World,
 };
 
-pub enum Camera {
+pub(crate) enum Camera {
     Perspective {
         transform: Matrix4<f32>,
         view_plane: f32,

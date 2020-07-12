@@ -11,7 +11,7 @@ use crate::{
     tracer::{self, Bounce, BounceType, RenderContext},
 };
 
-pub fn contribute<'a>(
+pub(crate) fn contribute<'a>(
     bounce: &Bounce<'a>,
     sample: &mut Sample,
     reflectance: &mut f32,
@@ -125,7 +125,7 @@ impl Ord for Tile {
 }
 impl Eq for Tile {}
 
-pub fn make_tiles(
+pub(crate) fn make_tiles(
     film_width: usize,
     film_height: usize,
     tile_size: usize,

@@ -18,7 +18,7 @@ use crate::{
     tracer::{self, Emit, LightProgram, NormalInput, Reflect, Reflection, RenderContext},
 };
 
-pub struct Material<'p> {
+pub(crate) struct Material<'p> {
     surface: SurfaceMaterial<'p>,
     normal_map: Option<Program<'p, NormalInput, Vector>>,
 }
@@ -82,7 +82,7 @@ impl<'p> Material<'p> {
     }
 }
 
-pub enum SurfaceMaterial<'p> {
+pub(crate) enum SurfaceMaterial<'p> {
     Diffuse(Diffuse<'p>),
     Emission(Emission<'p>),
     Mirror(Mirror<'p>),
@@ -214,7 +214,7 @@ impl<'p> SurfaceMaterial<'p> {
     }
 }
 
-pub struct Diffuse<'p> {
+pub(crate) struct Diffuse<'p> {
     pub color: LightProgram<'p>,
 }
 
@@ -240,7 +240,7 @@ fn lambertian(_ray_in: Vector3<f32>, ray_out: Vector3<f32>, normal: Vector3<f32>
     2.0 * normal.dot(ray_out).abs()
 }
 
-pub struct Emission<'p> {
+pub(crate) struct Emission<'p> {
     pub color: LightProgram<'p>,
 }
 
@@ -254,7 +254,7 @@ impl<'p> Emission<'p> {
     }
 }
 
-pub struct Mirror<'p> {
+pub(crate) struct Mirror<'p> {
     pub color: LightProgram<'p>,
 }
 
@@ -277,7 +277,7 @@ impl<'p> Mirror<'p> {
     }
 }
 
-pub struct Mix<'p> {
+pub(crate) struct Mix<'p> {
     factor: f32,
     pub a: Box<SurfaceMaterial<'p>>,
     pub b: Box<SurfaceMaterial<'p>>,
@@ -313,7 +313,7 @@ impl<'p> Mix<'p> {
     }
 }
 
-pub struct FresnelMix<'p> {
+pub(crate) struct FresnelMix<'p> {
     ior: f32,
     dispersion: f32,
     env_ior: f32,
@@ -416,7 +416,7 @@ fn fresnel_mix<'a, R: Rng>(
     }
 }
 
-pub struct Refractive<'p> {
+pub(crate) struct Refractive<'p> {
     color: LightProgram<'p>,
     ior: f32,
     dispersion: f32,

@@ -28,7 +28,7 @@ use crate::{
     tracer::{LightProgram, ParametricValue},
 };
 
-pub struct World<'p> {
+pub(crate) struct World<'p> {
     pub sky: LightProgram<'p>,
     pub lights: Vec<Lamp<'p>>,
     pub objects: bkd_tree::BkdTree<Arc<Shape<'p>>>,
@@ -265,7 +265,7 @@ impl<'p> World<'p> {
     }
 }
 
-pub trait ObjectContainer {
+pub(crate) trait ObjectContainer {
     fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)>;
 }
 

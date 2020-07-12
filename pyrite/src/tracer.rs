@@ -13,10 +13,11 @@ use crate::{
     world::World,
 };
 
-pub use self::Reflection::{Emit, Reflect};
+pub(crate) use self::Reflection::{Emit, Reflect};
+use color::WavelengthInput;
 
 pub type Brdf = fn(ray_in: Vector3<f32>, ray_out: Vector3<f32>, normal: Vector3<f32>) -> f32;
-pub type LightProgram<'p> = Program<'p, RenderContext, color::Light>;
+pub(crate) type LightProgram<'p> = Program<'p, RenderContext, color::Light>;
 
 pub trait ParametricValue<From, To>: Send + Sync {
     fn get(&self, i: &From) -> To;
@@ -28,7 +29,7 @@ impl<From> ParametricValue<From, f32> for f32 {
     }
 }
 
-pub enum Reflection<'a> {
+pub(crate) enum Reflection<'a> {
     Emit(LightProgram<'a>),
     Reflect(Ray3<f32>, LightProgram<'a>, f32, Option<Brdf>),
 }
@@ -70,7 +71,13 @@ impl ProgramInput for RenderContext {
     }
 }
 
-pub struct Bounce<'a> {
+impl WavelengthInput for RenderContext {
+    fn wavelength(&self) -> f32 {
+        self.wavelength
+    }
+}
+
+pub(crate) struct Bounce<'a> {
     pub ty: BounceType,
     pub light: Light,
     pub color: LightProgram<'a>,
@@ -105,7 +112,7 @@ impl BounceType {
     }
 }
 
-pub struct DirectLight<'a> {
+pub(crate) struct DirectLight<'a> {
     pub light: Light,
     pub color: LightProgram<'a>,
     pub incident: Vector3<f32>,
@@ -137,7 +144,7 @@ impl Light {
     }
 }
 
-pub fn trace<'w, R: Rng>(
+pub(crate) fn trace<'w, R: Rng>(
     path: &mut Vec<Bounce<'w>>,
     rng: &mut R,
     mut ray: Ray3<f32>,

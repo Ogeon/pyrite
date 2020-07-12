@@ -147,16 +147,20 @@ pub struct Image {
     pub width: u32,
     pub height: u32,
     pub file: Option<String>,
+    pub filter: Option<expressions::Expression>,
+    pub white: Option<expressions::Expression>,
 }
 
 impl<'lua> Parse<'lua> for Image {
     type Input = rlua::Table<'lua>;
 
-    fn parse<'a>(context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
+    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
         Ok(Image {
             width: context.expect_field("width")?,
             height: context.expect_field("height")?,
             file: context.expect_field("file")?,
+            filter: context.parse_field("filter")?,
+            white: context.parse_field("white")?,
         })
     }
 }
