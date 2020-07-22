@@ -82,7 +82,8 @@ pub(crate) struct Bounce<'a> {
     pub light: Light,
     pub color: LightProgram<'a>,
     pub incident: Vector3<f32>,
-    pub normal: Ray3<f32>,
+    pub position: Point3<f32>,
+    pub normal: Vector3<f32>,
     pub texture: Point2<f32>,
     pub probability: f32,
     pub direct_light: Vec<DirectLight<'a>>,
@@ -157,18 +158,20 @@ pub(crate) fn trace<'w, R: Rng>(
     let mut sample_light = true;
 
     for _ in 0..bounces {
-        match world.intersect(&ray) {
-            Some((intersection, material)) => {
+        match world.intersect(ray) {
+            Some(intersection) => {
+                let material = intersection.surface_point.get_material();
+                let surface_data = intersection.surface_point.get_surface_data();
+
                 let normal_input = NormalInput {
                     incident: ray.direction,
-                    normal: intersection.normal.vector(),
-                    texture: intersection.texture,
+                    normal: surface_data.normal.vector(),
+                    texture: surface_data.texture,
                 };
-                let normal_direction =
-                    material.apply_normal_map(intersection.normal, normal_input, exe);
-                let normal = Ray3::new(intersection.position, normal_direction);
+                let normal = material.apply_normal_map(surface_data.normal, normal_input, exe);
+                let position = intersection.surface_point.position;
 
-                match material.reflect(&mut light, ray, normal, rng) {
+                match material.reflect(&mut light, ray, position, normal, rng) {
                     Reflect(out_ray, color, prob, brdf) => {
                         let direct_light = if let Some(brdf) = brdf {
                             trace_direct(
@@ -176,6 +179,7 @@ pub(crate) fn trace<'w, R: Rng>(
                                 light_samples,
                                 light.clone(),
                                 ray.direction,
+                                position,
                                 normal,
                                 world,
                                 brdf,
@@ -197,8 +201,9 @@ pub(crate) fn trace<'w, R: Rng>(
                             light: light.clone(),
                             color,
                             incident: ray.direction,
+                            position,
                             normal,
-                            texture: intersection.texture,
+                            texture: surface_data.texture,
                             probability: prob,
                             direct_light,
                         };
@@ -213,8 +218,9 @@ pub(crate) fn trace<'w, R: Rng>(
                                 light,
                                 color,
                                 incident: ray.direction,
+                                position,
                                 normal,
-                                texture: intersection.texture,
+                                texture: surface_data.texture,
                                 probability: 1.0,
                                 direct_light: vec![],
                             });
@@ -236,10 +242,8 @@ pub(crate) fn trace<'w, R: Rng>(
                     light,
                     color,
                     incident: ray.direction,
-                    normal: Ray3::new(
-                        Point3::from_vec(&ray.direction * std::f32::INFINITY),
-                        -ray.direction,
-                    ),
+                    position: Point3::from_vec(&ray.direction * std::f32::INFINITY),
+                    normal: -ray.direction,
                     texture: Point2::origin(),
                     probability: 1.0,
                     direct_light: vec![],
@@ -256,18 +260,17 @@ fn trace_direct<'w, R: Rng>(
     samples: usize,
     light: Light,
     ray_in: Vector3<f32>,
-    normal: Ray3<f32>,
+    position: Point3<f32>,
+    normal: Vector3<f32>,
     world: &'w World,
     brdf: Brdf,
 ) -> Vec<DirectLight<'w>> {
     if let Some((lamp, probability)) = world.pick_lamp(rng) {
-        let n = if ray_in.dot(normal.direction) < 0.0 {
-            normal.direction
+        let normal = if ray_in.dot(normal) < 0.0 {
+            normal
         } else {
-            -normal.direction
+            -normal
         };
-
-        let normal = Ray3::new(normal.origin, n);
 
         let probability = 1.0 / (samples as f32 * 2.0 * std::f32::consts::PI * probability);
 
@@ -278,18 +281,18 @@ fn trace_direct<'w, R: Rng>(
                     sq_distance,
                     surface,
                     weight,
-                } = lamp.sample(rng, normal.origin);
+                } = lamp.sample(rng, position);
 
                 let mut light = light.clone();
 
-                let ray_out = Ray3::new(normal.origin, direction);
+                let ray_out = Ray3::new(position, direction);
 
-                let cos_out = normal.direction.dot(ray_out.direction).max(0.0);
+                let cos_out = normal.dot(ray_out.direction).max(0.0);
 
                 if cos_out > 0.0 {
                     let hit_dist = world
-                        .intersect(&ray_out)
-                        .map(|(hit, _)| hit.distance * hit.distance);
+                        .intersect(ray_out)
+                        .map(|hit| hit.distance * hit.distance);
 
                     let blocked = match (hit_dist, sq_distance) {
                         (Some(hit), Some(lamp)) if hit >= lamp - DIST_EPSILON => false,
@@ -310,16 +313,14 @@ fn trace_direct<'w, R: Rng>(
                                     target_normal,
                                     rng,
                                 );
-                                (color, target_normal.direction)
+                                (color, target_normal)
                             }
                             lamp::Surface::Color(color) => {
                                 let target_normal = -ray_out.direction;
                                 (Some(color), target_normal)
                             }
                         };
-                        let scale = weight
-                            * probability
-                            * brdf(ray_in, normal.direction, ray_out.direction);
+                        let scale = weight * probability * brdf(ray_in, normal, ray_out.direction);
 
                         return color.map(|color| DirectLight {
                             light,

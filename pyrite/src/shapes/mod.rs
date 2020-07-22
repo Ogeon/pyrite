@@ -1,14 +1,13 @@
 use std;
-use std::ops::Deref;
 use std::sync::Arc;
 
-use std::f32::{INFINITY, NEG_INFINITY};
+use std::f32::INFINITY;
 
 use cgmath::{
-    ElementWise, EuclideanSpace, InnerSpace, Matrix3, Matrix4, Point2, Point3, Quaternion,
+    ElementWise, EuclideanSpace, InnerSpace, Matrix3, Matrix4, Point2, Point3, Quaternion, Rad,
     Transform, Vector2, Vector3,
 };
-use collision::{Continuous, Ray3};
+use collision::{Aabb, Aabb3, Continuous, Ray3};
 
 use rand::Rng;
 
@@ -16,10 +15,9 @@ use crate::tracer::ParametricValue;
 
 use crate::materials::Material;
 use crate::math::{self, DIST_EPSILON};
-use crate::spatial::{bkd_tree, Dim3};
-use crate::world;
+use crate::spatial::bvh::Bounded;
 
-pub(crate) use self::Shape::{Plane, RayMarched, Sphere, Triangle};
+pub(crate) use self::Shape::{RayMarched, Sphere, Triangle};
 
 const EPSILON: f32 = DIST_EPSILON;
 
@@ -40,16 +38,12 @@ pub(crate) enum Shape<'p> {
         texture_scale: Vector2<f32>,
         material: Material<'p>,
     },
-    Plane {
-        shape: collision::Plane<f32>,
-        normal: Normal,
-        texture_scale: Vector2<f32>,
-        material: Material<'p>,
-    },
     Triangle {
         v1: Vertex,
         v2: Vertex,
         v3: Vertex,
+        edge1: Vector3<f32>,
+        edge2: Vector3<f32>,
         material: Arc<Material<'p>>,
     },
     RayMarched {
@@ -65,67 +59,28 @@ impl<'p> Shape<'p> {
             Sphere {
                 ref position,
                 radius,
-                texture_scale,
                 ..
             } => {
-                use cgmath::Rad;
-
                 let sphere = collision::Sphere {
                     radius,
                     center: position.clone(),
                 };
 
-                sphere.intersection(ray).map(|intersection| {
-                    let normal = (intersection - position).normalize();
-                    let latitude = normal.y.acos();
-                    let longitude = normal.x.atan2(normal.z);
-
-                    let rotation = Matrix3::from_angle_y(Rad(longitude))
-                        * Matrix3::from_angle_x(Rad(latitude - std::f32::consts::PI * 0.5));
-
-                    let texture_coordinates = Vector2::new(
-                        longitude * std::f32::consts::FRAC_1_PI * 0.5,
-                        1.0 - (latitude * std::f32::consts::FRAC_1_PI),
-                    );
-
-                    Intersection {
-                        distance: (intersection - ray.origin).magnitude(),
+                sphere.intersection(ray).map(|intersection| Intersection {
+                    distance: (intersection - ray.origin).magnitude(),
+                    surface_point: SurfacePoint {
                         position: intersection,
-                        normal: Normal::new(normal, rotation.into()),
-                        texture: Point2::from_vec(
-                            texture_coordinates.div_element_wise(texture_scale),
-                        ),
-                    }
+                        shape: ShapeSurfacePoint::Sphere { shape: self },
+                    },
                 })
             }
-            Plane {
-                ref shape,
-                normal,
-                texture_scale,
-                ..
-            } => shape.intersection(ray).map(|intersection| {
-                let world_space = intersection.to_vec();
-                let normal_space = normal.into_space(world_space);
-
-                let texture_coordinates = normal_space.truncate();
-
-                Intersection {
-                    distance: (intersection - ray.origin).magnitude(),
-                    position: intersection,
-                    normal,
-                    texture: Point2::from_vec(texture_coordinates.div_element_wise(texture_scale)),
-                }
-            }),
             Triangle {
                 ref v1,
-                ref v2,
-                ref v3,
+                edge1: e1,
+                edge2: e2,
                 ..
             } => {
                 //Möller–Trumbore intersection algorithm
-                let e1 = v2.position - v1.position;
-                let e2 = v3.position - v1.position;
-
                 let p = ray.direction.cross(e2);
                 let det = e1.dot(p);
 
@@ -153,15 +108,12 @@ impl<'p> Shape<'p> {
                 let dist = e2.dot(q) * inv_det;
                 if dist > EPSILON {
                     let hit_position = ray.origin + ray.direction * dist;
-                    let normal = Normal::on_triangle(v1.normal, v2.normal, v3.normal, u, v);
-                    let texture = (v1.texture * (1.0 - (u + v)))
-                        .add_element_wise(v2.texture * u)
-                        .add_element_wise(v3.texture * v);
                     Some(Intersection {
                         distance: dist,
-                        position: hit_position,
-                        normal,
-                        texture,
+                        surface_point: SurfacePoint {
+                            position: hit_position,
+                            shape: ShapeSurfacePoint::Triangle { shape: self, u, v },
+                        },
                     })
                 } else {
                     None
@@ -185,23 +137,18 @@ impl<'p> Shape<'p> {
                 }
 
                 if total_distance <= max {
-                    let p = origin + ray.direction * (total_distance - EPSILON);
-                    let x_dir = Vector3::new(EPSILON, 0.0, 0.0);
-                    let y_dir = Vector3::new(0.0, EPSILON, 0.0);
-                    let z_dir = Vector3::new(0.0, 0.0, EPSILON);
-                    let n = Vector3::new(
-                        estimator.get(&(p + x_dir)) - estimator.get(&(p + -x_dir)),
-                        estimator.get(&(p + y_dir)) - estimator.get(&(p + -y_dir)),
-                        estimator.get(&(p + z_dir)) - estimator.get(&(p + -z_dir)),
-                    )
-                    .normalize();
+                    let offset_position = origin + ray.direction * (total_distance - EPSILON);
                     let p = ray.origin + ray.direction * total_distance;
 
                     Some(Intersection {
                         distance: total_distance,
-                        position: p,
-                        normal: Normal::from_vector(n),
-                        texture: Point2::origin(),
+                        surface_point: SurfacePoint {
+                            position: p,
+                            shape: ShapeSurfacePoint::RayMarched {
+                                shape: self,
+                                offset_position,
+                            },
+                        },
                     })
                 } else {
                     None
@@ -213,34 +160,25 @@ impl<'p> Shape<'p> {
     pub fn get_material(&self) -> &Material {
         match *self {
             Sphere { ref material, .. } => material,
-            Plane { ref material, .. } => material,
             Triangle { ref material, .. } => &**material,
             RayMarched { ref material, .. } => material,
         }
     }
 
-    pub fn sample_point(&self, rng: &mut impl Rng) -> Option<(Ray3<f32>, Point2<f32>)> {
+    pub fn sample_point(&self, rng: &mut impl Rng) -> Option<SurfacePoint> {
         match *self {
             Sphere {
                 ref position,
                 radius,
-                texture_scale,
                 ..
             } => {
                 let sphere_point = math::utils::sample_sphere(rng);
-                let latitude = sphere_point.y.acos();
-                let longitude = sphere_point.x.atan2(sphere_point.z);
-                let texture_coordinates = Vector2::new(
-                    longitude * std::f32::consts::FRAC_1_PI * 0.5,
-                    1.0 - (latitude * std::f32::consts::FRAC_1_PI),
-                );
 
-                Some((
-                    Ray3::new(position + sphere_point * radius, sphere_point),
-                    Point2::from_vec(texture_coordinates.div_element_wise(texture_scale)),
-                ))
+                Some(SurfacePoint {
+                    position: position + sphere_point * radius,
+                    shape: ShapeSurfacePoint::Sphere { shape: self },
+                })
             }
-            Plane { .. } => None,
             Triangle {
                 ref v1,
                 ref v2,
@@ -260,22 +198,17 @@ impl<'p> Shape<'p> {
                 };
 
                 let position = v1.position + a * u + b * v;
-                let normal = Normal::on_triangle(v1.normal, v2.normal, v3.normal, u, v);
-                let texture = (v1.texture * (1.0 - (u + v)))
-                    .add_element_wise(v2.texture * u)
-                    .add_element_wise(v3.texture * v);
 
-                Some((Ray3::new(position, normal.vector), texture))
+                Some(SurfacePoint {
+                    position,
+                    shape: ShapeSurfacePoint::Triangle { shape: self, u, v },
+                })
             }
             RayMarched { .. } => None,
         }
     }
 
-    pub fn sample_towards(
-        &self,
-        rng: &mut impl Rng,
-        target: &Point3<f32>,
-    ) -> Option<(Ray3<f32>, Point2<f32>)> {
+    pub fn sample_towards(&self, rng: &mut impl Rng, target: &Point3<f32>) -> Option<Intersection> {
         match *self {
             Sphere {
                 ref position,
@@ -291,23 +224,31 @@ impl<'p> Shape<'p> {
 
                     let ray_dir = math::utils::sample_cone(rng, dir.normalize(), cos_theta_max);
 
-                    let intersection = self.ray_intersect(&Ray3::new(*target, ray_dir)).map(
-                        |Intersection {
-                             position, normal, ..
-                         }| Ray3::new(position, normal.vector),
-                    );
+                    let intersection = self.ray_intersect(&Ray3::new(*target, ray_dir));
 
                     if let Some(intersection) = intersection {
-                        Some((intersection, Point2::origin()))
+                        Some(intersection)
                     } else {
                         // cheat
-                        Some((Ray3::new(*target, -dir.normalize()), Point2::origin()))
+                        Some(Intersection {
+                            distance: 0.0,
+                            surface_point: SurfacePoint {
+                                position: *target,
+                                shape: ShapeSurfacePoint::Sphere { shape: self },
+                            },
+                        })
                     }
                 } else {
-                    self.sample_point(rng)
+                    self.sample_point(rng).map(|surface_point| Intersection {
+                        distance: (surface_point.position - target).magnitude(),
+                        surface_point,
+                    })
                 }
             }
-            _ => self.sample_point(rng),
+            _ => self.sample_point(rng).map(|surface_point| Intersection {
+                distance: (surface_point.position - target).magnitude(),
+                surface_point,
+            }),
         }
     }
 
@@ -334,7 +275,6 @@ impl<'p> Shape<'p> {
     pub fn surface_area(&self) -> f32 {
         match *self {
             Sphere { radius, .. } => radius * radius * 4.0 * std::f32::consts::PI,
-            Plane { .. } => INFINITY,
             Triangle {
                 ref v1,
                 ref v2,
@@ -359,16 +299,19 @@ impl<'p> Shape<'p> {
                 *radius *= scale;
                 *position *= scale;
             }
-            Plane { .. } => {}
             Triangle {
                 ref mut v1,
                 ref mut v2,
                 ref mut v3,
-                ..
+                ref mut edge1,
+                ref mut edge2,
+                material: _,
             } => {
                 v1.position *= scale;
                 v2.position *= scale;
                 v3.position *= scale;
+                *edge1 = v2.position - v1.position;
+                *edge2 = v3.position - v1.position;
             }
             RayMarched { .. } => {}
         }
@@ -381,12 +324,13 @@ impl<'p> Shape<'p> {
             } => {
                 *position = transform.transform_point(*position);
             }
-            Plane { .. } => {}
             Triangle {
                 ref mut v1,
                 ref mut v2,
                 ref mut v3,
-                ..
+                ref mut edge1,
+                ref mut edge2,
+                material: _,
             } => {
                 v1.normal = v1.normal.transform(transform);
                 v2.normal = v2.normal.transform(transform);
@@ -394,36 +338,84 @@ impl<'p> Shape<'p> {
                 v1.position = transform.transform_point(v1.position);
                 v2.position = transform.transform_point(v2.position);
                 v3.position = transform.transform_point(v3.position);
+                *edge1 = v2.position - v1.position;
+                *edge2 = v3.position - v1.position;
             }
             RayMarched { .. } => {}
         }
     }
+
+    fn get_sphere_surface_data(&self, surface_position: Point3<f32>) -> SurfaceData {
+        if let &Sphere {
+            position,
+            texture_scale,
+            ..
+        } = self
+        {
+            let normal = (surface_position - position).normalize();
+            let latitude = normal.y.acos();
+            let longitude = normal.x.atan2(normal.z);
+
+            let rotation = Matrix3::from_angle_y(Rad(longitude))
+                * Matrix3::from_angle_x(Rad(latitude - std::f32::consts::PI * 0.5));
+
+            let texture_coordinates = Vector2::new(
+                longitude * std::f32::consts::FRAC_1_PI * 0.5,
+                1.0 - (latitude * std::f32::consts::FRAC_1_PI),
+            );
+
+            SurfaceData {
+                normal: Normal::new(normal, rotation.into()),
+                texture: Point2::from_vec(texture_coordinates.div_element_wise(texture_scale)),
+            }
+        } else {
+            panic!("cannot get sphere surface data from another type of shape");
+        }
+    }
+
+    fn get_triangle_surface_data(&self, u: f32, v: f32) -> SurfaceData {
+        if let Triangle { v1, v2, v3, .. } = self {
+            let normal = Normal::on_triangle(v1.normal, v2.normal, v3.normal, u, v);
+            let texture = (v1.texture * (1.0 - (u + v)))
+                .add_element_wise(v2.texture * u)
+                .add_element_wise(v3.texture * v);
+
+            SurfaceData { normal, texture }
+        } else {
+            panic!("cannot get triangle surface data from another type of shape");
+        }
+    }
+
+    fn get_ray_marched_surface_data(&self, p: Point3<f32>) -> SurfaceData {
+        if let RayMarched { estimator, .. } = self {
+            let x_dir = Vector3::new(EPSILON, 0.0, 0.0);
+            let y_dir = Vector3::new(0.0, EPSILON, 0.0);
+            let z_dir = Vector3::new(0.0, 0.0, EPSILON);
+            let n = Vector3::new(
+                estimator.get(&(p + x_dir)) - estimator.get(&(p + -x_dir)),
+                estimator.get(&(p + y_dir)) - estimator.get(&(p + -y_dir)),
+                estimator.get(&(p + z_dir)) - estimator.get(&(p + -z_dir)),
+            )
+            .normalize();
+            SurfaceData {
+                normal: Normal::from_vector(n),
+                texture: Point2::origin(),
+            }
+        } else {
+            panic!("cannot get triangle surface data from another type of shape");
+        }
+    }
 }
 
-impl<'p> bkd_tree::Element for Arc<Shape<'p>> {
-    type Item = Intersection;
-    type Ray = world::BkdRay;
-
-    fn get_bounds_interval(&self, axis: Dim3) -> (f32, f32) {
-        match *self.deref() {
+impl<'p> Bounded for Shape<'p> {
+    fn aabb(&self) -> Aabb3<f32> {
+        match *self {
             Sphere {
-                ref position,
-                radius,
-                ..
-            } => match axis {
-                Dim3::X => (position.x - radius, position.x + radius),
-                Dim3::Y => (position.y - radius, position.y + radius),
-                Dim3::Z => (position.z - radius, position.z + radius),
-            },
-            Plane { shape, .. } => {
-                let point = shape.n * shape.d;
-                match axis {
-                    Dim3::X if shape.n.x.abs() == 1.0 => (point.x, point.x),
-                    Dim3::Y if shape.n.x.abs() == 1.0 => (point.y, point.y),
-                    Dim3::Z if shape.n.x.abs() == 1.0 => (point.z, point.z),
-                    _ => (NEG_INFINITY, INFINITY),
-                }
-            }
+                position, radius, ..
+            } => Aabb3::new(
+                position.sub_element_wise(radius),
+                position.add_element_wise(radius),
+            ),
             Triangle {
                 ref v1,
                 ref v2,
@@ -434,30 +426,106 @@ impl<'p> bkd_tree::Element for Arc<Shape<'p>> {
                 let p2 = v2.position;
                 let p3 = v3.position;
 
-                match axis {
-                    Dim3::X => (p1.x.min(p2.x).min(p3.x), p1.x.max(p2.x).max(p3.x)),
-                    Dim3::Y => (p1.y.min(p2.y).min(p3.y), p1.y.max(p2.y).max(p3.y)),
-                    Dim3::Z => (p1.z.min(p2.z).min(p3.z), p1.z.max(p2.z).max(p3.z)),
-                }
+                Aabb3::new(p1, p2).grow(p3)
             }
-            RayMarched { ref bounds, .. } => match axis {
-                Dim3::X => bounds.x_interval(),
-                Dim3::Y => bounds.y_interval(),
-                Dim3::Z => bounds.z_interval(),
-            },
+            RayMarched { ref bounds, .. } => bounds.aabb(),
         }
-    }
-
-    fn intersect(&self, ray: &world::BkdRay) -> Option<(f32, Intersection)> {
-        let &world::BkdRay(ref ray) = ray;
-        self.ray_intersect(ray)
-            .map(|intersection| (intersection.distance, intersection))
     }
 }
 
-pub struct Intersection {
+pub(crate) struct Plane<'p> {
+    pub shape: collision::Plane<f32>,
+    pub normal: Normal,
+    pub texture_scale: Vector2<f32>,
+    pub material: Material<'p>,
+}
+
+impl<'p> Plane<'p> {
+    pub fn ray_intersect(&self, ray: &Ray3<f32>) -> Option<Intersection> {
+        let Plane { ref shape, .. } = self;
+
+        shape.intersection(ray).map(|intersection| Intersection {
+            distance: (intersection - ray.origin).magnitude(),
+            surface_point: SurfacePoint {
+                position: intersection,
+                shape: ShapeSurfacePoint::Plane { shape: self },
+            },
+        })
+    }
+
+    fn get_surface_data(&self, position: Point3<f32>) -> SurfaceData {
+        let &Plane {
+            normal,
+            texture_scale,
+            ..
+        } = self;
+
+        let world_space = position.to_vec();
+        let normal_space = normal.into_space(world_space);
+
+        let texture_coordinates = normal_space.truncate();
+        SurfaceData {
+            normal,
+            texture: Point2::from_vec(texture_coordinates.div_element_wise(texture_scale)),
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub(crate) struct Intersection<'a> {
     pub distance: f32,
+    pub surface_point: SurfacePoint<'a>,
+}
+
+#[derive(Copy, Clone)]
+pub(crate) struct SurfacePoint<'a> {
     pub position: Point3<f32>,
+    pub shape: ShapeSurfacePoint<'a>,
+}
+
+impl<'a> SurfacePoint<'a> {
+    pub fn get_surface_data(&self) -> SurfaceData {
+        match self.shape {
+            ShapeSurfacePoint::Sphere { shape } => shape.get_sphere_surface_data(self.position),
+            ShapeSurfacePoint::Plane { shape } => shape.get_surface_data(self.position),
+            ShapeSurfacePoint::Triangle { shape, u, v } => shape.get_triangle_surface_data(u, v),
+            ShapeSurfacePoint::RayMarched {
+                shape,
+                offset_position,
+            } => shape.get_ray_marched_surface_data(offset_position),
+        }
+    }
+
+    pub fn get_material(&self) -> &'a Material<'a> {
+        match self.shape {
+            ShapeSurfacePoint::Sphere { shape } => shape.get_material(),
+            ShapeSurfacePoint::Plane { shape } => &shape.material,
+            ShapeSurfacePoint::Triangle { shape, .. } => shape.get_material(),
+            ShapeSurfacePoint::RayMarched { shape, .. } => shape.get_material(),
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub(crate) enum ShapeSurfacePoint<'a> {
+    Sphere {
+        shape: &'a Shape<'a>,
+    },
+    Plane {
+        shape: &'a Plane<'a>,
+    },
+    Triangle {
+        shape: &'a Shape<'a>,
+        u: f32,
+        v: f32,
+    },
+    RayMarched {
+        shape: &'a Shape<'a>,
+        offset_position: Point3<f32>,
+    },
+}
+
+pub(crate) struct SurfaceData {
     pub normal: Normal,
     pub texture: Point2<f32>,
 }
@@ -523,27 +591,6 @@ pub enum BoundingVolume {
 }
 
 impl BoundingVolume {
-    pub fn x_interval(&self) -> (f32, f32) {
-        match *self {
-            BoundingVolume::Box(min, max) => (min.x, max.x),
-            BoundingVolume::Sphere(center, radius) => (center.x - radius, center.x + radius),
-        }
-    }
-
-    pub fn y_interval(&self) -> (f32, f32) {
-        match *self {
-            BoundingVolume::Box(min, max) => (min.y, max.y),
-            BoundingVolume::Sphere(center, radius) => (center.y - radius, center.y + radius),
-        }
-    }
-
-    pub fn z_interval(&self) -> (f32, f32) {
-        match *self {
-            BoundingVolume::Box(min, max) => (min.z, max.z),
-            BoundingVolume::Sphere(center, radius) => (center.z - radius, center.z + radius),
-        }
-    }
-
     pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(f32, f32)> {
         match *self {
             BoundingVolume::Box(min, max) => {
@@ -640,6 +687,18 @@ impl BoundingVolume {
         match *self {
             BoundingVolume::Box(min, max) => (min + max.to_vec()) * 0.5,
             BoundingVolume::Sphere(center, _) => center,
+        }
+    }
+}
+
+impl Bounded for BoundingVolume {
+    fn aabb(&self) -> Aabb3<f32> {
+        match self {
+            &BoundingVolume::Box(min, max) => Aabb3::new(min, max),
+            &BoundingVolume::Sphere(position, radius) => Aabb3::new(
+                position.sub_element_wise(radius),
+                position.add_element_wise(radius),
+            ),
         }
     }
 }

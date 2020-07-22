@@ -105,9 +105,9 @@ fn render_tile<R: Rng>(
                     let color = material.get_emission(&mut light, -ray.direction, normal, &mut rng);
                     (color, normal, texture)
                 }
-                Surface::Color(color) => (Some(color), ray, Point2::origin()),
+                Surface::Color(color) => (Some(color), ray.direction, Point2::origin()),
             };
-            ray.origin += normal.direction * DIST_EPSILON;
+            ray.origin += normal * DIST_EPSILON;
 
             if let Some(color) = color {
                 lamp_path.push(Bounce {
@@ -115,6 +115,7 @@ fn render_tile<R: Rng>(
                     light: light.clone(),
                     color,
                     incident: Vector3::new(0.0, 0.0, 0.0),
+                    position: ray.origin,
                     normal,
                     texture,
                     probability: weight / probability,
@@ -230,13 +231,13 @@ fn render_tile<R: Rng>(
                 continue;
             }
 
-            let camera_hit = camera.is_visible(bounce.normal.origin, &world, &mut rng);
+            let camera_hit = camera.is_visible(bounce.position, &world, &mut rng);
             if let Some((position, ray)) = camera_hit {
                 if position.x > -1.0 && position.x < 1.0 && position.y > -1.0 && position.y < 1.0 {
-                    let sq_distance = (ray.origin - bounce.normal.origin).magnitude2();
+                    let sq_distance = (ray.origin - bounce.position).magnitude2();
                     let scale = 1.0 / (sq_distance);
-                    let brdf_in = bounce.ty.brdf(-ray.direction, bounce.normal.direction)
-                        / bounce.ty.brdf(bounce.incident, bounce.normal.direction);
+                    let brdf_in = bounce.ty.brdf(-ray.direction, bounce.normal)
+                        / bounce.ty.brdf(bounce.incident, bounce.normal);
 
                     main_sample.0.brightness = 0.0;
                     main_sample.0.weight = weight;
@@ -299,41 +300,39 @@ fn connect_paths<'a>(
             continue;
         }
 
-        let from = bounce.normal.origin;
-        let to = lamp_bounce.normal.origin;
+        let from = bounce.position;
+        let to = lamp_bounce.position;
 
         let direction = to - from;
         let sq_distance = direction.magnitude2();
         let distance = sq_distance.sqrt();
         let ray = Ray3::new(from, direction / distance);
 
-        if bounce.normal.direction.dot(ray.direction) <= 0.0 {
+        if bounce.normal.dot(ray.direction) <= 0.0 {
             continue;
         }
 
-        if lamp_bounce.normal.direction.dot(-ray.direction) <= 0.0 {
+        if lamp_bounce.normal.dot(-ray.direction) <= 0.0 {
             continue;
         }
 
-        let hit = world.intersect(&ray).map(|(hit, _)| hit.distance);
+        let hit = world.intersect(ray).map(|hit| hit.distance);
         if let Some(dist) = hit {
             if dist < distance - DIST_EPSILON {
                 continue;
             }
         }
 
-        let cos_out = bounce.normal.direction.dot(ray.direction).abs();
-        let cos_in = lamp_bounce.normal.direction.dot(-ray.direction).abs();
-        let brdf_out = bounce_brdf(bounce.incident, bounce.normal.direction, ray.direction)
-            / bounce.ty.brdf(bounce.incident, bounce.normal.direction);
+        let cos_out = bounce.normal.dot(ray.direction).abs();
+        let cos_in = lamp_bounce.normal.dot(-ray.direction).abs();
+        let brdf_out = bounce_brdf(bounce.incident, bounce.normal, ray.direction)
+            / bounce.ty.brdf(bounce.incident, bounce.normal);
 
         let scale = cos_in * cos_out * brdf_out / (2.0 * std::f32::consts::PI * sq_distance);
-        let brdf_in = lamp_bounce
-            .ty
-            .brdf(-ray.direction, lamp_bounce.normal.direction)
+        let brdf_in = lamp_bounce.ty.brdf(-ray.direction, lamp_bounce.normal)
             / lamp_bounce
                 .ty
-                .brdf(lamp_bounce.incident, lamp_bounce.normal.direction);
+                .brdf(lamp_bounce.incident, lamp_bounce.normal);
 
         let mut use_additional = use_additional;
         let mut additional: Vec<_> = additional

@@ -10,11 +10,10 @@ use cgmath::{
 };
 use collision::Ray3;
 
-use crate::spatial::{bkd_tree, Dim3};
-
-use crate::lamp::Lamp;
-use crate::materials::Material;
 use crate::{
+    lamp::Lamp,
+    materials::Material,
+    math::DIST_EPSILON,
     project::{
         eval_context::{EvalContext, Evaluate, EvaluateOr},
         expressions::{Expression, Expressions},
@@ -23,15 +22,18 @@ use crate::{
         WorldObject,
     },
     shapes::{
-        distance_estimators::QuatMul, BoundingVolume, Intersection, Normal, Shape, Triangle, Vertex,
+        distance_estimators::QuatMul, BoundingVolume, Intersection, Normal, Plane, Shape, Triangle,
+        Vertex,
     },
+    spatial::bvh::Bvh,
     tracer::{LightProgram, ParametricValue},
 };
 
 pub(crate) struct World<'p> {
     pub sky: LightProgram<'p>,
     pub lights: Vec<Lamp<'p>>,
-    pub objects: bkd_tree::BkdTree<Arc<Shape<'p>>>,
+    pub planes: Vec<Plane<'p>>,
+    pub finite_objects: Bvh<&'p Shape<'p>>,
 }
 
 impl<'p> World<'p> {
@@ -41,10 +43,12 @@ impl<'p> World<'p> {
         programs: ProgramCompiler<'p>,
         expressions: &Expressions,
         meshes: &Meshes,
+        allocator: &'p bumpalo::Bump,
     ) -> Result<Self, Box<dyn Error>> {
         let sky = programs.compile(&project.sky.unwrap_or(Expression::Number(0.0)), expressions)?;
 
-        let mut objects: Vec<Arc<Shape>> = Vec::new();
+        let mut objects: Vec<&Shape> = Vec::new();
+        let mut planes = Vec::new();
         let mut lights = Vec::new();
 
         for (i, object) in project.objects.into_iter().enumerate() {
@@ -60,7 +64,7 @@ impl<'p> World<'p> {
                     let emissive = material.is_emissive();
                     let texture_scale: Option<_> = texture_scale.evaluate(eval_context)?;
 
-                    let shape = Arc::new(Shape::Sphere {
+                    let shape = allocator.alloc(Shape::Sphere {
                         position: position.evaluate(eval_context)?,
                         radius: radius.evaluate(eval_context)?,
                         texture_scale: texture_scale.unwrap_or(Vector2::new(1.0, 1.0)),
@@ -68,7 +72,7 @@ impl<'p> World<'p> {
                     });
 
                     if emissive {
-                        lights.push(Lamp::Shape(shape.clone()));
+                        lights.push(Lamp::Shape(shape));
                     }
                     objects.push(shape);
                 }
@@ -87,7 +91,7 @@ impl<'p> World<'p> {
                     let emissive = material.is_emissive();
                     let texture_scale: Option<_> = texture_scale.evaluate(eval_context)?;
 
-                    let shape = Arc::new(Shape::Plane {
+                    let shape = Plane {
                         shape: collision::Plane::from_point_normal(
                             origin.evaluate(eval_context)?,
                             normal,
@@ -98,12 +102,12 @@ impl<'p> World<'p> {
                         ),
                         texture_scale: texture_scale.unwrap_or(Vector2::new(1.0, 1.0)),
                         material,
-                    });
+                    };
 
                     if emissive {
-                        lights.push(Lamp::Shape(shape.clone()));
+                        println!("warning: emissive planes may not always produce correct results");
                     }
-                    objects.push(shape);
+                    planes.push(shape);
                 }
                 WorldObject::RayMarched {
                     shape,
@@ -165,14 +169,14 @@ impl<'p> World<'p> {
                         }) as Box<dyn ParametricValue<_, _>>,
                     };
 
-                    let shape = Arc::new(Shape::RayMarched {
+                    let shape = allocator.alloc(Shape::RayMarched {
                         bounds,
                         estimator,
                         material,
                     });
 
                     if emissive {
-                        lights.push(Lamp::Shape(shape.clone()));
+                        println!("warning: emissive, distance estimated shapes may not always produce correct results");
                     }
                     objects.push(shape);
                 }
@@ -213,9 +217,9 @@ impl<'p> World<'p> {
                                             make_triangle(obj, x, y, z, object_material.clone());
                                         triangle.scale(scale);
                                         triangle.transform(transform);
-                                        let triangle = Arc::new(triangle);
+                                        let triangle = allocator.alloc(triangle);
                                         if emissive {
-                                            lights.push(Lamp::Shape(triangle.clone()));
+                                            lights.push(Lamp::Shape(triangle));
                                         }
 
                                         objects.push(triangle);
@@ -242,84 +246,54 @@ impl<'p> World<'p> {
             }
         }
 
-        println!("the scene contains {} objects", objects.len());
-        println!("building BKD-Tree... ");
-        let tree = bkd_tree::BkdTree::new(objects, 10); //TODO: make arrity configurable
-        println!("done building BKD-Tree");
+        println!(
+            "the scene contains {} objects",
+            planes.len() + objects.len()
+        );
+        println!("building BVH... ");
+        let tree = Bvh::new(objects);
+        println!("done building BVH");
 
         Ok(World {
             sky,
             lights,
-            objects: tree,
+            planes,
+            finite_objects: tree,
         })
     }
 
-    pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)> {
-        self.objects.intersect(ray)
+    pub fn intersect(&self, ray: Ray3<f32>) -> Option<Intersection> {
+        let mut result = None;
+        let mut closest_distance = f32::INFINITY;
+
+        for plane in &self.planes {
+            if let Some(intersection) = plane.ray_intersect(&ray) {
+                if intersection.distance > DIST_EPSILON && intersection.distance < closest_distance
+                {
+                    closest_distance = intersection.distance;
+                    result = Some(intersection);
+                }
+            }
+        }
+
+        let mut intersections = self.finite_objects.ray_intersect(ray);
+        while let Some(&object) = intersections.next(closest_distance) {
+            if let Some(intersection) = object.ray_intersect(&ray) {
+                if intersection.distance > DIST_EPSILON && intersection.distance < closest_distance
+                {
+                    closest_distance = intersection.distance;
+                    result = Some(intersection);
+                }
+            }
+        }
+
+        result
     }
 
     pub fn pick_lamp(&self, rng: &mut impl Rng) -> Option<(&Lamp, f32)> {
         self.lights
             .get(rng.gen_range(0, self.lights.len()))
             .map(|l| (l, 1.0 / self.lights.len() as f32))
-    }
-}
-
-pub(crate) trait ObjectContainer {
-    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)>;
-}
-
-impl<'p> ObjectContainer for bkd_tree::BkdTree<Arc<Shape<'p>>> {
-    fn intersect(&self, ray: &Ray3<f32>) -> Option<(Intersection, &Material)> {
-        let ray = BkdRay(*ray);
-        self.find(&ray)
-            .map(|(intersection, object)| (intersection, object.get_material()))
-    }
-}
-
-pub struct BkdRay(pub Ray3<f32>);
-
-impl bkd_tree::Ray for BkdRay {
-    type Dim = Dim3;
-
-    fn plane_intersections(&self, min: f32, max: f32, axis: Dim3) -> Option<(f32, f32)> {
-        let &BkdRay(ray) = self;
-
-        let (origin, direction) = match axis {
-            Dim3::X => (ray.origin.x, ray.direction.x),
-            Dim3::Y => (ray.origin.y, ray.direction.y),
-            Dim3::Z => (ray.origin.z, ray.direction.z),
-        };
-
-        let min = (min - origin) / direction;
-        let max = (max - origin) / direction;
-        let far = min.max(max);
-
-        if far > 0.0 {
-            let near = min.min(max);
-            Some((near, far))
-        } else {
-            None
-        }
-    }
-
-    #[inline]
-    fn plane_distance(&self, min: f32, max: f32, axis: Dim3) -> (f32, f32) {
-        let &BkdRay(ray) = self;
-
-        let (origin, direction) = match axis {
-            Dim3::X => (ray.origin.x, ray.direction.x),
-            Dim3::Y => (ray.origin.y, ray.direction.y),
-            Dim3::Z => (ray.origin.z, ray.direction.z),
-        };
-        let min = (min - origin) / direction;
-        let max = (max - origin) / direction;
-
-        if min < max {
-            (min, max)
-        } else {
-            (max, min)
-        }
     }
 }
 
@@ -385,6 +359,8 @@ fn make_triangle<'p, M: obj::GenPolygon>(
             normal: Normal::new(n3, Matrix3::from_cols(tangent, bitangent, n3).into()),
             texture: t3,
         },
+        edge1: delta_position1,
+        edge2: delta_position2,
         material,
     }
 }

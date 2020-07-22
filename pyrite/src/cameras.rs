@@ -132,7 +132,7 @@ impl Camera {
                 let direction = target - world_origin;
                 let distance = direction.magnitude();
                 let ray = Ray::new(world_origin, direction / distance);
-                if let Some((hit, _)) = world.intersect(&ray) {
+                if let Some(hit) = world.intersect(ray) {
                     if hit.distance < distance - DIST_EPSILON {
                         return None;
                     }

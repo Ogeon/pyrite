@@ -23,6 +23,7 @@ pub(crate) fn contribute<'a>(
         ref light,
         color,
         incident,
+        position: _,
         normal,
         texture,
         probability,
@@ -36,7 +37,7 @@ pub(crate) fn contribute<'a>(
     let context = RenderContext {
         wavelength: sample.wavelength,
         incident,
-        normal: normal.direction,
+        normal,
         texture,
     };
 
@@ -69,7 +70,7 @@ pub(crate) fn contribute<'a>(
             }
         }
 
-        *reflectance *= ty.brdf(incident, normal.direction);
+        *reflectance *= ty.brdf(incident, normal);
     }
 
     true

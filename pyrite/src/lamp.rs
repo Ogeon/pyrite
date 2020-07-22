@@ -1,5 +1,4 @@
 use std;
-use std::sync::Arc;
 
 use cgmath::{InnerSpace, Point2, Point3, Vector3};
 use collision::Ray3;
@@ -7,7 +6,7 @@ use collision::Ray3;
 use rand::Rng;
 
 use crate::math::utils::{sample_cone, sample_hemisphere, sample_sphere};
-use crate::shapes::Shape;
+use crate::shapes::{Intersection, Shape, SurfaceData};
 use crate::{materials::Material, tracer::LightProgram};
 
 pub(crate) enum Lamp<'p> {
@@ -17,7 +16,7 @@ pub(crate) enum Lamp<'p> {
         color: LightProgram<'p>,
     },
     Point(Point3<f32>, LightProgram<'p>),
-    Shape(Arc<Shape<'p>>),
+    Shape(&'p Shape<'p>),
 }
 
 impl<'p> Lamp<'p> {
@@ -52,21 +51,27 @@ impl<'p> Lamp<'p> {
                 }
             }
             Lamp::Shape(ref shape) => {
-                let (ray, texture) = shape
+                let Intersection {
+                    distance,
+                    surface_point,
+                } = shape
                     .sample_towards(rng, &target)
                     .expect("trying to use infinite shape in direct lighting");
-                let v = ray.origin - target;
-                let distance = v.magnitude2();
+                let v = surface_point.position - target;
+                let sq_distance = distance * distance;
                 let direction = v.normalize();
+
+                let SurfaceData { normal, texture } = surface_point.get_surface_data();
+
                 let weight = shape.solid_angle_towards(&target).unwrap_or_else(|| {
-                    let cos_in = ray.direction.dot(-direction).abs();
-                    cos_in * shape.surface_area() / distance
+                    let cos_in = normal.vector().dot(-direction).abs();
+                    cos_in * shape.surface_area() / sq_distance
                 });
                 Sample {
-                    direction: direction,
-                    sq_distance: Some(distance),
+                    direction,
+                    sq_distance: Some(sq_distance),
                     surface: Surface::Physical {
-                        normal: ray,
+                        normal: normal.vector(),
                         texture,
                         material: shape.get_material(),
                     },
@@ -88,14 +93,16 @@ impl<'p> Lamp<'p> {
                 })
             }
             Lamp::Shape(ref shape) => {
-                let (normal, texture) = shape
+                let surface_point = shape
                     .sample_point(rng)
                     .expect("trying to use infinite shape as lamp");
-                let direction = sample_hemisphere(rng, normal.direction);
+
+                let SurfaceData { normal, texture } = surface_point.get_surface_data();
+                let direction = sample_hemisphere(rng, normal.vector());
                 Some(RaySample {
-                    ray: Ray3::new(normal.origin, direction),
+                    ray: Ray3::new(surface_point.position, direction),
                     surface: Surface::Physical {
-                        normal,
+                        normal: normal.vector(),
                         texture,
                         material: shape.get_material(),
                     },
@@ -115,7 +122,7 @@ pub(crate) struct Sample<'a> {
 
 pub(crate) enum Surface<'a> {
     Physical {
-        normal: Ray3<f32>,
+        normal: Vector3<f32>,
         texture: Point2<f32>,
         material: &'a Material<'a>,
     },

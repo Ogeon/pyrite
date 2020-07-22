@@ -2,7 +2,7 @@ use std::error::Error;
 
 use rand::Rng;
 
-use cgmath::{InnerSpace, Vector3};
+use cgmath::{InnerSpace, Point3, Vector3};
 use collision::Ray3;
 
 use crate::{
@@ -47,17 +47,18 @@ impl<'p> Material<'p> {
         &self,
         light: &mut tracer::Light,
         ray_in: Ray3<f32>,
-        normal: Ray3<f32>,
+        position: Point3<f32>,
+        normal: Vector3<f32>,
         rng: &mut impl Rng,
     ) -> Reflection<'_> {
-        self.surface.reflect(light, ray_in, normal, rng)
+        self.surface.reflect(light, ray_in, position, normal, rng)
     }
 
     pub fn get_emission(
         &self,
         light: &mut tracer::Light,
         ray_in: Vector3<f32>,
-        normal: Ray3<f32>,
+        normal: Vector3<f32>,
         rng: &mut impl Rng,
     ) -> Option<Program<RenderContext, Light>> {
         self.surface.get_emission(light, ray_in, normal, rng)
@@ -168,16 +169,23 @@ impl<'p> SurfaceMaterial<'p> {
         &self,
         light: &mut tracer::Light,
         ray_in: Ray3<f32>,
-        normal: Ray3<f32>,
+        position: Point3<f32>,
+        normal: Vector3<f32>,
         rng: &mut impl Rng,
     ) -> Reflection<'_> {
         match self {
-            SurfaceMaterial::Diffuse(material) => material.reflect(ray_in, normal, rng),
+            SurfaceMaterial::Diffuse(material) => material.reflect(ray_in, position, normal, rng),
             SurfaceMaterial::Emission(material) => material.reflect(),
-            SurfaceMaterial::Mirror(material) => material.reflect(ray_in, normal),
-            SurfaceMaterial::Refractive(material) => material.reflect(light, ray_in, normal, rng),
-            SurfaceMaterial::Mix(material) => material.reflect(light, ray_in, normal, rng),
-            SurfaceMaterial::FresnelMix(material) => material.reflect(light, ray_in, normal, rng),
+            SurfaceMaterial::Mirror(material) => material.reflect(ray_in, position, normal),
+            SurfaceMaterial::Refractive(material) => {
+                material.reflect(light, ray_in, position, normal, rng)
+            }
+            SurfaceMaterial::Mix(material) => {
+                material.reflect(light, ray_in, position, normal, rng)
+            }
+            SurfaceMaterial::FresnelMix(material) => {
+                material.reflect(light, ray_in, position, normal, rng)
+            }
         }
     }
 
@@ -185,7 +193,7 @@ impl<'p> SurfaceMaterial<'p> {
         &self,
         light: &mut tracer::Light,
         ray_in: Vector3<f32>,
-        normal: Ray3<f32>,
+        normal: Vector3<f32>,
         rng: &mut impl Rng,
     ) -> Option<Program<RenderContext, Light>> {
         match self {
@@ -219,16 +227,22 @@ pub(crate) struct Diffuse<'p> {
 }
 
 impl<'p> Diffuse<'p> {
-    fn reflect(&self, ray_in: Ray3<f32>, normal: Ray3<f32>, rng: &mut impl Rng) -> Reflection<'_> {
-        let n = if ray_in.direction.dot(normal.direction) < 0.0 {
-            normal.direction
+    fn reflect(
+        &self,
+        ray_in: Ray3<f32>,
+        position: Point3<f32>,
+        normal: Vector3<f32>,
+        rng: &mut impl Rng,
+    ) -> Reflection<'_> {
+        let n = if ray_in.direction.dot(normal) < 0.0 {
+            normal
         } else {
-            -normal.direction
+            -normal
         };
 
         let reflected = math::utils::sample_hemisphere(rng, n);
         Reflect(
-            Ray3::new(normal.origin, reflected),
+            Ray3::new(position, reflected),
             self.color,
             1.0,
             Some(lambertian),
@@ -259,17 +273,22 @@ pub(crate) struct Mirror<'p> {
 }
 
 impl<'p> Mirror<'p> {
-    fn reflect(&self, ray_in: Ray3<f32>, normal: Ray3<f32>) -> Reflection<'_> {
-        let mut n = if ray_in.direction.dot(normal.direction) < 0.0 {
-            normal.direction
+    fn reflect(
+        &self,
+        ray_in: Ray3<f32>,
+        position: Point3<f32>,
+        normal: Vector3<f32>,
+    ) -> Reflection<'_> {
+        let mut n = if ray_in.direction.dot(normal) < 0.0 {
+            normal
         } else {
-            -normal.direction
+            -normal
         };
 
         let perp = ray_in.direction.dot(n) * 2.0;
         n *= perp;
         Reflect(
-            Ray3::new(normal.origin, ray_in.direction - n),
+            Ray3::new(position, ray_in.direction - n),
             self.color,
             1.0,
             None,
@@ -288,13 +307,14 @@ impl<'p> Mix<'p> {
         &self,
         light: &mut tracer::Light,
         ray_in: Ray3<f32>,
-        normal: Ray3<f32>,
+        position: Point3<f32>,
+        normal: Vector3<f32>,
         rng: &mut impl Rng,
     ) -> Reflection<'_> {
         if self.factor < rng.gen() {
-            self.a.reflect(light, ray_in, normal, rng)
+            self.a.reflect(light, ray_in, position, normal, rng)
         } else {
-            self.b.reflect(light, ray_in, normal, rng)
+            self.b.reflect(light, ray_in, position, normal, rng)
         }
     }
 
@@ -302,7 +322,7 @@ impl<'p> Mix<'p> {
         &self,
         light: &mut tracer::Light,
         ray_in: Vector3<f32>,
-        normal: Ray3<f32>,
+        normal: Vector3<f32>,
         rng: &mut impl Rng,
     ) -> Option<Program<RenderContext, Light>> {
         if self.factor < rng.gen() {
@@ -327,7 +347,8 @@ impl<'p> FresnelMix<'p> {
         &self,
         light: &mut tracer::Light,
         ray_in: Ray3<f32>,
-        normal: Ray3<f32>,
+        position: Point3<f32>,
+        normal: Vector3<f32>,
         rng: &mut impl Rng,
     ) -> Reflection<'_> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
@@ -343,7 +364,7 @@ impl<'p> FresnelMix<'p> {
                 normal,
                 rng,
             );
-            child.reflect(light, ray_in, normal, rng)
+            child.reflect(light, ray_in, position, normal, rng)
         } else {
             let child = fresnel_mix(
                 self.ior,
@@ -354,7 +375,7 @@ impl<'p> FresnelMix<'p> {
                 normal,
                 rng,
             );
-            child.reflect(light, ray_in, normal, rng)
+            child.reflect(light, ray_in, position, normal, rng)
         }
     }
 
@@ -362,7 +383,7 @@ impl<'p> FresnelMix<'p> {
         &self,
         light: &mut tracer::Light,
         ray_in: Vector3<f32>,
-        normal: Ray3<f32>,
+        normal: Vector3<f32>,
         rng: &mut impl Rng,
     ) -> Option<Program<RenderContext, Light>> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
@@ -400,13 +421,13 @@ fn fresnel_mix<'a, R: Rng>(
     reflect: &'a SurfaceMaterial<'a>,
     refract: &'a SurfaceMaterial<'a>,
     ray_in: Vector3<f32>,
-    normal: Ray3<f32>,
+    normal: Vector3<f32>,
     rng: &mut R,
 ) -> &'a SurfaceMaterial<'a> {
-    let factor = if ray_in.dot(normal.direction) < 0.0 {
-        math::utils::schlick(env_ior, ior, normal.direction, ray_in)
+    let factor = if ray_in.dot(normal) < 0.0 {
+        math::utils::schlick(env_ior, ior, normal, ray_in)
     } else {
-        math::utils::schlick(ior, env_ior, -normal.direction, ray_in)
+        math::utils::schlick(ior, env_ior, -normal, ray_in)
     };
 
     if factor > rng.gen() {
@@ -429,16 +450,25 @@ impl<'p> Refractive<'p> {
         &self,
         light: &mut tracer::Light,
         ray_in: Ray3<f32>,
-        normal: Ray3<f32>,
+        position: Point3<f32>,
+        normal: Vector3<f32>,
         rng: &mut impl Rng,
     ) -> Reflection<'_> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
             let env_ior = self.env_ior + self.env_dispersion / (wl * wl);
-            refract(ior, env_ior, self.color, ray_in, normal, rng)
+            refract(ior, env_ior, self.color, ray_in, position, normal, rng)
         } else {
-            refract(self.ior, self.env_ior, self.color, ray_in, normal, rng)
+            refract(
+                self.ior,
+                self.env_ior,
+                self.color,
+                ray_in,
+                position,
+                normal,
+                rng,
+            )
         }
     }
 }
@@ -448,19 +478,19 @@ fn refract<'a, R: Rng>(
     env_ior: f32,
     color: Program<'a, RenderContext, Light>,
     ray_in: Ray3<f32>,
-    normal: Ray3<f32>,
+    position: Point3<f32>,
+    normal: Vector3<f32>,
     rng: &mut R,
 ) -> Reflection<'a> {
-    let nl = if normal.direction.dot(ray_in.direction) < 0.0 {
-        normal.direction
+    let nl = if normal.dot(ray_in.direction) < 0.0 {
+        normal
     } else {
-        -normal.direction
+        -normal
     };
 
-    let reflected =
-        ray_in.direction - (normal.direction * 2.0 * normal.direction.dot(ray_in.direction));
+    let reflected = ray_in.direction - (normal * 2.0 * normal.dot(ray_in.direction));
 
-    let into = normal.direction.dot(nl) > 0.0;
+    let into = normal.dot(nl) > 0.0;
 
     let nnt = if into { env_ior / ior } else { ior / env_ior };
     let ddn = ray_in.direction.dot(nl);
@@ -468,21 +498,16 @@ fn refract<'a, R: Rng>(
     let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
     if cos2t < 0.0 {
         // Total internal reflection
-        return Reflect(Ray3::new(normal.origin, reflected), color, 1.0, None);
+        return Reflect(Ray3::new(position, reflected), color, 1.0, None);
     }
 
     let s = if into { 1.0 } else { -1.0 } * (ddn * nnt + cos2t.sqrt());
-    let tdir = (ray_in.direction * nnt - normal.direction * s).normalize();
+    let tdir = (ray_in.direction * nnt - normal * s).normalize();
 
     let a = ior - env_ior;
     let b = ior + env_ior;
     let r0 = a * a / (b * b);
-    let c = 1.0
-        - if into {
-            -ddn
-        } else {
-            tdir.dot(normal.direction)
-        };
+    let c = 1.0 - if into { -ddn } else { tdir.dot(normal) };
 
     let re = r0 + (1.0 - r0) * c * c * c * c * c;
     let tr = 1.0 - re;
@@ -491,8 +516,8 @@ fn refract<'a, R: Rng>(
     let tp = tr / (1.0 - p);
 
     if rng.gen::<f32>() < p {
-        return Reflect(Ray3::new(normal.origin, reflected), color, rp, None);
+        return Reflect(Ray3::new(position, reflected), color, rp, None);
     } else {
-        return Reflect(Ray3::new(normal.origin, tdir), color, tp, None);
+        return Reflect(Ray3::new(position, tdir), color, tp, None);
     }
 }

@@ -208,12 +208,12 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                     (color, normal, texture)
                                 }
                                 Surface::Color(color) => {
-                                    (Some(color), ray_sample.ray, Point2::origin())
+                                    (Some(color), ray_sample.ray.direction, Point2::origin())
                                 }
                             };
 
                             if let Some(color) = color {
-                                ray_sample.ray.origin += normal.direction * DIST_EPSILON;
+                                ray_sample.ray.origin += normal * DIST_EPSILON;
 
                                 trace(
                                     &mut bounces,
@@ -239,6 +239,7 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                                         light,
                                         color,
                                         incident,
+                                        position: ray_sample.ray.origin,
                                         normal,
                                         texture,
                                         probability: ray_sample.weight * probability,
@@ -318,7 +319,7 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
 
                     for hit in bounces {
                         let pixel = &hit.pixel;
-                        let point = KdPoint(hit.bounce.normal.origin);
+                        let point = KdPoint(hit.bounce.position);
                         let neighbors: Vec<_> =
                             light_bounces.neighbors(&point, config.radius).collect();
                         let num_neighbors = neighbors.len();
@@ -359,13 +360,9 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
 
                                 let incident = -neighbor.bounce.incident;
 
-                                let mut weight = incident.dot(hit.bounce.normal.direction).max(0.0);
+                                let mut weight = incident.dot(hit.bounce.normal).max(0.0);
                                 if weight > 0.0 {
-                                    weight *= hit
-                                        .bounce
-                                        .incident
-                                        .dot(-hit.bounce.normal.direction)
-                                        .max(0.0);
+                                    weight *= hit.bounce.incident.dot(-hit.bounce.normal).max(0.0);
                                     weight /= ::std::f32::consts::PI;
                                     hit.accumulate_reflectance(&mut samples, incident, &mut exe);
                                     neighbor.accumulate_light(&mut samples, &mut exe);
@@ -447,16 +444,16 @@ impl<'a> CameraBounce<'a> {
             } = &hit.bounce;
 
             let brdf = if let Some((brdf, ray_out)) = first_brdf.take() {
-                brdf(incident, normal.direction, ray_out)
+                brdf(incident, normal, ray_out)
             } else {
-                ty.brdf(incident, normal.direction)
+                ty.brdf(incident, normal)
             };
 
             for &mut (ref sample, ref mut reflectance) in &mut *samples {
                 let context = RenderContext {
                     wavelength: sample.wavelength,
                     incident,
-                    normal: normal.direction,
+                    normal: normal,
                     texture,
                 };
                 let c = exe.run(color, &context).value;
@@ -520,7 +517,7 @@ impl<'a> LightBounce<'a> {
                 let context = RenderContext {
                     wavelength: sample.wavelength,
                     incident,
-                    normal: normal.direction,
+                    normal,
                     texture,
                 };
 
@@ -529,7 +526,7 @@ impl<'a> LightBounce<'a> {
                 if let BounceType::Emission = *ty {
                     sample.brightness = c * *reflectance;
                 } else {
-                    *reflectance *= c * ty.brdf(incident, normal.direction);
+                    *reflectance *= c * ty.brdf(incident, normal);
                 }
             }
 
@@ -547,10 +544,10 @@ impl<'a> kd_tree::Element for Arc<LightBounce<'a>> {
     type Point = KdPoint;
 
     fn position(&self) -> KdPoint {
-        KdPoint(self.bounce.normal.origin)
+        KdPoint(self.bounce.position)
     }
 
     fn sq_distance(&self, point: &KdPoint) -> f32 {
-        (self.bounce.normal.origin - point.0).magnitude2()
+        (self.bounce.position - point.0).magnitude2()
     }
 }

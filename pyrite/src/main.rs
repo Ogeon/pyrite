@@ -71,7 +71,7 @@ fn main() {
             textures: &textures,
         };
 
-        match parse_project(project, programs, &expressions, &meshes, resources) {
+        match parse_project(project, programs, &expressions, &meshes, resources, &arena) {
             Ok((image, context)) => render(image, context, project_path),
             Err(error) => eprintln!("error while parsing project: {}", error),
         };
@@ -86,6 +86,7 @@ fn parse_project<'p>(
     expressions: &Expressions,
     meshes: &Meshes,
     resources: Resources<'p>,
+    arena: &'p Bump,
 ) -> Result<(ImageSettings<'p>, RenderContext<'p>), Box<dyn Error>> {
     let eval_context = EvalContext { expressions };
 
@@ -98,6 +99,7 @@ fn parse_project<'p>(
             programs,
             expressions,
             meshes,
+            &arena,
         )?,
         resources,
     };
