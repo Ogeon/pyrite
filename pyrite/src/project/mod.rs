@@ -20,10 +20,9 @@ pub mod eval_context;
 pub mod expressions;
 pub mod meshes;
 mod parse_context;
-pub mod program;
 pub mod spectra;
 mod tables;
-mod textures;
+pub(crate) mod textures;
 
 pub fn load_project<'p, P: AsRef<Path>>(path: P) -> Result<ProjectData, Box<dyn Error>> {
     let project_dir = path

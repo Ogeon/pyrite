@@ -3,7 +3,7 @@ use num_cpus;
 use crate::cameras;
 use crate::world;
 
-use crate::{film::Film, project::program::Resources};
+use crate::{film::Film, program::Resources};
 
 mod algorithm;
 mod bidirectional;

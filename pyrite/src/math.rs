@@ -156,7 +156,7 @@ pub mod utils {
     }
 }
 
-pub fn fresnel(ior: f32, env_ior: f32, normal: Vector3<f32>, incident: Vector3<f32>) -> f32 {
+pub(crate) fn fresnel(ior: f32, env_ior: f32, normal: Vector3<f32>, incident: Vector3<f32>) -> f32 {
     use cgmath::InnerSpace;
 
     if incident.dot(normal) < 0.0 {
@@ -164,4 +164,11 @@ pub fn fresnel(ior: f32, env_ior: f32, normal: Vector3<f32>, incident: Vector3<f
     } else {
         utils::schlick(ior, env_ior, -normal, incident)
     }
+}
+
+pub(crate) fn blackbody(wavelength: f32, temperature: f32) -> f32 {
+    let wavelength = wavelength * 1.0e-9;
+    let power_term = 3.74183e-16 * wavelength.powi(-5);
+
+    power_term / ((1.4388e-2 / (wavelength * temperature)).exp() - 1.0)
 }

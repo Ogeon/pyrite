@@ -5,6 +5,8 @@ use std::time::Instant;
 use image;
 
 use std::{
+    borrow::Cow,
+    convert::TryFrom,
     error::Error,
     io::{stdout, Write},
     ops::{Add, AddAssign, Div, Mul},
@@ -17,23 +19,25 @@ use palette::{ComponentWise, FromColor, LinSrgb, Pixel, Srgb, Xyz};
 
 use bumpalo::Bump;
 
-use color::{Light, WavelengthInput};
 use film::{Film, Spectrum};
+use program::{
+    ExecutionContext, NumberInput, ProgramCompiler, ProgramFor, ProgramInput, Resources,
+    VectorInput,
+};
 use project::{
     eval_context::EvalContext,
-    expressions::Expressions,
+    expressions::{Expressions, Vector},
     meshes::Meshes,
-    program::{ExecutionContext, Program, ProgramCompiler, ProgramInput, Resources},
     ProjectData,
 };
 
 mod cameras;
-mod color;
 mod film;
 mod lamp;
 mod light_source;
 mod materials;
 mod math;
+mod program;
 mod project;
 mod renderer;
 mod rgb;
@@ -148,10 +152,7 @@ fn render<P: AsRef<Path>>(
     let mut filter_exe = ExecutionContext::new(config.resources);
     let mut filter = image_settings.filter.map(|white| {
         move |intensity: f32, wavelength: f32| {
-            intensity
-                * filter_exe
-                    .run(white, &SpectrumSamplingInput { wavelength })
-                    .value
+            intensity * filter_exe.run(white, &SpectrumSamplingInput { wavelength })
         }
     });
 
@@ -162,20 +163,14 @@ fn render<P: AsRef<Path>>(
         let mut d65_max = 0.0f32;
 
         while wavelength < config.renderer.spectrum_span.1 {
-            max = max.max(
-                white_balance_exe
-                    .run(white, &SpectrumSamplingInput { wavelength })
-                    .value,
-            );
+            max = max.max(white_balance_exe.run(white, &SpectrumSamplingInput { wavelength }));
             d65_max = d65_max.max(light_source::D65.get(wavelength));
             wavelength += 1.0;
         }
 
         move |intensity: f32, wavelength: f32| {
-            let white_intensity = white_balance_exe
-                .run(white, &SpectrumSamplingInput { wavelength })
-                .value
-                / max;
+            let white_intensity =
+                white_balance_exe.run(white, &SpectrumSamplingInput { wavelength }) / max;
             let neutral = intensity / white_intensity.max(0.000001);
             neutral * (light_source::D65.get(wavelength) / d65_max)
         }
@@ -414,8 +409,8 @@ struct ImageSettings<'a> {
     width: u32,
     height: u32,
     file: Option<String>,
-    filter: Option<Program<'a, SpectrumSamplingInput, Light>>,
-    white: Option<Program<'a, SpectrumSamplingInput, Light>>,
+    filter: Option<ProgramFor<'a, SpectrumSamplingInput, f32>>,
+    white: Option<ProgramFor<'a, SpectrumSamplingInput, f32>>,
 }
 
 impl<'a> ImageSettings<'a> {
@@ -451,19 +446,54 @@ struct SpectrumSamplingInput {
 }
 
 impl ProgramInput for SpectrumSamplingInput {
-    fn normal() -> Result<project::program::InputFn<Self>, Box<dyn Error>> {
-        Err("the surface normal cannot be used while sampling a constant spectrum".into())
+    type NumberInput = SpectrumSamplingNumberInput;
+    type VectorInput = SpectrumSamplingVectorInput;
+
+    #[inline(always)]
+    fn get_number_input(&self, input: Self::NumberInput) -> f32 {
+        match input {
+            SpectrumSamplingNumberInput::Wavelength => self.wavelength,
+        }
     }
-    fn incident() -> Result<project::program::InputFn<Self>, Box<dyn Error>> {
-        Err("the incident vector cannot be used while sampling a constant spectrum".into())
-    }
-    fn texture_coordinates() -> Result<project::program::InputFn<Self>, Box<dyn Error>> {
-        Err("texture coordinates cannot be used while sampling a constant spectrum".into())
+
+    #[inline(always)]
+    fn get_vector_input(&self, input: Self::VectorInput) -> Vector {
+        match input {}
     }
 }
 
-impl WavelengthInput for SpectrumSamplingInput {
-    fn wavelength(&self) -> f32 {
-        self.wavelength
+#[derive(Clone, Copy)]
+enum SpectrumSamplingNumberInput {
+    Wavelength,
+}
+
+impl TryFrom<NumberInput> for SpectrumSamplingNumberInput {
+    type Error = Cow<'static, str>;
+
+    fn try_from(value: NumberInput) -> Result<Self, Self::Error> {
+        match value {
+            NumberInput::Wavelength => Ok(Self::Wavelength),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SpectrumSamplingVectorInput {}
+
+impl TryFrom<VectorInput> for SpectrumSamplingVectorInput {
+    type Error = Cow<'static, str>;
+
+    fn try_from(value: VectorInput) -> Result<Self, Self::Error> {
+        match value {
+            VectorInput::Normal => {
+                Err("the surface normal cannot be used while sampling a constant spectrum".into())
+            }
+            VectorInput::Incident => {
+                Err("the incident vector cannot be used while sampling a constant spectrum".into())
+            }
+            VectorInput::TextureCoordinates => {
+                Err("texture coordinates cannot be used while sampling a constant spectrum".into())
+            }
+        }
     }
 }

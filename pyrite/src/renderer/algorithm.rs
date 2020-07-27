@@ -7,7 +7,7 @@ use rand::Rng;
 use crate::cameras::Camera;
 use crate::film::{Area, Sample};
 use crate::{
-    project::program::ExecutionContext,
+    program::ExecutionContext,
     tracer::{self, Bounce, BounceType, RenderContext},
 };
 
@@ -41,7 +41,7 @@ pub(crate) fn contribute<'a>(
         texture,
     };
 
-    let c = exe.run(color, &context).value * probability;
+    let c = exe.run(color, &context) * probability;
 
     if let BounceType::Emission = *ty {
         sample.brightness += c * *reflectance;
@@ -65,7 +65,7 @@ pub(crate) fn contribute<'a>(
                     texture,
                 };
 
-                let l_c = exe.run(l_color, &context).value * l_probability;
+                let l_c = exe.run(l_color, &context) * l_probability;
                 sample.brightness += l_c * *reflectance;
             }
         }

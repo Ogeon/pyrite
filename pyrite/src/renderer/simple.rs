@@ -8,7 +8,7 @@ use crate::renderer::algorithm::contribute;
 use crate::renderer::{Renderer, Status, WorkPool};
 use crate::tracer::{trace, Light};
 use crate::{
-    project::program::{ExecutionContext, Resources},
+    program::{ExecutionContext, Resources},
     world::World,
 };
 

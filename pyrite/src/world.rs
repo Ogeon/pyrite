@@ -14,11 +14,11 @@ use crate::{
     lamp::Lamp,
     materials::Material,
     math::DIST_EPSILON,
+    program::ProgramCompiler,
     project::{
         eval_context::{EvalContext, Evaluate, EvaluateOr},
         expressions::{Expression, Expressions},
         meshes::Meshes,
-        program::ProgramCompiler,
         WorldObject,
     },
     shapes::{

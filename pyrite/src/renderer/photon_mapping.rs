@@ -17,7 +17,7 @@ use crate::tracer::{trace, Bounce, BounceType, Light, RenderContext};
 use crate::utils::{pairs, BatchRange};
 use crate::{
     math::DIST_EPSILON,
-    project::program::{ExecutionContext, Resources},
+    program::{ExecutionContext, Resources},
     world::World,
 };
 
@@ -456,7 +456,7 @@ impl<'a> CameraBounce<'a> {
                     normal: normal,
                     texture,
                 };
-                let c = exe.run(color, &context).value;
+                let c = exe.run(color, &context);
                 *reflectance *= c * probability * brdf;
             }
 
@@ -521,7 +521,7 @@ impl<'a> LightBounce<'a> {
                     texture,
                 };
 
-                let c = exe.run(color, &context).value * probability;
+                let c = exe.run(color, &context) * probability;
 
                 if let BounceType::Emission = *ty {
                     sample.brightness = c * *reflectance;

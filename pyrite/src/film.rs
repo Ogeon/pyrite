@@ -130,13 +130,17 @@ impl Grain {
 
     fn increment(&self, increment: f32, weight: f32) {
         let mut currant_data = self.data.load();
-        loop {
+        let mut attempts = 0;
+
+        // Discard the sample if multiple threads are stuck updating the grain
+        while attempts < 5 {
             let result = self
                 .data
                 .compare_exchange(currant_data, currant_data.add(increment, weight));
 
             if let Err(current) = result {
                 currant_data = current;
+                attempts += 1;
             } else {
                 break;
             }

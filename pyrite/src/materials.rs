@@ -6,21 +6,20 @@ use cgmath::{InnerSpace, Point3, Vector3};
 use collision::Ray3;
 
 use crate::{
-    color::Light,
     math,
+    program::{ExecutionContext, ProgramCompiler, ProgramFor},
     project::{
         eval_context::{EvalContext, Evaluate, EvaluateOr},
         expressions::{Expressions, Vector},
-        program::{ExecutionContext, Program, ProgramCompiler},
         SurfaceMaterial as ProjectMaterial,
     },
     shapes::Normal,
-    tracer::{self, Emit, LightProgram, NormalInput, Reflect, Reflection, RenderContext},
+    tracer::{self, Emit, LightProgram, NormalInput, Reflect, Reflection},
 };
 
 pub(crate) struct Material<'p> {
     surface: SurfaceMaterial<'p>,
-    normal_map: Option<Program<'p, NormalInput, Vector>>,
+    normal_map: Option<ProgramFor<'p, NormalInput, Vector>>,
 }
 
 impl<'p> Material<'p> {
@@ -60,7 +59,7 @@ impl<'p> Material<'p> {
         ray_in: Vector3<f32>,
         normal: Vector3<f32>,
         rng: &mut impl Rng,
-    ) -> Option<Program<RenderContext, Light>> {
+    ) -> Option<LightProgram> {
         self.surface.get_emission(light, ray_in, normal, rng)
     }
 
@@ -195,7 +194,7 @@ impl<'p> SurfaceMaterial<'p> {
         ray_in: Vector3<f32>,
         normal: Vector3<f32>,
         rng: &mut impl Rng,
-    ) -> Option<Program<RenderContext, Light>> {
+    ) -> Option<LightProgram> {
         match self {
             SurfaceMaterial::Emission(material) => material.get_emission(),
             SurfaceMaterial::Mix(material) => material.get_emission(light, ray_in, normal, rng),
@@ -263,7 +262,7 @@ impl<'p> Emission<'p> {
         Emit(self.color)
     }
 
-    fn get_emission(&self) -> Option<Program<RenderContext, Light>> {
+    fn get_emission(&self) -> Option<LightProgram> {
         Some(self.color)
     }
 }
@@ -324,7 +323,7 @@ impl<'p> Mix<'p> {
         ray_in: Vector3<f32>,
         normal: Vector3<f32>,
         rng: &mut impl Rng,
-    ) -> Option<Program<RenderContext, Light>> {
+    ) -> Option<LightProgram> {
         if self.factor < rng.gen() {
             self.a.get_emission(light, ray_in, normal, rng)
         } else {
@@ -385,7 +384,7 @@ impl<'p> FresnelMix<'p> {
         ray_in: Vector3<f32>,
         normal: Vector3<f32>,
         rng: &mut impl Rng,
-    ) -> Option<Program<RenderContext, Light>> {
+    ) -> Option<LightProgram> {
         if self.dispersion != 0.0 || self.env_dispersion != 0.0 {
             let wl = light.colored() * 0.001;
             let ior = self.ior + self.dispersion / (wl * wl);
@@ -476,7 +475,7 @@ impl<'p> Refractive<'p> {
 fn refract<'a, R: Rng>(
     ior: f32,
     env_ior: f32,
-    color: Program<'a, RenderContext, Light>,
+    color: LightProgram<'a>,
     ray_in: Ray3<f32>,
     position: Point3<f32>,
     normal: Vector3<f32>,

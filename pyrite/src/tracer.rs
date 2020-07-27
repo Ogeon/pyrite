@@ -1,23 +1,21 @@
-use std::{self, error::Error};
-
 use rand::Rng;
 
 use cgmath::{EuclideanSpace, InnerSpace, Point2, Point3, Vector3};
 use collision::Ray3;
 
 use crate::{
-    color,
     lamp::{self, Lamp},
     math::DIST_EPSILON,
-    project::program::{ExecutionContext, InputFn, Program, ProgramInput},
+    program::{ExecutionContext, NumberInput, ProgramFor, ProgramInput, VectorInput},
+    project::expressions::Vector,
     world::World,
 };
 
 pub(crate) use self::Reflection::{Emit, Reflect};
-use color::WavelengthInput;
+use std::{borrow::Cow, convert::TryFrom};
 
 pub type Brdf = fn(ray_in: Vector3<f32>, ray_out: Vector3<f32>, normal: Vector3<f32>) -> f32;
-pub(crate) type LightProgram<'p> = Program<'p, RenderContext, color::Light>;
+pub(crate) type LightProgram<'p> = ProgramFor<'p, RenderContext, f32>;
 
 pub trait ParametricValue<From, To>: Send + Sync {
     fn get(&self, i: &From) -> To;
@@ -41,14 +39,36 @@ pub struct NormalInput {
 }
 
 impl ProgramInput for NormalInput {
-    fn normal() -> Result<InputFn<Self>, Box<dyn Error>> {
-        Ok(|_, this, _| this.normal.into())
+    type NumberInput = NormalNumberInput;
+    type VectorInput = SurfaceVectorInput;
+
+    #[inline(always)]
+    fn get_number_input(&self, input: Self::NumberInput) -> f32 {
+        match input {}
     }
-    fn incident() -> Result<InputFn<Self>, Box<dyn Error>> {
-        Ok(|_, this, _| this.incident.into())
+
+    #[inline(always)]
+    fn get_vector_input(&self, input: Self::VectorInput) -> Vector {
+        match input {
+            SurfaceVectorInput::Normal => self.normal.into(),
+            SurfaceVectorInput::Incident => self.incident.into(),
+            SurfaceVectorInput::TextureCoordinates => self.texture.into(),
+        }
     }
-    fn texture_coordinates() -> Result<InputFn<Self>, Box<dyn Error>> {
-        Ok(|_, this, _| this.texture.into())
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum NormalNumberInput {}
+
+impl TryFrom<NumberInput> for NormalNumberInput {
+    type Error = Cow<'static, str>;
+
+    fn try_from(value: NumberInput) -> Result<Self, Self::Error> {
+        match value {
+            NumberInput::Wavelength => {
+                Err("the wavelength is not available during normal mapping".into())
+            }
+        }
     }
 }
 
@@ -60,20 +80,57 @@ pub struct RenderContext {
 }
 
 impl ProgramInput for RenderContext {
-    fn normal() -> Result<InputFn<Self>, Box<dyn Error>> {
-        Ok(|_, this, _| this.normal.into())
+    type NumberInput = RenderNumberInput;
+    type VectorInput = SurfaceVectorInput;
+
+    #[inline(always)]
+    fn get_number_input(&self, input: Self::NumberInput) -> f32 {
+        match input {
+            RenderNumberInput::Wavelength => self.wavelength,
+        }
     }
-    fn incident() -> Result<InputFn<Self>, Box<dyn Error>> {
-        Ok(|_, this, _| this.incident.into())
-    }
-    fn texture_coordinates() -> Result<InputFn<Self>, Box<dyn Error>> {
-        Ok(|_, this, _| this.texture.into())
+
+    #[inline(always)]
+    fn get_vector_input(&self, input: Self::VectorInput) -> Vector {
+        match input {
+            SurfaceVectorInput::Normal => self.normal.into(),
+            SurfaceVectorInput::Incident => self.incident.into(),
+            SurfaceVectorInput::TextureCoordinates => self.texture.into(),
+        }
     }
 }
 
-impl WavelengthInput for RenderContext {
-    fn wavelength(&self) -> f32 {
-        self.wavelength
+#[derive(Clone, Copy)]
+pub(crate) enum RenderNumberInput {
+    Wavelength,
+}
+
+impl TryFrom<NumberInput> for RenderNumberInput {
+    type Error = Cow<'static, str>;
+
+    fn try_from(value: NumberInput) -> Result<Self, Self::Error> {
+        match value {
+            NumberInput::Wavelength => Ok(RenderNumberInput::Wavelength),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum SurfaceVectorInput {
+    Normal,
+    Incident,
+    TextureCoordinates,
+}
+
+impl TryFrom<VectorInput> for SurfaceVectorInput {
+    type Error = Cow<'static, str>;
+
+    fn try_from(value: VectorInput) -> Result<Self, Self::Error> {
+        match value {
+            VectorInput::Normal => Ok(SurfaceVectorInput::Normal),
+            VectorInput::Incident => Ok(SurfaceVectorInput::Incident),
+            VectorInput::TextureCoordinates => Ok(SurfaceVectorInput::TextureCoordinates),
+        }
     }
 }
 

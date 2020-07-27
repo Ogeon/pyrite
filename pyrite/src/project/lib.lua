@@ -190,12 +190,18 @@ function rgb(red, green, blue)
     return properties
 end
 
-function texture(path, encoding)
+function texture(path, ...)
     local properties = {
         type = "texture",
         path = path,
-        encoding = encoding or "srgb",
+        linear = false,
+        mono = false,
     }
+
+    for _, modifier in ipairs({...}) do
+        if type(modifier) == "string" then properties[modifier] = true end
+    end
+
     _pyrite.make_expression(properties)
 
     return properties

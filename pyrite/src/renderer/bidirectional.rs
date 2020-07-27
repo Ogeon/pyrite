@@ -14,7 +14,7 @@ use crate::tracer::{trace, Bounce, BounceType, Light};
 use crate::utils::pairs;
 use crate::{
     math::DIST_EPSILON,
-    project::program::{ExecutionContext, Resources},
+    program::{ExecutionContext, Resources},
     world::World,
 };
 
