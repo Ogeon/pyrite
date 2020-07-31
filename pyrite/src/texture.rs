@@ -80,57 +80,58 @@ impl<T> Texture<T> {
         let height_f = self.height as f32;
 
         let x = position.x * width_f - 0.5;
-        let x2 = x.floor() as i64;
-        let x1 = x2 - 1;
-        let x3 = x2 + 1;
-        let x4 = x2 + 2;
+        let x_floor = x.floor();
 
-        let y = 1.0 - (position.y * height_f - 0.5);
-        let y2 = y.floor() as i64;
-        let y1 = y2 - 1;
-        let y3 = y2 + 1;
-        let y4 = y2 + 2;
+        let x2 = (x_floor as isize).rem_euclid(self.width as isize) as usize;
+        let x1 = if x2 == 0 { self.width - 1 } else { x2 - 1 };
+        let x3 = if x2 == self.width - 1 { 0 } else { x2 + 1 };
+        let x4 = if x3 == self.width - 1 { 0 } else { x3 + 1 };
 
-        let x = x.rem_euclid(1.0);
-        let x1 = x1.rem_euclid(self.width as i64) as usize;
-        let x2 = x2.rem_euclid(self.width as i64) as usize;
-        let x3 = x3.rem_euclid(self.width as i64) as usize;
-        let x4 = x4.rem_euclid(self.width as i64) as usize;
+        let y = (1.0 - position.y) * height_f - 0.5;
+        let y_floor = y.floor();
 
-        let y = y.rem_euclid(1.0);
-        let y1 = y1.rem_euclid(self.height as i64) as usize;
-        let y2 = y2.rem_euclid(self.height as i64) as usize;
-        let y3 = y3.rem_euclid(self.height as i64) as usize;
-        let y4 = y4.rem_euclid(self.height as i64) as usize;
+        let y2 = (y_floor as isize).rem_euclid(self.height as isize) as usize;
+        let y1 = if y2 == 0 { self.height - 1 } else { y2 - 1 };
+        let y3 = if y2 == self.height - 1 { 0 } else { y2 + 1 };
+        let y4 = if y3 == self.height - 1 { 0 } else { y3 + 1 };
 
-        let points = [
+        let points = if x4 > 2 {
             [
-                self.color_at(x1, y1),
-                self.color_at(x2, y1),
-                self.color_at(x3, y1),
-                self.color_at(x4, y1),
-            ],
+                self.color_array_at(x1, y1),
+                self.color_array_at(x1, y2),
+                self.color_array_at(x1, y3),
+                self.color_array_at(x1, y4),
+            ]
+        } else {
             [
-                self.color_at(x1, y2),
-                self.color_at(x2, y2),
-                self.color_at(x3, y2),
-                self.color_at(x4, y2),
-            ],
-            [
-                self.color_at(x1, y3),
-                self.color_at(x2, y3),
-                self.color_at(x3, y3),
-                self.color_at(x4, y3),
-            ],
-            [
-                self.color_at(x1, y4),
-                self.color_at(x2, y4),
-                self.color_at(x3, y4),
-                self.color_at(x4, y4),
-            ],
-        ];
+                [
+                    self.color_at(x1, y1),
+                    self.color_at(x2, y1),
+                    self.color_at(x3, y1),
+                    self.color_at(x4, y1),
+                ],
+                [
+                    self.color_at(x1, y2),
+                    self.color_at(x2, y2),
+                    self.color_at(x3, y2),
+                    self.color_at(x4, y2),
+                ],
+                [
+                    self.color_at(x1, y3),
+                    self.color_at(x2, y3),
+                    self.color_at(x3, y3),
+                    self.color_at(x4, y3),
+                ],
+                [
+                    self.color_at(x1, y4),
+                    self.color_at(x2, y4),
+                    self.color_at(x3, y4),
+                    self.color_at(x4, y4),
+                ],
+            ]
+        };
 
-        bicubic_interpolate(points, x, y)
+        bicubic_interpolate(points, x - x_floor, y - y_floor)
     }
 
     #[inline(always)]
@@ -139,6 +140,22 @@ impl<T> Texture<T> {
         T: Copy,
     {
         self.data[x + y * self.width]
+    }
+
+    #[inline(always)]
+    fn color_array_at(&self, x: usize, y: usize) -> [T; 4]
+    where
+        T: Copy,
+    {
+        let from = x + y * self.width;
+        let to = from + 4;
+
+        assert!(to <= self.data.len());
+
+        match self.data[from..to] {
+            [a, b, c, d] => [a, b, c, d],
+            _ => unreachable!(),
+        }
     }
 }
 
