@@ -1,20 +1,22 @@
 use rand::{Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
-use super::algorithm::{make_tiles, Tile};
+use super::{
+    algorithm::{contribute, make_tiles, Tile},
+    LocalProgress, Progress, Renderer, TaskRunner,
+};
 use crate::cameras::Camera;
 use crate::film::{Film, Sample};
-use crate::renderer::algorithm::contribute;
-use crate::renderer::{Renderer, Status, WorkPool};
 use crate::tracer::{trace, Light};
 use crate::{
     program::{ExecutionContext, Resources},
     world::World,
 };
+use std::time::{Duration, Instant};
 
-pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
+pub(crate) fn render<F: FnMut(Progress<'_>)>(
     film: &Film,
-    workers: &mut W,
+    task_runner: TaskRunner,
     mut on_status: F,
     renderer: &Renderer,
     world: &World,
@@ -25,8 +27,8 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
         XorShiftRng::from_rng(rand::thread_rng()).expect("could not generate RNG")
     }
 
-    let status_message = "rendering";
-    on_status(Status {
+    let status_message = "Rendering";
+    on_status(Progress {
         progress: 0,
         message: &status_message,
     });
@@ -36,14 +38,16 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
     let mut progress: usize = 0;
     let num_tiles = tiles.len();
 
-    workers.do_work(
+    task_runner.run_tasks(
         tiles.into_iter().map(|f| (f, gen_rng())),
-        |(tile, rng)| {
-            render_tile(rng, tile, film, camera, world, resources, renderer);
+        |index, (tile, rng), progress| {
+            render_tile(
+                index, rng, tile, film, camera, world, resources, renderer, progress,
+            );
         },
         |_, _| {
             progress += 1;
-            on_status(Status {
+            on_status(Progress {
                 progress: ((progress * 100) / num_tiles) as u8,
                 message: &status_message,
             });
@@ -52,6 +56,7 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
 }
 
 fn render_tile<R: Rng>(
+    index: usize,
     mut rng: R,
     tile: Tile,
     film: &Film,
@@ -59,12 +64,23 @@ fn render_tile<R: Rng>(
     world: &World,
     resources: Resources,
     renderer: &Renderer,
+    progress: LocalProgress,
 ) {
     let mut additional_samples = Vec::with_capacity(renderer.spectrum_samples as usize - 1);
     let mut path = Vec::with_capacity(renderer.bounces as usize);
     let mut exe = ExecutionContext::new(resources);
 
-    for _ in 0..(tile.area() * renderer.pixel_samples as usize) {
+    let iterations = tile.area() as u64 * renderer.pixel_samples as u64;
+    let message = format!("Tile {}", index + 1);
+    let mut last_progress = Instant::now();
+    progress.show(&message, iterations);
+
+    for i in 0..iterations {
+        if Instant::now() - last_progress > Duration::from_millis(100) {
+            progress.set_progress(i);
+            last_progress = Instant::now();
+        }
+
         additional_samples.clear();
         path.clear();
 

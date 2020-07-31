@@ -4,6 +4,7 @@ use crate::cameras;
 use crate::world;
 
 use crate::{film::Film, program::Resources};
+use indicatif::ProgressBar;
 
 mod algorithm;
 mod bidirectional;
@@ -71,10 +72,10 @@ impl Renderer {
         }
     }
 
-    pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
+    pub(crate) fn render<F: FnMut(Progress<'_>)>(
         &self,
         film: &Film,
-        workers: &mut W,
+        task_runner: TaskRunner,
         on_status: F,
         camera: &cameras::Camera,
         world: &world::World,
@@ -82,13 +83,27 @@ impl Renderer {
     ) {
         match self.algorithm {
             Algorithm::Simple => {
-                simple::render(film, workers, on_status, self, world, camera, resources)
+                simple::render(film, task_runner, on_status, self, world, camera, resources)
             }
             Algorithm::Bidirectional(ref config) => bidirectional::render(
-                film, workers, on_status, self, config, world, camera, resources,
+                film,
+                task_runner,
+                on_status,
+                self,
+                config,
+                world,
+                camera,
+                resources,
             ),
             Algorithm::PhotonMapping(ref config) => photon_mapping::render(
-                film, workers, on_status, self, config, world, camera, resources,
+                film,
+                task_runner,
+                on_status,
+                self,
+                config,
+                world,
+                camera,
+                resources,
             ),
         }
     }
@@ -100,59 +115,116 @@ pub enum Algorithm {
     PhotonMapping(photon_mapping::Config),
 }
 
-pub trait WorkPool {
-    fn do_work<I, T, U, W, R>(&mut self, work: I, worker: W, with_result: R)
-    where
-        T: Send,
-        U: Send,
-        I: Send,
-        I: IntoIterator<Item = T>,
-        I::IntoIter: Iterator + Send,
-        W: Send + Sync,
-        W: Fn(T) -> U,
-        R: FnMut(usize, U);
+pub(crate) struct TaskRunner {
+    pub(crate) threads: usize,
+    pub(crate) progress: ProgressIndicator,
 }
 
-pub struct RayonPool;
-impl WorkPool for RayonPool {
-    fn do_work<I, T, U, W, R>(&mut self, work: I, worker: W, mut with_result: R)
+impl TaskRunner {
+    fn run_tasks<I, F, R, T>(&self, tasks: I, do_work: F, mut with_result: R)
     where
+        I: IntoIterator + Send,
+        I::Item: Send,
+        F: Fn(usize, I::Item, LocalProgress) -> T + Send + Sync,
+        R: FnMut(usize, T),
         T: Send,
-        U: Send,
-        I: Send,
-        I: IntoIterator<Item = T>,
-        I::IntoIter: Iterator + Send,
-        W: Send + Sync,
-        W: Fn(T) -> U,
-        R: FnMut(usize, U),
     {
-        use rayon::prelude::*;
+        crossbeam::thread::scope(|scope| {
+            let (result_receiver, sender_receiver) = {
+                let (sender_sender, sender_receiver) = crossbeam::channel::bounded(self.threads);
+                let (result_sender, result_receiver) = crossbeam::channel::unbounded();
 
-        let (sender, receiver) = crossbeam::channel::unbounded();
+                for thread_id in 0..self.threads {
+                    let sender_sender = sender_sender.clone();
+                    let result_sender = result_sender.clone();
+                    let do_work = &do_work;
+                    let progress = &self.progress;
 
-        crossbeam::scope(|scope| {
+                    scope.spawn(move |_| {
+                        let (task_sender, task_receiver) = crossbeam::channel::bounded(1);
+                        if let Err(_) = sender_sender.send(task_sender.clone()) {
+                            return;
+                        }
+
+                        while let Ok(Message::Task(index, task)) = task_receiver.recv() {
+                            let result =
+                                do_work(index, task, progress.get_local_progress_bar(thread_id));
+
+                            if let Err(_) = result_sender.send((index, result)) {
+                                return;
+                            }
+
+                            if let Err(_) = sender_sender.send(task_sender.clone()) {
+                                return;
+                            }
+                        }
+                    });
+                }
+
+                (result_receiver, sender_receiver)
+            };
+
             scope.spawn(move |_| {
-                work.into_iter()
-                    .enumerate()
-                    .par_bridge()
-                    .for_each(|(index, input)| sender.send((index, worker(input))).unwrap());
+                for (index, task) in tasks.into_iter().enumerate() {
+                    if let Ok(sender) = sender_receiver.recv() {
+                        sender.send(Message::Task(index, task)).unwrap(); // workers should never close the channel
+                    }
+                }
+
+                for sender in sender_receiver {
+                    sender.send(Message::Stop).unwrap(); // workers should never close the channel
+                }
             });
 
-            for (index, result) in receiver {
+            for (index, result) in result_receiver {
                 with_result(index, result);
             }
         })
         .unwrap();
 
-        /*scope(|scope| {
-            for (index, result) in self.unordered_map(&scope, work, worker) {
-                with_result(index, result);
-            }
-        });*/
+        self.progress.clear_local_progress();
     }
 }
 
-pub struct Status<'a> {
-    pub progress: u8,
-    pub message: &'a str,
+enum Message<T> {
+    Task(usize, T),
+    Stop,
+}
+
+pub(crate) struct ProgressIndicator {
+    pub bars: Vec<ProgressBar>,
+}
+
+impl ProgressIndicator {
+    pub fn get_local_progress_bar(&self, id: usize) -> LocalProgress {
+        LocalProgress {
+            bar: self.bars[id].clone(),
+        }
+    }
+
+    pub fn clear_local_progress(&self) {
+        for bar in &self.bars {
+            bar.finish_and_clear();
+        }
+    }
+}
+
+pub(crate) struct LocalProgress {
+    bar: ProgressBar,
+}
+
+impl LocalProgress {
+    pub fn show(&self, message: &str, length: u64) {
+        self.bar.set_message(message);
+        self.bar.set_length(length);
+    }
+
+    pub fn set_progress(&self, progress: u64) {
+        self.bar.set_position(progress);
+    }
+}
+
+pub(crate) struct Progress<'a> {
+    pub(crate) progress: u8,
+    pub(crate) message: &'a str,
 }

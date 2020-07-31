@@ -105,7 +105,9 @@ impl<'p> World<'p> {
                     };
 
                     if emissive {
-                        println!("warning: emissive planes may not always produce correct results");
+                        println!(
+                            "Warning: emissive planes may not always produce correct results."
+                        );
                     }
                     planes.push(shape);
                 }
@@ -176,7 +178,7 @@ impl<'p> World<'p> {
                     });
 
                     if emissive {
-                        println!("warning: emissive, distance estimated shapes may not always produce correct results");
+                        println!("Warning: emissive, distance estimated shapes may not always produce correct results.");
                     }
                     objects.push(shape);
                 }
@@ -191,7 +193,7 @@ impl<'p> World<'p> {
                     let scale = scale.evaluate_or(eval_context, 1.0)?;
                     let obj = meshes.get(file);
                     for object in &obj.objects {
-                        println!("adding object '{}'", object.name);
+                        println!("Adding object '{}'.", object.name);
 
                         let (object_material, emissive) = match materials.remove(&object.name) {
                             Some(m) => {
@@ -247,12 +249,12 @@ impl<'p> World<'p> {
         }
 
         println!(
-            "the scene contains {} objects",
+            "The scene contains {} objects.",
             planes.len() + objects.len()
         );
-        println!("building BVH... ");
+        println!("Building BVH... ");
         let tree = Bvh::new(objects);
-        println!("done building BVH");
+        println!("Done building BVH.");
 
         Ok(World {
             sky,

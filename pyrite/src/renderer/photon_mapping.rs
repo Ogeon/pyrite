@@ -5,12 +5,11 @@ use rand_xorshift::XorShiftRng;
 
 use cgmath::{EuclideanSpace, InnerSpace, Point2, Point3, Vector3};
 
-use super::algorithm::make_tiles;
+use super::{algorithm::make_tiles, Progress, Renderer, TaskRunner};
 use crate::cameras::Camera;
 use crate::film::{DetachedPixel, Film, Sample};
 use crate::lamp::Surface;
 use crate::renderer::algorithm::contribute;
-use crate::renderer::{Renderer, Status, WorkPool};
 use crate::spatial::kd_tree::{self, KdTree};
 use crate::spatial::Dim3;
 use crate::tracer::{trace, Bounce, BounceType, Light, RenderContext};
@@ -21,9 +20,9 @@ use crate::{
     world::World,
 };
 
-pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
+pub(crate) fn render<F: FnMut(Progress<'_>)>(
     film: &Film,
-    workers: &mut W,
+    task_runner: TaskRunner,
     mut on_status: F,
     renderer: &Renderer,
     config: &Config,
@@ -52,14 +51,14 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
             num_passes
         );
         let mut camera_bounces = Vec::with_capacity(num_tiles);
-        on_status(Status {
+        on_status(Progress {
             progress: 0,
             message: &status_message,
         });
         progress = 0;
-        workers.do_work(
+        task_runner.run_tasks(
             tiles.iter().map(|f| (f, gen_rng())),
-            |(tile, mut rng)| {
+            |_index, (tile, mut rng), _progress| {
                 let mut all_bounces = vec![];
                 let mut bounces = Vec::with_capacity(renderer.bounces as usize);
                 let mut exe = ExecutionContext::new(resources);
@@ -154,7 +153,7 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
             |_i, bounces| {
                 camera_bounces.extend(bounces);
                 progress += 1;
-                on_status(Status {
+                on_status(Progress {
                     progress: ((progress * 100) / num_tiles) as u8,
                     message: &status_message,
                 });
@@ -168,17 +167,17 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                 photon_pass + pixel_pass as usize * config.photon_passes,
                 num_passes
             );
-            on_status(Status {
+            on_status(Progress {
                 progress: 0,
                 message: &status_message,
             });
             progress = 0;
-            workers.do_work(
+            task_runner.run_tasks(
                 BatchRange::new(0..config.photons, 5000).map(|batch| {
                     let rng: XorShiftRng = gen_rng();
                     (batch, rng)
                 }),
-                |(num_rays, mut rng)| {
+                |_index, (num_rays, mut rng), _progress| {
                     let mut processed = vec![];
                     let mut bounces = Vec::with_capacity(renderer.bounces as usize);
                     let mut exe = ExecutionContext::new(resources);
@@ -292,7 +291,7 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                 |_, (n, bounces)| {
                     light_bounces.extend(bounces);
                     progress += n;
-                    on_status(Status {
+                    on_status(Progress {
                         progress: ((progress as f32 / config.photons as f32) * 100.0) as u8,
                         message: &status_message,
                     });
@@ -306,15 +305,15 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                 photon_pass + pixel_pass as usize * config.photon_passes,
                 num_passes
             );
-            on_status(Status {
+            on_status(Progress {
                 progress: 0,
                 message: &status_message,
             });
             progress = 0;
 
-            workers.do_work(
+            task_runner.run_tasks(
                 camera_bounces.chunks(5000).map(|b| (b, gen_rng())),
-                |(bounces, mut rng)| {
+                |_index, (bounces, mut rng), _progress| {
                     let mut exe = ExecutionContext::new(resources);
 
                     for hit in bounces {
@@ -393,7 +392,7 @@ pub(crate) fn render<W: WorkPool, F: FnMut(Status<'_>)>(
                 },
                 |_, n| {
                     progress += n;
-                    on_status(Status {
+                    on_status(Progress {
                         progress: ((progress as f32 / camera_bounces.len() as f32) * 100.0) as u8,
                         message: &status_message,
                     });

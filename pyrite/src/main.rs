@@ -8,7 +8,6 @@ use std::{
     borrow::Cow,
     convert::TryFrom,
     error::Error,
-    io::{stdout, Write},
     ops::{Add, AddAssign, Div, Mul},
     path::Path,
 };
@@ -18,6 +17,8 @@ use cgmath::Vector2;
 use palette::{ComponentWise, FromColor, LinSrgb, Pixel, Srgb, Xyz};
 
 use bumpalo::Bump;
+
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use film::{Film, Spectrum};
 use program::{
@@ -30,6 +31,7 @@ use project::{
     meshes::Meshes,
     ProjectData,
 };
+use renderer::ProgressIndicator;
 
 mod cameras;
 mod film;
@@ -55,6 +57,8 @@ fn main() {
     let arena = Bump::new();
 
     if let Some(project_path) = args.next() {
+        let loading_started = Instant::now();
+
         let ProjectData {
             expressions,
             meshes,
@@ -75,10 +79,32 @@ fn main() {
             textures: &textures,
         };
 
-        match parse_project(project, programs, &expressions, &meshes, resources, &arena) {
-            Ok((image, context)) => render(image, context, project_path),
+        let parse_result =
+            parse_project(project, programs, &expressions, &meshes, resources, &arena);
+        let loading_ended = Instant::now();
+
+        match parse_result {
+            Ok((image, context)) => {
+                let rendering_started = Instant::now();
+                render(image, context, project_path);
+                let rendering_ended = Instant::now();
+
+                println!("Done.");
+                println!(
+                    "Project loading: {}",
+                    indicatif::FormattedDuration(loading_ended - loading_started)
+                );
+                println!(
+                    "Rendering: {}",
+                    indicatif::FormattedDuration(rendering_ended - rendering_started)
+                );
+                println!(
+                    "Total: {}",
+                    indicatif::FormattedDuration(rendering_ended - loading_started)
+                );
+            }
             Err(error) => eprintln!("error while parsing project: {}", error),
-        };
+        }
     } else {
         eprintln!("usage: {} project_file", name);
     }
@@ -120,7 +146,30 @@ fn render<P: AsRef<Path>>(
 ) {
     let image_size = Vector2::new(image_settings.width, image_settings.height);
 
-    let mut pool = renderer::RayonPool;
+    let progress = MultiProgress::new();
+
+    let progress_style =
+        ProgressStyle::default_bar().template("[Thread {prefix:>3}] {bar} {percent:>3}% {msg:!}");
+    let task_runner = renderer::TaskRunner {
+        threads: config.renderer.threads,
+        progress: ProgressIndicator {
+            bars: (1..)
+                .map(|id| {
+                    let bar = progress.add(ProgressBar::new(0).with_style(progress_style.clone()));
+                    bar.set_prefix(&id.to_string());
+                    bar
+                })
+                .take(config.renderer.threads)
+                .collect(),
+        },
+    };
+
+    let global_progress = progress.add(ProgressBar::new(100)).with_style(
+        ProgressStyle::default_bar()
+            .template("\n{msg} {wide_bar} {percent:>3}% [{elapsed_precise}]"),
+    );
+
+    let preview_progress = progress.add(ProgressBar::new_spinner());
 
     let mut pixels = image::ImageBuffer::new(image_size.x, image_size.y);
 
@@ -195,98 +244,77 @@ fn render<P: AsRef<Path>>(
     let mut last_print: Option<Instant> = None;
     let mut last_image: Instant = Instant::now();
 
-    config.renderer.render(
-        &film,
-        &mut pool,
-        |status| {
-            let time_since_print = last_print.map(|last_print| Instant::now() - last_print);
+    crossbeam::thread::scope(|scope| {
+        scope.spawn(|_| {
+            config.renderer.render(
+                &film,
+                task_runner,
+                |status| {
+                    let time_since_print = last_print.map(|last_print| Instant::now() - last_print);
 
-            let should_print = time_since_print
-                .map(|time| time.as_millis() >= 500)
-                .unwrap_or(true);
+                    let should_print = time_since_print
+                        .map(|time| time.as_millis() >= 500)
+                        .unwrap_or(true);
 
-            if should_print {
-                print!("\r{}... {:2}%", status.message, status.progress);
-                stdout().flush().unwrap();
-                last_print = Some(Instant::now());
+                    if should_print {
+                        global_progress.set_message(status.message);
+                        global_progress.set_position(status.progress as u64);
 
-                let time_since_image = Instant::now() - last_image;
-                if time_since_image.as_secs() >= 20 {
-                    let begin_iter = Instant::now();
-                    for (spectrum, pixel) in film.developed_pixels().zip(pixels.pixels_mut()) {
-                        let rgb: Srgb<u8> = if let Some((red, green, blue)) = &rgb_curves {
-                            let color = spectrum_to_rgb(30.0, spectrum, &red, &green, &blue);
-                            Srgb::from_linear(color).into_format()
-                        } else {
-                            let color = spectrum_to_xyz(
-                                spectrum.spectrum_width(),
-                                30.0,
-                                spectrum,
-                                |s, w| spectrum_get(s, w),
-                            );
-                            Srgb::from_color(color).into_format()
-                        };
+                        last_print = Some(Instant::now());
 
-                        *pixel = image::Rgb(rgb.into_raw());
+                        let time_since_image = Instant::now() - last_image;
+                        if time_since_image.as_secs() >= 20 {
+                            let begin_iter = Instant::now();
+                            preview_progress.set_message("Updating preview...");
+
+                            for (spectrum, pixel) in
+                                film.developed_pixels().zip(pixels.pixels_mut())
+                            {
+                                let rgb: Srgb<u8> = if let Some((red, green, blue)) = &rgb_curves {
+                                    let color =
+                                        spectrum_to_rgb(30.0, spectrum, &red, &green, &blue);
+                                    Srgb::from_linear(color).into_format()
+                                } else {
+                                    let color = spectrum_to_xyz(
+                                        spectrum.spectrum_width(),
+                                        30.0,
+                                        spectrum,
+                                        |s, w| spectrum_get(s, w),
+                                    );
+                                    Srgb::from_color(color).into_format()
+                                };
+
+                                *pixel = image::Rgb(rgb.into_raw());
+                            }
+                            let diff = (Instant::now() - begin_iter).as_millis() as f64 / 1000.0;
+
+                            if let Err(e) = pixels.save(&render_path) {
+                                preview_progress.finish_with_message(&format!(
+                                    "Error while writing preview: {}",
+                                    e
+                                ));
+                            } else {
+                                preview_progress.finish_with_message(&format!(
+                                    "Preview updated ({} seconds)",
+                                    diff
+                                ));
+                            }
+                            last_image = Instant::now();
+                        }
                     }
-                    let diff = (Instant::now() - begin_iter).as_millis() as f64 / 1000.0;
+                },
+                &config.camera,
+                &config.world,
+                config.resources,
+            );
+            global_progress.finish_and_clear();
+        });
 
-                    print!(
-                        "\r{}... {:2}% - updated image in {} seconds",
-                        status.message, status.progress, diff
-                    );
-                    stdout().flush().unwrap();
-                    if let Err(e) = pixels.save(&render_path) {
-                        println!("\rerror while writing image: {}", e);
-                    }
-                    last_image = Instant::now();
-                }
-            }
-        },
-        &config.camera,
-        &config.world,
-        config.resources,
-    );
+        progress.join_and_clear().unwrap();
+    })
+    .unwrap();
 
-    /*crossbeam::scope(|scope| {
-        print!(" 0%");
-        stdout().flush().unwrap();
-
-        let mut last_print = PreciseTime::now();
-        let num_tiles = film.num_tiles();
-
-        for (i, _) in pool.unordered_map(scope, &film, &f).enumerate() {
-            print!("\r{:2}%", (i * 100) / num_tiles);
-            stdout().flush().unwrap();
-            if last_print.to(PreciseTime::now()).num_seconds() >= 4 {
-                let begin_iter = PreciseTime::now();
-                film.with_changed_pixels(|position, spectrum| {
-                    let r = clamp_channel(calculate_channel(&spectrum, &red));
-                    let g = clamp_channel(calculate_channel(&spectrum, &green));
-                    let b = clamp_channel(calculate_channel(&spectrum, &blue));
-
-                    unsafe {
-                        pixels.unsafe_put_pixel(position.x as u32, position.y as u32, image::Rgb {
-                            data: [r, g, b]
-                        })
-                    }
-                });
-                let diff = begin_iter.to(PreciseTime::now()).num_milliseconds() as f64 / 1000.0;
-
-                print!("\r{:2}% - updated iamge in {} seconds", (i * 100) / num_tiles, diff);
-                stdout().flush().unwrap();
-                match File::create(&render_path) {
-                    Ok(mut file) => if let Err(e) = image::ImageRgb8(pixels.clone()).save(&mut file, image::PNG) {
-                        println!("\rerror while writing image: {}", e);
-                    },
-                    Err(e) => println!("\rfailed to open/create file for writing: {}", e)
-                }
-                last_print = PreciseTime::now();
-            }
-        }
-    });*/
-
-    println!("\nSaving final result...");
+    println!("Saving final result...");
 
     for (spectrum, pixel) in film.developed_pixels().zip(pixels.pixels_mut()) {
         let rgb: Srgb<u8> = if let Some((red, green, blue)) = &rgb_curves {
@@ -305,8 +333,6 @@ fn render<P: AsRef<Path>>(
     if let Err(e) = pixels.save(&render_path) {
         println!("error while writing image: {}", e);
     }
-
-    println!("Done!")
 }
 
 fn spectrum_to_rgb(
