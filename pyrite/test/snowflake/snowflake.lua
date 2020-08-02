@@ -51,14 +51,14 @@ return {
                 position = vector(0, 150, 50),
                 radius = 30,
                 material = {
-                    surface = material.emission {color = light_source.d65 * 6},
+                    surface = material.emissive {color = light_source.d65 * 6},
                 },
             },
             shape.sphere {
                 position = vector(100, -100, 50),
                 radius = 10,
                 material = {
-                    surface = material.emission {color = light_source.d65 * 3},
+                    surface = material.emissive {color = light_source.d65 * 3},
                 },
             },
             shape.sphere {

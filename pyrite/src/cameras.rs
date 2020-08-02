@@ -12,7 +12,10 @@ use crate::film::Area;
 
 use crate::{
     math::DIST_EPSILON,
-    project::eval_context::{EvalContext, Evaluate, EvaluateOr},
+    project::{
+        eval_context::{EvalContext, Evaluate, EvaluateOr},
+        expressions::Expressions,
+    },
     world::World,
 };
 
@@ -28,8 +31,10 @@ pub(crate) enum Camera {
 impl Camera {
     pub fn from_project(
         project_camera: crate::project::Camera,
-        eval_context: EvalContext,
+        expressions: &Expressions,
     ) -> Result<Self, Box<dyn Error>> {
+        let eval_context = EvalContext { expressions };
+
         match project_camera {
             crate::project::Camera::Perspective {
                 transform,

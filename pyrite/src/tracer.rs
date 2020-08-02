@@ -5,14 +5,14 @@ use collision::Ray3;
 
 use crate::{
     lamp::{self, Lamp},
+    materials::{ProbabilityInput, Scattering},
     math::DIST_EPSILON,
     program::{ExecutionContext, NumberInput, ProgramFor, ProgramInput, VectorInput},
     project::expressions::Vector,
     world::World,
 };
 
-pub(crate) use self::Reflection::{Emit, Reflect};
-use std::{borrow::Cow, convert::TryFrom};
+use std::{borrow::Cow, cell::Cell, convert::TryFrom};
 
 pub type Brdf = fn(ray_in: Vector3<f32>, ray_out: Vector3<f32>, normal: Vector3<f32>) -> f32;
 pub(crate) type LightProgram<'p> = ProgramFor<'p, RenderContext, f32>;
@@ -25,11 +25,6 @@ impl<From> ParametricValue<From, f32> for f32 {
     fn get(&self, _: &From) -> f32 {
         *self
     }
-}
-
-pub(crate) enum Reflection<'a> {
-    Emit(LightProgram<'a>),
-    Reflect(Ray3<f32>, LightProgram<'a>, f32, Option<Brdf>),
 }
 
 pub struct NormalInput {
@@ -136,7 +131,7 @@ impl TryFrom<VectorInput> for SurfaceVectorInput {
 
 pub(crate) struct Bounce<'a> {
     pub ty: BounceType,
-    pub light: Light,
+    pub dispersed: bool,
     pub color: LightProgram<'a>,
     pub incident: Vector3<f32>,
     pub position: Point3<f32>,
@@ -171,7 +166,7 @@ impl BounceType {
 }
 
 pub(crate) struct DirectLight<'a> {
-    pub light: Light,
+    pub dispersed: bool,
     pub color: LightProgram<'a>,
     pub incident: Vector3<f32>,
     pub normal: Vector3<f32>,
@@ -184,29 +179,11 @@ pub struct Light {
     white: bool,
 }
 
-impl Light {
-    pub fn new(wavelength: f32) -> Light {
-        Light {
-            wavelength: wavelength,
-            white: true,
-        }
-    }
-
-    pub fn colored(&mut self) -> f32 {
-        self.white = false;
-        self.wavelength
-    }
-
-    pub fn is_white(&self) -> bool {
-        self.white
-    }
-}
-
 pub(crate) fn trace<'w, R: Rng>(
     path: &mut Vec<Bounce<'w>>,
     rng: &mut R,
     mut ray: Ray3<f32>,
-    mut light: Light,
+    wavelength: f32,
     world: &'w World,
     bounces: u32,
     light_samples: usize,
@@ -228,18 +205,39 @@ pub(crate) fn trace<'w, R: Rng>(
                 let normal = material.apply_normal_map(surface_data.normal, normal_input, exe);
                 let position = intersection.surface_point.position;
 
-                match material.reflect(&mut light, ray, position, normal, rng) {
-                    Reflect(out_ray, color, prob, brdf) => {
+                let component = material.choose_component(rng);
+
+                let probability_input = ProbabilityInput {
+                    wavelength,
+                    wavelength_used: Cell::new(false),
+                    normal,
+                    incident: ray.direction,
+                    texture_coordinate: surface_data.texture,
+                };
+                let component_probability = component.get_probability(exe, &probability_input);
+                let normal_dispersed = probability_input.wavelength_used.get();
+
+                let scattered = component
+                    .bsdf
+                    .scatter(ray.direction, normal, wavelength, rng);
+                match scattered {
+                    Scattering::Reflected {
+                        out_direction,
+                        probability,
+                        dispersed,
+                        brdf,
+                    } => {
                         let direct_light = if let Some(brdf) = brdf {
                             trace_direct(
                                 rng,
                                 light_samples,
-                                light.clone(),
+                                wavelength,
                                 ray.direction,
                                 position,
                                 normal,
                                 world,
                                 brdf,
+                                exe,
                             )
                         } else {
                             vec![]
@@ -248,37 +246,37 @@ pub(crate) fn trace<'w, R: Rng>(
                         sample_light = brdf.is_none() || light_samples == 0;
 
                         let bounce_type = if let Some(brdf) = brdf {
-                            BounceType::Diffuse(brdf, out_ray.direction)
+                            BounceType::Diffuse(brdf, out_direction)
                         } else {
                             BounceType::Specular
                         };
 
                         let bounce = Bounce {
                             ty: bounce_type,
-                            light: light.clone(),
-                            color,
+                            dispersed: dispersed || normal_dispersed,
+                            color: component.bsdf.color,
                             incident: ray.direction,
                             position,
                             normal,
                             texture: surface_data.texture,
-                            probability: prob,
+                            probability: probability * component_probability,
                             direct_light,
                         };
 
-                        ray = out_ray;
+                        ray = Ray3::new(position, out_direction);
                         path.push(bounce);
                     }
-                    Emit(color) => {
+                    Scattering::Emitted => {
                         if sample_light {
                             path.push(Bounce {
                                 ty: BounceType::Emission,
-                                light,
-                                color,
+                                dispersed: normal_dispersed,
+                                color: component.bsdf.color,
                                 incident: ray.direction,
                                 position,
                                 normal,
                                 texture: surface_data.texture,
-                                probability: 1.0,
+                                probability: component_probability,
                                 direct_light: vec![],
                             });
                         }
@@ -296,7 +294,7 @@ pub(crate) fn trace<'w, R: Rng>(
                 let color = directional.unwrap_or_else(|| world.sky);
                 path.push(Bounce {
                     ty: BounceType::Emission,
-                    light,
+                    dispersed: false,
                     color,
                     incident: ray.direction,
                     position: Point3::from_vec(&ray.direction * std::f32::INFINITY),
@@ -315,12 +313,13 @@ pub(crate) fn trace<'w, R: Rng>(
 fn trace_direct<'w, R: Rng>(
     rng: &mut R,
     samples: usize,
-    light: Light,
+    wavelength: f32,
     ray_in: Vector3<f32>,
     position: Point3<f32>,
     normal: Vector3<f32>,
     world: &'w World,
     brdf: Brdf,
+    exe: &mut ExecutionContext<'w>,
 ) -> Vec<DirectLight<'w>> {
     if let Some((lamp, probability)) = world.pick_lamp(rng) {
         let normal = if ray_in.dot(normal) < 0.0 {
@@ -340,8 +339,6 @@ fn trace_direct<'w, R: Rng>(
                     weight,
                 } = lamp.sample(rng, position);
 
-                let mut light = light.clone();
-
                 let ray_out = Ray3::new(position, direction);
 
                 let cos_out = normal.dot(ray_out.direction).max(0.0);
@@ -358,33 +355,44 @@ fn trace_direct<'w, R: Rng>(
                     };
 
                     if !blocked {
-                        let (color, target_normal) = match surface {
+                        let (color, material_probability, dispersed, target_normal) = match surface
+                        {
                             lamp::Surface::Physical {
                                 normal: target_normal,
                                 material,
-                                ..
+                                texture,
                             } => {
-                                let color = material.get_emission(
-                                    &mut light,
-                                    ray_out.direction,
+                                let component = material.choose_emissive(rng);
+                                let input = ProbabilityInput {
+                                    wavelength,
+                                    wavelength_used: Cell::new(false),
+                                    normal: target_normal,
+                                    incident: ray_out.direction,
+                                    texture_coordinate: texture,
+                                };
+
+                                let probability = component.get_probability(exe, &input);
+
+                                (
+                                    component.bsdf.color,
+                                    probability,
+                                    input.wavelength_used.get(),
                                     target_normal,
-                                    rng,
-                                );
-                                (color, target_normal)
+                                )
                             }
                             lamp::Surface::Color(color) => {
                                 let target_normal = -ray_out.direction;
-                                (Some(color), target_normal)
+                                (color, 1.0, false, target_normal)
                             }
                         };
                         let scale = weight * probability * brdf(ray_in, normal, ray_out.direction);
 
-                        return color.map(|color| DirectLight {
-                            light,
+                        return Some(DirectLight {
+                            dispersed,
                             color,
                             incident: ray_out.direction,
                             normal: target_normal,
-                            probability: scale,
+                            probability: scale * material_probability,
                         });
                     }
                 }

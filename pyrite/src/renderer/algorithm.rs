@@ -20,7 +20,7 @@ pub(crate) fn contribute<'a>(
 ) -> bool {
     let &Bounce {
         ref ty,
-        ref light,
+        dispersed,
         color,
         incident,
         position: _,
@@ -30,7 +30,7 @@ pub(crate) fn contribute<'a>(
         ref direct_light,
     } = bounce;
 
-    if !light.is_white() && require_white {
+    if dispersed && require_white {
         return false;
     }
 
@@ -50,14 +50,14 @@ pub(crate) fn contribute<'a>(
 
         for direct in direct_light {
             let &tracer::DirectLight {
-                light: ref l_light,
+                dispersed: l_dispersed,
                 color: l_color,
                 incident: l_incident,
                 normal: l_normal,
                 probability: l_probability,
             } = direct;
 
-            if l_light.is_white() || !require_white {
+            if !l_dispersed || !require_white {
                 let context = RenderContext {
                     wavelength: sample.wavelength,
                     incident: l_incident,

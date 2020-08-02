@@ -1,7 +1,10 @@
 local colors = require "colors"
 local lamp = require "lamp"
 
-local light = {surface = material.emission {color = lamp.color * 3}}
+local light = {
+    surface = material.emissive {color = lamp.color * 3} +
+        material.diffuse {color = 0.78},
+}
 
 local white = {surface = material.diffuse {color = colors.white}}
 
@@ -49,7 +52,7 @@ return {
             },
             shape.ray_marched {
                 shape = ray_marched.quaternion_julia {
-                    iterations = 50,
+                    iterations = 25,
                     threshold = 4,
                     constant = vector(-0.2, 0.8, 0, 0),
                     slice_plane = 0,
@@ -62,11 +65,10 @@ return {
                 },
 
                 material = {
-                    surface = fresnel_mix {
-                        refract = material.diffuse {color = 0.8},
-                        reflect = material.mirror {color = 1},
-                        ior = 1.5,
-                    },
+                    surface = mix(
+                        material.mirror {color = 1},
+                            material.diffuse {color = 0.8}, fresnel(1.5)
+                    ),
                 },
             },
         },

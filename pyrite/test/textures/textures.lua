@@ -1,7 +1,15 @@
 local light_ball = shape.sphere {
-    material = {surface = material.emission {color = light_source.d65 * 20}},
+    material = {surface = material.emissive {color = light_source.d65 * 20}},
     position = vector(0, 0, 0),
     radius = 1,
+}
+
+local floor_material = {
+    surface = mix(
+        material.mirror {color = 1},
+            material.diffuse {color = texture("tiles/color.jpg")}, fresnel(1.5)
+    ),
+    normal_map = texture("tiles/normal.jpg", "linear") * vector(1, -1, 1),
 }
 
 return {
@@ -29,17 +37,7 @@ return {
             shape.plane {
                 origin = vector(),
                 normal = vector {y = 1},
-                material = {
-                    surface = fresnel_mix {
-                        ior = 1.5,
-                        reflect = material.mirror {color = 1},
-                        refract = material.diffuse {
-                            color = texture("tiles/color.jpg"),
-                        },
-                    },
-                    normal_map = texture("tiles/normal.jpg", "linear") *
-                        vector(1, -1, 1),
-                },
+                material = floor_material,
                 texture_scale = 5,
             },
             light_ball:with{position = vector(-1, 12, 2), radius = 3},

@@ -1,6 +1,3 @@
-use std;
-use std::sync::Arc;
-
 use std::f32::INFINITY;
 
 use cgmath::{
@@ -11,11 +8,12 @@ use collision::{Aabb, Aabb3, Continuous, Ray3};
 
 use rand::Rng;
 
-use crate::tracer::ParametricValue;
-
-use crate::materials::Material;
-use crate::math::{self, DIST_EPSILON};
-use crate::spatial::bvh::Bounded;
+use crate::{
+    materials::Material,
+    math::{self, DIST_EPSILON},
+    spatial::bvh::Bounded,
+    tracer::ParametricValue,
+};
 
 pub(crate) use self::Shape::{RayMarched, Sphere, Triangle};
 
@@ -44,7 +42,7 @@ pub(crate) enum Shape<'p> {
         v3: Vertex,
         edge1: Vector3<f32>,
         edge2: Vector3<f32>,
-        material: Arc<Material<'p>>,
+        material: Material<'p>,
     },
     RayMarched {
         estimator: DistanceEstimator,
@@ -157,11 +155,11 @@ impl<'p> Shape<'p> {
         }
     }
 
-    pub fn get_material(&self) -> &Material {
+    pub fn get_material(&self) -> Material {
         match *self {
-            Sphere { ref material, .. } => material,
-            Triangle { ref material, .. } => &**material,
-            RayMarched { ref material, .. } => material,
+            Sphere { material, .. } => material,
+            Triangle { material, .. } => material,
+            RayMarched { material, .. } => material,
         }
     }
 
@@ -496,10 +494,10 @@ impl<'a> SurfacePoint<'a> {
         }
     }
 
-    pub fn get_material(&self) -> &'a Material<'a> {
+    pub fn get_material(&self) -> Material<'a> {
         match self.shape {
             ShapeSurfacePoint::Sphere { shape } => shape.get_material(),
-            ShapeSurfacePoint::Plane { shape } => &shape.material,
+            ShapeSurfacePoint::Plane { shape } => shape.material,
             ShapeSurfacePoint::Triangle { shape, .. } => shape.get_material(),
             ShapeSurfacePoint::RayMarched { shape, .. } => shape.get_material(),
         }

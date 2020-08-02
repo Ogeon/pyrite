@@ -432,6 +432,46 @@ impl<'p> ProgramCompiler<'p> {
                         }
                     }
                 }
+                ExpressionStatus::Pending(&ComplexExpression::Clamp { value, min, max }) => {
+                    let value = try_get_number_value(
+                        value,
+                        &mut status,
+                        expressions,
+                        &mut instructions,
+                        &mut input_numbers,
+                        &mut next_number_register,
+                    )?;
+                    let value = unwrap_or_push!(value, expression_id, pending);
+
+                    let min = try_get_number_value(
+                        min,
+                        &mut status,
+                        expressions,
+                        &mut instructions,
+                        &mut input_numbers,
+                        &mut next_number_register,
+                    )?;
+                    let min = unwrap_or_push!(min, expression_id, pending);
+
+                    let max = try_get_number_value(
+                        max,
+                        &mut status,
+                        expressions,
+                        &mut instructions,
+                        &mut input_numbers,
+                        &mut next_number_register,
+                    )?;
+                    let max = unwrap_or_push!(max, expression_id, pending);
+
+                    instructions.push(Instruction::Clamp { value, min, max });
+                    status.insert(
+                        expression_id,
+                        ExpressionStatus::Done(Register::Number(NumberRegister(
+                            next_number_register,
+                        ))),
+                    );
+                    next_number_register += 1;
+                }
                 ExpressionStatus::Done(_) => {}
             }
         }

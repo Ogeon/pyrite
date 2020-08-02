@@ -96,26 +96,6 @@ function _pyrite.expression_mt:__div(other)
     return _pyrite.binary_operator("div", self, other)
 end
 
-function _pyrite.expression_mt:fresnel_mix(other, ior)
-    local properties
-
-    if type(self) == "table" and self.type == nil then
-        properties = self
-        properties.type = "fresnel_mix"
-    else
-        properties = {
-            type = "fresnel_mix",
-            reflect = self,
-            refract = other,
-            ior = ior,
-        }
-    end
-    _pyrite.make_expression(properties)
-
-    return properties
-end
-fresnel_mix = _pyrite.expression_mt.fresnel_mix
-
 function _pyrite.expression_mt:mix(other, amount)
     local properties
 
@@ -261,8 +241,8 @@ material = {
         _pyrite.make_expression(properties)
         return properties
     end,
-    emission = function(properties)
-        properties.type = "emission"
+    emissive = function(properties)
+        properties.type = "emissive"
         _pyrite.make_expression(properties)
         return properties
     end,

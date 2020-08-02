@@ -69,6 +69,11 @@ pub(super) enum Instruction<N, V> {
         rhs: usize,
         amount: NumberValue,
     },
+    Clamp {
+        value: NumberValue,
+        min: NumberValue,
+        max: NumberValue,
+    },
 }
 
 #[derive(Copy, Clone)]

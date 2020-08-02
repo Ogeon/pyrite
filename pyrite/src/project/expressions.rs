@@ -29,6 +29,55 @@ impl Expressions {
     pub fn get(&self, id: ExpressionId) -> &ComplexExpression {
         self.expressions.get(id.0).expect("missing expression")
     }
+
+    pub(crate) fn insert_sub(&mut self, lhs: Expression, rhs: Expression) -> Expression {
+        if let (Expression::Number(lhs), Expression::Number(rhs)) = (lhs, rhs) {
+            return Expression::Number(lhs - rhs);
+        }
+
+        let id = ExpressionId(self.expressions.len());
+        self.expressions.push(ComplexExpression::Binary {
+            operator: BinaryOperator::Sub,
+            lhs,
+            rhs,
+        });
+
+        Expression::Complex(id)
+    }
+
+    pub(crate) fn insert_mul(&mut self, lhs: Expression, rhs: Expression) -> Expression {
+        if let (Expression::Number(lhs), Expression::Number(rhs)) = (lhs, rhs) {
+            return Expression::Number(lhs * rhs);
+        }
+
+        let id = ExpressionId(self.expressions.len());
+        self.expressions.push(ComplexExpression::Binary {
+            operator: BinaryOperator::Mul,
+            lhs,
+            rhs,
+        });
+
+        Expression::Complex(id)
+    }
+
+    pub(crate) fn insert_clamp(
+        &mut self,
+        value: Expression,
+        min: Expression,
+        max: Expression,
+    ) -> Expression {
+        if let (Expression::Number(value), Expression::Number(min), Expression::Number(max)) =
+            (value, min, max)
+        {
+            return Expression::Number(value.min(max).max(min));
+        }
+
+        let id = ExpressionId(self.expressions.len());
+        self.expressions
+            .push(ComplexExpression::Clamp { value, min, max });
+
+        Expression::Complex(id)
+    }
 }
 
 pub struct ExpressionLoader<'lua> {
@@ -188,6 +237,12 @@ impl Evaluate<Quaternion<f32>> for Expression {
     }
 }
 
+impl From<f64> for Expression {
+    fn from(number: f64) -> Self {
+        Expression::Number(number)
+    }
+}
+
 pub enum ComplexExpression {
     Vector {
         x: Expression,
@@ -209,6 +264,11 @@ pub enum ComplexExpression {
         amount: Expression,
         lhs: Expression,
         rhs: Expression,
+    },
+    Clamp {
+        value: Expression,
+        min: Expression,
+        max: Expression,
     },
     Fresnel {
         ior: Expression,
@@ -348,6 +408,12 @@ impl<T: ExpressionValue> Evaluate<T> for ComplexExpression {
                 let rhs: T = rhs.evaluate(context)?;
                 T::mix(lhs, rhs, amount)
             }
+            ComplexExpression::Clamp { value, min, max } => {
+                let value = value.evaluate(context)?;
+                let min = min.evaluate(context)?;
+                let max = max.evaluate(context)?;
+                T::clamp(value, min, max)
+            }
             ComplexExpression::Fresnel { .. } => {
                 Err("cannot evaluate Fresnel functions as constants".into())
             }
@@ -395,6 +461,7 @@ pub trait ExpressionValue:
     fn from_vector(x: f32, y: f32, z: f32, w: f32) -> Result<Self, Box<dyn Error>>;
     fn from_rgb(red: f32, green: f32, blue: f32) -> Result<Self, Box<dyn Error>>;
     fn mix(lhs: Self, rhs: Self, amount: f32) -> Result<Self, Box<dyn Error>>;
+    fn clamp(value: Self, min: Self, max: Self) -> Result<Self, Box<dyn Error>>;
 }
 
 impl ExpressionValue for f32 {
@@ -414,6 +481,10 @@ impl ExpressionValue for f32 {
         let amount = amount.min(1.0).max(0.0);
         Ok(lhs * (1.0 - amount) + rhs * amount)
     }
+
+    fn clamp(value: Self, min: Self, max: Self) -> Result<Self, Box<dyn Error>> {
+        Ok(value.min(max).max(min))
+    }
 }
 
 impl ExpressionValue for u16 {
@@ -431,6 +502,10 @@ impl ExpressionValue for u16 {
 
     fn mix(lhs: Self, rhs: Self, amount: f32) -> Result<Self, Box<dyn Error>> {
         Ok(<f32 as ExpressionValue>::mix(lhs as f32, rhs as f32, amount)? as u16)
+    }
+
+    fn clamp(value: Self, min: Self, max: Self) -> Result<Self, Box<dyn Error>> {
+        Ok(value.min(max).max(min))
     }
 }
 
@@ -458,6 +533,10 @@ impl ExpressionValue for Vector {
 
     fn mix(lhs: Self, rhs: Self, amount: f32) -> Result<Self, Box<dyn Error>> {
         Ok(Vector(lhs.0.lerp(rhs.0, amount.min(1.0).max(0.0))))
+    }
+
+    fn clamp(_value: Self, _min: Self, _max: Self) -> Result<Self, Box<dyn Error>> {
+        Err("vectors cannot be clamped".into())
     }
 }
 

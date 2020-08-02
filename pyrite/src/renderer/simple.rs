@@ -7,7 +7,7 @@ use super::{
 };
 use crate::cameras::Camera;
 use crate::film::{Film, Sample};
-use crate::tracer::{trace, Light};
+use crate::tracer::trace;
 use crate::{
     program::{ExecutionContext, Resources},
     world::World,
@@ -88,12 +88,11 @@ fn render_tile<R: Rng>(
 
         let ray = camera.ray_towards(&position, &mut rng);
         let wavelength = film.sample_wavelength(&mut rng);
-        let light = Light::new(wavelength);
         trace(
             &mut path,
             &mut rng,
             ray,
-            light,
+            wavelength,
             world,
             renderer.bounces,
             renderer.light_samples,

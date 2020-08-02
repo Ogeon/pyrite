@@ -38,10 +38,10 @@ return {
                 materials = {
                     diamonds = diamond,
                     light_left = {
-                        surface = material.emission {color = light_source.d65},
+                        surface = material.emissive {color = light_source.d65},
                     },
                     light_right = {
-                        surface = material.emission {
+                        surface = material.emissive {
                             color = light_source.d65 * 2,
                         },
                     },

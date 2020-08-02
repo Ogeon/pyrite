@@ -29,17 +29,15 @@ return {
             ball:with{
                 position = ball.position:with{y = 1.5},
                 material = {
-                    surface = material.emission {color = light_source.d65 * 3},
+                    surface = material.emissive {color = light_source.d65 * 3},
                 },
             },
 
             ball:with{
                 position = ball.position:with{x = -3},
                 material = {
-                    surface = fresnel_mix {
-                        ior = 1.5,
-                        reflect = material.mirror {color = 1},
-                        refract = material.diffuse {
+                    surface = mix(
+                        material.mirror {color = 1}, material.diffuse {
                             color = spectrum {
                                 format = "curve",
                                 points = {
@@ -50,8 +48,8 @@ return {
                                     {600, 0},
                                 },
                             },
-                        },
-                    },
+                        }, fresnel(1.5)
+                    ),
                 },
             },
 

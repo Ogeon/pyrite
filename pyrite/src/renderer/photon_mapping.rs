@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{cell::Cell, sync::Arc};
 
 use rand::{self, SeedableRng};
 use rand_xorshift::XorShiftRng;
@@ -12,9 +12,10 @@ use crate::lamp::Surface;
 use crate::renderer::algorithm::contribute;
 use crate::spatial::kd_tree::{self, KdTree};
 use crate::spatial::Dim3;
-use crate::tracer::{trace, Bounce, BounceType, Light, RenderContext};
+use crate::tracer::{trace, Bounce, BounceType, RenderContext};
 use crate::utils::{pairs, BatchRange};
 use crate::{
+    materials::ProbabilityInput,
     math::DIST_EPSILON,
     program::{ExecutionContext, Resources},
     world::World,
@@ -69,13 +70,12 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                     let position = tile.sample_point(&mut rng);
                     let ray = camera.ray_towards(&position, &mut rng);
                     let wavelength = film.sample_wavelength(&mut rng);
-                    let light = Light::new(wavelength);
 
                     trace(
                         &mut bounces,
                         &mut rng,
                         ray,
-                        light,
+                        wavelength,
                         world,
                         renderer.bounces,
                         renderer.light_samples,
@@ -116,8 +116,9 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                         match bounce.ty {
                             BounceType::Diffuse(_, _) => {
                                 let b = Arc::new(CameraBounce {
+                                    wavelength,
                                     parent: current,
-                                    bounce: bounce,
+                                    bounce,
                                     pixel: film
                                         .get_pixel_ref_f(position)
                                         .expect("position out of bounds"),
@@ -128,8 +129,9 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                             }
                             BounceType::Specular => {
                                 let b = Arc::new(CameraBounce {
+                                    wavelength,
                                     parent: current,
-                                    bounce: bounce,
+                                    bounce,
                                     pixel: film
                                         .get_pixel_ref_f(position)
                                         .expect("position out of bounds"),
@@ -190,97 +192,117 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                             .and_then(|(lamp, p)| lamp.sample_ray(&mut rng).map(|s| (lamp, p, s)));
 
                         if let Some((_lamp, probability, mut ray_sample)) = res {
-                            let mut light = Light::new(film.sample_wavelength(&mut rng));
+                            let wavelength = film.sample_wavelength(&mut rng);
 
-                            let (color, normal, texture) = match ray_sample.surface {
-                                Surface::Physical {
-                                    normal,
-                                    material,
-                                    texture,
-                                } => {
-                                    let color = material.get_emission(
-                                        &mut light,
-                                        -ray_sample.ray.direction,
+                            let (color, material_probability, dispersed, normal, texture) =
+                                match ray_sample.surface {
+                                    Surface::Physical {
                                         normal,
-                                        &mut rng,
-                                    );
-                                    (color, normal, texture)
-                                }
-                                Surface::Color(color) => {
-                                    (Some(color), ray_sample.ray.direction, Point2::origin())
-                                }
-                            };
-
-                            if let Some(color) = color {
-                                ray_sample.ray.origin += normal * DIST_EPSILON;
-
-                                trace(
-                                    &mut bounces,
-                                    &mut rng,
-                                    ray_sample.ray,
-                                    light.clone(),
-                                    world,
-                                    config.photon_bounces,
-                                    0,
-                                    &mut exe,
-                                );
-                                let p = 1.0 / config.photon_bounces as f32;
-
-                                let incident = bounces
-                                    .get(0)
-                                    .map(|b| -b.incident)
-                                    .unwrap_or(Vector3::new(0.0, 0.0, 0.0));
-
-                                let mut current = Arc::new(LightBounce {
-                                    parent: None,
-                                    bounce: Bounce {
-                                        ty: BounceType::Emission,
-                                        light,
-                                        color,
-                                        incident,
-                                        position: ray_sample.ray.origin,
-                                        normal,
+                                        material,
                                         texture,
-                                        probability: ray_sample.weight * probability,
-                                        direct_light: vec![],
-                                    },
-                                    probability: p,
-                                });
+                                    } => {
+                                        let component = material.choose_emissive(&mut rng);
+                                        let input = ProbabilityInput {
+                                            wavelength,
+                                            wavelength_used: Cell::new(false),
+                                            normal,
+                                            incident: -ray_sample.ray.direction,
+                                            texture_coordinate: texture,
+                                        };
 
-                                if let Some(bounce) = bounces.get_mut(0) {
-                                    if let BounceType::Diffuse(_, ref mut o) = bounce.ty {
-                                        *o = -incident
+                                        let probability =
+                                            component.get_probability(&mut exe, &input);
+
+                                        (
+                                            component.bsdf.color,
+                                            probability,
+                                            input.wavelength_used.get(),
+                                            normal,
+                                            texture,
+                                        )
                                     }
+                                    Surface::Color(color) => (
+                                        color,
+                                        1.0,
+                                        false,
+                                        ray_sample.ray.direction,
+                                        Point2::origin(),
+                                    ),
+                                };
+
+                            ray_sample.ray.origin += normal * DIST_EPSILON;
+
+                            trace(
+                                &mut bounces,
+                                &mut rng,
+                                ray_sample.ray,
+                                wavelength,
+                                world,
+                                config.photon_bounces,
+                                0,
+                                &mut exe,
+                            );
+                            let p = 1.0 / config.photon_bounces as f32;
+
+                            let incident = bounces
+                                .get(0)
+                                .map(|b| -b.incident)
+                                .unwrap_or(Vector3::new(0.0, 0.0, 0.0));
+
+                            let mut current = Arc::new(LightBounce {
+                                parent: None,
+                                wavelength,
+                                bounce: Bounce {
+                                    ty: BounceType::Emission,
+                                    dispersed,
+                                    color,
+                                    incident,
+                                    position: ray_sample.ray.origin,
+                                    normal,
+                                    texture,
+                                    probability: ray_sample.weight
+                                        * probability
+                                        * material_probability,
+                                    direct_light: vec![],
+                                },
+                                probability: p,
+                            });
+
+                            if let Some(bounce) = bounces.get_mut(0) {
+                                if let BounceType::Diffuse(_, ref mut o) = bounce.ty {
+                                    *o = -incident
                                 }
+                            }
 
-                                pairs(&mut bounces, |to, from| {
-                                    to.incident = -from.incident;
-                                    if let BounceType::Diffuse(_, ref mut o) = from.ty {
-                                        *o = from.incident
-                                    }
-                                });
+                            pairs(&mut bounces, |to, from| {
+                                to.incident = -from.incident;
+                                if let BounceType::Diffuse(_, ref mut o) = from.ty {
+                                    *o = from.incident
+                                }
+                            });
 
-                                for bounce in bounces.drain(..) {
-                                    match bounce.ty {
-                                        BounceType::Diffuse(_, _) => {
-                                            let b = Arc::new(LightBounce {
-                                                parent: Some(current),
-                                                bounce: bounce,
-                                                probability: p,
-                                            });
-                                            current = b.clone();
-                                            processed.push(b);
-                                        }
-                                        BounceType::Specular => {
-                                            let b = Arc::new(LightBounce {
-                                                parent: Some(current),
-                                                bounce: bounce,
-                                                probability: p,
-                                            });
-                                            current = b.clone();
-                                        }
-                                        BounceType::Emission => break,
+                            for bounce in bounces.drain(..) {
+                                match bounce.ty {
+                                    BounceType::Diffuse(_, _) => {
+                                        let b = Arc::new(LightBounce {
+                                            parent: Some(current),
+                                            wavelength,
+                                            bounce,
+                                            probability: p,
+                                        });
+                                        current = b.clone();
+                                        processed.push(b);
                                     }
+                                    BounceType::Specular => {
+                                        let b = Arc::new(LightBounce {
+                                            parent: Some(current),
+                                            wavelength,
+                                            bounce,
+                                            probability: p,
+                                        });
+                                        current = b.clone();
+                                    }
+                                    BounceType::Emission => break,
                                 }
                             }
                         }
@@ -323,17 +345,17 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                             light_bounces.neighbors(&point, config.radius).collect();
                         let num_neighbors = neighbors.len();
                         for neighbor in neighbors {
-                            let mut bounce_light = hit.bounce.light.clone();
-                            let mut neighbor_light = neighbor.bounce.light.clone();
+                            let bounce_dispersed = hit.bounce.dispersed;
+                            let neighbor_dispersed = neighbor.bounce.dispersed;
 
-                            if bounce_light.is_white() || neighbor_light.is_white() {
+                            if !bounce_dispersed || !neighbor_dispersed {
                                 let (use_additional, wavelength) =
-                                    if bounce_light.is_white() && neighbor_light.is_white() {
-                                        (true, neighbor_light.colored())
-                                    } else if bounce_light.is_white() {
-                                        (false, neighbor_light.colored())
+                                    if !bounce_dispersed && !neighbor_dispersed {
+                                        (true, neighbor.wavelength)
+                                    } else if !bounce_dispersed {
+                                        (false, neighbor.wavelength)
                                     } else {
-                                        (false, bounce_light.colored())
+                                        (false, hit.wavelength)
                                     };
 
                                 let mut samples = vec![(
@@ -411,6 +433,7 @@ pub struct Config {
 
 struct CameraBounce<'a> {
     parent: Parent<CameraBounce<'a>, Point2<f32>>,
+    wavelength: f32,
     bounce: Bounce<'a>,
     pixel: DetachedPixel<'a>,
     probability: f32,
@@ -433,7 +456,7 @@ impl<'a> CameraBounce<'a> {
         while let Some(hit) = current {
             let &Bounce {
                 ref ty,
-                light: _,
+                dispersed: _,
                 color,
                 incident,
                 normal,
@@ -488,6 +511,7 @@ impl kd_tree::Point for KdPoint {
 
 struct LightBounce<'a> {
     parent: Option<Arc<LightBounce<'a>>>,
+    wavelength: f32,
     bounce: Bounce<'a>,
     probability: f32,
 }
@@ -503,7 +527,7 @@ impl<'a> LightBounce<'a> {
         while let Some(hit) = current {
             let &Bounce {
                 ref ty,
-                light: _,
+                dispersed: _,
                 color,
                 incident,
                 normal,

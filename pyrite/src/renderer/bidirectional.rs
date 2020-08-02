@@ -11,14 +11,18 @@ use super::{
 use crate::cameras::Camera;
 use crate::film::{Film, Sample};
 use crate::lamp::{RaySample, Surface};
-use crate::tracer::{trace, Bounce, BounceType, Light};
+use crate::tracer::{trace, Bounce, BounceType};
 use crate::utils::pairs;
 use crate::{
+    materials::ProbabilityInput,
     math::DIST_EPSILON,
     program::{ExecutionContext, Resources},
     world::World,
 };
-use std::time::{Duration, Instant};
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
 
 pub struct BidirParams {
     pub bounces: u32,
@@ -98,7 +102,6 @@ fn render_tile<R: Rng>(
 
         let position = tile.sample_point(&mut rng);
         let wavelength = film.sample_wavelength(&mut rng);
-        let light = Light::new(wavelength);
 
         let camera_ray = camera.ray_towards(&position, &mut rng);
         let lamp_sample = world
@@ -111,70 +114,81 @@ fn render_tile<R: Rng>(
                 weight,
             } = lamp_sample;
 
-            let mut light = light.clone();
-            let (color, normal, texture) = match surface {
+            let (color, material_probability, dispersed, normal, texture) = match surface {
                 Surface::Physical {
                     normal,
                     material,
                     texture,
                 } => {
-                    let color = material.get_emission(&mut light, -ray.direction, normal, &mut rng);
-                    (color, normal, texture)
+                    let component = material.choose_emissive(&mut rng);
+                    let input = ProbabilityInput {
+                        wavelength,
+                        wavelength_used: Cell::new(false),
+                        normal,
+                        incident: -ray.direction,
+                        texture_coordinate: texture,
+                    };
+
+                    let probability = component.get_probability(&mut exe, &input);
+
+                    (
+                        component.bsdf.color,
+                        probability,
+                        input.wavelength_used.get(),
+                        normal,
+                        texture,
+                    )
                 }
-                Surface::Color(color) => (Some(color), ray.direction, Point2::origin()),
+                Surface::Color(color) => (color, 1.0, false, ray.direction, Point2::origin()),
             };
             ray.origin += normal * DIST_EPSILON;
 
-            if let Some(color) = color {
-                lamp_path.push(Bounce {
-                    ty: BounceType::Emission,
-                    light: light.clone(),
-                    color,
-                    incident: Vector3::new(0.0, 0.0, 0.0),
-                    position: ray.origin,
-                    normal,
-                    texture,
-                    probability: weight / probability,
-                    direct_light: vec![],
-                });
+            lamp_path.push(Bounce {
+                ty: BounceType::Emission,
+                dispersed,
+                color,
+                incident: Vector3::new(0.0, 0.0, 0.0),
+                position: ray.origin,
+                normal,
+                texture,
+                probability: weight / (probability * material_probability),
+                direct_light: vec![],
+            });
 
-                trace(
-                    &mut lamp_path,
-                    &mut rng,
-                    ray,
-                    light,
-                    world,
-                    bidir_params.bounces,
-                    0,
-                    &mut exe,
-                );
+            trace(
+                &mut lamp_path,
+                &mut rng,
+                ray,
+                wavelength,
+                world,
+                bidir_params.bounces,
+                0,
+                &mut exe,
+            );
 
-                pairs(&mut lamp_path, |to, from| {
-                    to.incident = -from.incident;
-                    if let BounceType::Diffuse(_, ref mut o) = from.ty {
-                        *o = from.incident
-                    }
-                });
+            pairs(&mut lamp_path, |to, from| {
+                to.incident = -from.incident;
+                if let BounceType::Diffuse(_, ref mut o) = from.ty {
+                    *o = from.incident
+                }
+            });
 
-                if lamp_path.len() > 1 {
-                    if let Some(last) = lamp_path.pop() {
-                        match last.ty {
-                            BounceType::Diffuse(_, _) | BounceType::Specular => {
-                                lamp_path.push(last)
-                            }
-                            BounceType::Emission => {}
-                        }
+            if lamp_path.len() > 1 {
+                if let Some(last) = lamp_path.pop() {
+                    match last.ty {
+                        BounceType::Diffuse(_, _) | BounceType::Specular => lamp_path.push(last),
+                        BounceType::Emission => {}
                     }
                 }
-                lamp_path.reverse();
             }
+            lamp_path.reverse();
         }
 
         trace(
             &mut camera_path,
             &mut rng,
             camera_ray,
-            light,
+            wavelength,
             world,
             renderer.bounces,
             renderer.light_samples,

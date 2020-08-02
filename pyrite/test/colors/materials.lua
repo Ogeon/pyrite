@@ -3,7 +3,7 @@ local glass_template = material.refractive {
     color = spectrum {format = "curve"},
 }
 return {
-    light = {surface = material.emission {color = light_source.d65 * 5}},
+    light = {surface = material.emissive {color = light_source.d65 * 5}},
 
     floor = {surface = material.diffuse {color = 1}},
 

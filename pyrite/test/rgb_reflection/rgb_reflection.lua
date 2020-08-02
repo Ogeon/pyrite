@@ -1,7 +1,7 @@
 local ball = shape.sphere {radius = 1, position = vector(0, 0, 0)}
 
 local light_ball = ball:with{
-    material = {surface = material.emission {color = light_source.d65 * 3}},
+    material = {surface = material.emissive {color = light_source.d65 * 3}},
     position = ball.position:with{y = 3, z = 1},
 }
 

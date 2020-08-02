@@ -10,21 +10,23 @@ use crate::parse_enum;
 
 use eval_context::{EvalContext, Evaluate};
 use expressions::{ExpressionLoader, Expressions};
+use materials::{MaterialId, MaterialLoader, Materials};
 use meshes::{MeshId, MeshLoader, Meshes};
 use parse_context::{Parse, ParseContext};
 use spectra::{Spectra, SpectrumLoader};
 use tables::Tables;
 use textures::{TextureLoader, Textures};
 
-pub mod eval_context;
-pub mod expressions;
-pub mod meshes;
+pub(crate) mod eval_context;
+pub(crate) mod expressions;
+pub(crate) mod materials;
+pub(crate) mod meshes;
 mod parse_context;
-pub mod spectra;
+pub(crate) mod spectra;
 mod tables;
 pub(crate) mod textures;
 
-pub fn load_project<'p, P: AsRef<Path>>(path: P) -> Result<ProjectData, Box<dyn Error>> {
+pub(crate) fn load_project<'p, P: AsRef<Path>>(path: P) -> Result<ProjectData, Box<dyn Error>> {
     let project_dir = path
         .as_ref()
         .parent()
@@ -75,22 +77,42 @@ pub fn load_project<'p, P: AsRef<Path>>(path: P) -> Result<ProjectData, Box<dyn 
         let mut meshes = MeshLoader::new(project_dir);
         let mut spectra = SpectrumLoader::new();
         let mut textures = TextureLoader::new(project_dir);
+        let mut materials = MaterialLoader::new();
         let parse_context = ParseContext::new(
             &mut expressions,
             &mut meshes,
             &mut spectra,
             &mut textures,
+            &mut materials,
             &tables,
             rlua::Table::from_lua(project, context.clone())?,
             &context,
         );
+
         let project = parse_context.parse()?;
+
+        while let Some((id, table)) = materials.next_pending() {
+            let expression = ParseContext::new(
+                &mut expressions,
+                &mut meshes,
+                &mut spectra,
+                &mut textures,
+                &mut materials,
+                &tables,
+                table,
+                &context,
+            )
+            .parse()?;
+            materials.replace_pending(id, expression);
+        }
+
         while let Some((id, table)) = expressions.next_pending() {
             let expression = ParseContext::new(
                 &mut expressions,
                 &mut meshes,
                 &mut spectra,
                 &mut textures,
+                &mut materials,
                 &tables,
                 table,
                 &context,
@@ -103,30 +125,33 @@ pub fn load_project<'p, P: AsRef<Path>>(path: P) -> Result<ProjectData, Box<dyn 
         let meshes = meshes.into_meshes();
         let spectra = spectra.into_spectra();
         let textures = textures.into_textures();
+        let materials = materials.into_materials();
 
         Ok(ProjectData {
             expressions,
             meshes,
             spectra,
             textures,
+            materials,
             project,
         })
     })
 }
 
-pub struct ProjectData {
+pub(crate) struct ProjectData {
     pub expressions: Expressions,
     pub meshes: Meshes,
     pub spectra: Spectra,
     pub textures: Textures,
+    pub materials: Materials,
     pub project: Project,
 }
 
-pub struct Project {
-    pub image: Image,
-    pub camera: Camera,
-    pub renderer: Renderer,
-    pub world: World,
+pub(crate) struct Project {
+    pub(crate) image: Image,
+    pub(crate) camera: Camera,
+    pub(crate) renderer: Renderer,
+    pub(crate) world: World,
 }
 
 impl<'lua> Parse<'lua> for Project {
@@ -256,9 +281,9 @@ impl RendererShared {
     }
 }
 
-pub struct World {
-    pub sky: Option<self::expressions::Expression>,
-    pub objects: Vec<WorldObject>,
+pub(crate) struct World {
+    pub(crate) sky: Option<self::expressions::Expression>,
+    pub(crate) objects: Vec<WorldObject>,
 }
 
 impl<'lua> Parse<'lua> for World {
@@ -272,7 +297,7 @@ impl<'lua> Parse<'lua> for World {
     }
 }
 
-pub enum WorldObject {
+pub(crate) enum WorldObject {
     Sphere {
         position: self::expressions::Expression,
         radius: self::expressions::Expression,
@@ -428,8 +453,8 @@ impl<'lua> Parse<'lua> for JuliaType {
     }
 }
 
-pub struct Material {
-    pub surface: SurfaceMaterial,
+pub(crate) struct Material {
+    pub surface: MaterialId,
     pub normal_map: Option<expressions::Expression>,
 }
 
@@ -438,7 +463,7 @@ impl<'lua> Parse<'lua> for Material {
 
     fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
         Ok(Material {
-            surface: context.parse_field("surface")?,
+            surface: context.materials.insert(context.expect_field("surface")?)?,
             normal_map: context.parse_field("normal_map")?,
         })
     }

@@ -3,15 +3,16 @@ use std::{collections::HashMap, error::Error};
 use rlua::FromLua;
 
 use super::{
-    expressions::ExpressionLoader, meshes::MeshLoader, spectra::SpectrumLoader, tables::Tables,
-    textures::TextureLoader,
+    expressions::ExpressionLoader, materials::MaterialLoader, meshes::MeshLoader,
+    spectra::SpectrumLoader, tables::Tables, textures::TextureLoader,
 };
 
-pub struct ParseContext<'a, 'lua: 'a, T> {
+pub(crate) struct ParseContext<'a, 'lua: 'a, T> {
     pub expressions: &'a mut ExpressionLoader<'lua>,
     pub meshes: &'a mut MeshLoader,
     pub spectra: &'a mut SpectrumLoader,
     pub textures: &'a mut TextureLoader,
+    pub materials: &'a mut MaterialLoader<'lua>,
     pub tables: &'a Tables,
 
     current_value: T,
@@ -24,6 +25,7 @@ impl<'a, 'lua, T: FromLua<'lua>> ParseContext<'a, 'lua, T> {
         meshes: &'a mut MeshLoader,
         spectra: &'a mut SpectrumLoader,
         textures: &'a mut TextureLoader,
+        materials: &'a mut MaterialLoader<'lua>,
         tables: &'a Tables,
         value: T,
         context: &'a rlua::Context<'lua>,
@@ -33,6 +35,7 @@ impl<'a, 'lua, T: FromLua<'lua>> ParseContext<'a, 'lua, T> {
             meshes,
             spectra,
             textures,
+            materials,
             tables,
             current_value: value,
             context,
@@ -55,6 +58,7 @@ impl<'a, 'lua, T: FromLua<'lua>> ParseContext<'a, 'lua, T> {
             meshes: self.meshes,
             spectra: self.spectra,
             textures: self.textures,
+            materials: self.materials,
             tables: self.tables,
 
             current_value: self.current_value.clone(),
@@ -85,6 +89,7 @@ impl<'a, 'lua> ParseContext<'a, 'lua, rlua::Value<'lua>> {
             meshes: self.meshes,
             spectra: self.spectra,
             textures: self.textures,
+            materials: self.materials,
             tables: self.tables,
 
             current_value: U::from_lua(self.current_value, self.context.clone())?,
@@ -113,6 +118,7 @@ impl<'a, 'lua> ParseContext<'a, 'lua, rlua::Table<'lua>> {
             meshes: self.meshes,
             spectra: self.spectra,
             textures: self.textures,
+            materials: self.materials,
             tables: self.tables,
 
             current_value: input,
@@ -138,6 +144,7 @@ impl<'a, 'lua> ParseContext<'a, 'lua, rlua::Table<'lua>> {
                     meshes,
                     spectra,
                     textures,
+                    materials,
                     tables,
                     current_value,
                     context,
@@ -154,6 +161,7 @@ impl<'a, 'lua> ParseContext<'a, 'lua, rlua::Table<'lua>> {
                             meshes,
                             spectra,
                             textures,
+                            materials,
                             tables,
 
                             current_value: value,
@@ -169,10 +177,11 @@ impl<'a, 'lua> ParseContext<'a, 'lua, rlua::Table<'lua>> {
         )
     }
 
-    pub fn parse_map_field<T: Parse<'lua>>(
+    pub fn with_map_field<T: FromLua<'lua>, U>(
         &mut self,
         name: &str,
-    ) -> Result<HashMap<String, T>, Box<dyn Error>> {
+        mut parse: impl FnMut(ParseContext<'_, 'lua, T>) -> Result<U, Box<dyn Error>>,
+    ) -> Result<HashMap<String, U>, Box<dyn Error>> {
         self.with_field(
             name,
             |context: ParseContext<'_, 'lua, rlua::Table<'lua>>| {
@@ -181,6 +190,7 @@ impl<'a, 'lua> ParseContext<'a, 'lua, rlua::Table<'lua>> {
                     meshes,
                     spectra,
                     textures,
+                    materials,
                     tables,
                     current_value,
                     context,
@@ -196,17 +206,18 @@ impl<'a, 'lua> ParseContext<'a, 'lua, rlua::Table<'lua>> {
                             meshes,
                             spectra,
                             textures,
+                            materials,
                             tables,
 
                             current_value: value,
                             context,
                         };
 
-                        let value = context
+                        let context = context
                             .narrow()
-                            .map_err(|error| format!("{}: {}", key, error))?
-                            .parse()
                             .map_err(|error| format!("{}: {}", key, error))?;
+                        let value =
+                            parse(context).map_err(|error| format!("{}: {}", key, error))?;
 
                         Ok((key, value))
                     })
@@ -214,9 +225,16 @@ impl<'a, 'lua> ParseContext<'a, 'lua, rlua::Table<'lua>> {
             },
         )
     }
+
+    pub fn parse_map_field<T: Parse<'lua>>(
+        &mut self,
+        name: &str,
+    ) -> Result<HashMap<String, T>, Box<dyn Error>> {
+        self.with_map_field(name, T::parse)
+    }
 }
 
-pub trait Parse<'lua>: Sized {
+pub(crate) trait Parse<'lua>: Sized {
     type Input: FromLua<'lua>;
 
     fn parse<'a>(context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>>;

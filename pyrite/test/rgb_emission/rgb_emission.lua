@@ -1,7 +1,7 @@
 local ball = shape.sphere {radius = 1, position = vector(0, 2, 0)}
 
 local color_ball = ball:with{
-    material = {surface = material.emission {color = rgb(1, 0, 0)}},
+    material = {surface = material.emissive {color = rgb(1, 0, 0)}},
 }
 
 return {

@@ -26,8 +26,8 @@ use program::{
     VectorInput,
 };
 use project::{
-    eval_context::EvalContext,
     expressions::{Expressions, Vector},
+    materials::Materials,
     meshes::Meshes,
     ProjectData,
 };
@@ -60,10 +60,11 @@ fn main() {
         let loading_started = Instant::now();
 
         let ProjectData {
-            expressions,
+            mut expressions,
             meshes,
             spectra,
             textures,
+            materials,
             project,
         } = match project::load_project(&project_path) {
             Ok(project) => project,
@@ -79,8 +80,15 @@ fn main() {
             textures: &textures,
         };
 
-        let parse_result =
-            parse_project(project, programs, &expressions, &meshes, resources, &arena);
+        let parse_result = parse_project(
+            project,
+            programs,
+            &mut expressions,
+            &meshes,
+            &materials,
+            resources,
+            &arena,
+        );
         let loading_ended = Instant::now();
 
         match parse_result {
@@ -113,21 +121,20 @@ fn main() {
 fn parse_project<'p>(
     project: project::Project,
     programs: ProgramCompiler<'p>,
-    expressions: &Expressions,
+    expressions: &mut Expressions,
     meshes: &Meshes,
+    materials: &Materials,
     resources: Resources<'p>,
     arena: &'p Bump,
 ) -> Result<(ImageSettings<'p>, RenderContext<'p>), Box<dyn Error>> {
-    let eval_context = EvalContext { expressions };
-
     let config = RenderContext {
-        camera: cameras::Camera::from_project(project.camera, eval_context)?,
+        camera: cameras::Camera::from_project(project.camera, expressions)?,
         renderer: renderer::Renderer::from_project(project.renderer),
         world: world::World::from_project(
             project.world,
-            eval_context,
             programs,
             expressions,
+            materials,
             meshes,
             &arena,
         )?,

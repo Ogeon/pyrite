@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc};
+use std::error::Error;
 
 use rand::Rng;
 
@@ -18,6 +18,7 @@ use crate::{
     project::{
         eval_context::{EvalContext, Evaluate, EvaluateOr},
         expressions::{Expression, Expressions},
+        materials::Materials,
         meshes::Meshes,
         WorldObject,
     },
@@ -39,9 +40,9 @@ pub(crate) struct World<'p> {
 impl<'p> World<'p> {
     pub fn from_project(
         project: crate::project::World,
-        eval_context: EvalContext,
         programs: ProgramCompiler<'p>,
-        expressions: &Expressions,
+        expressions: &mut Expressions,
+        materials: &Materials,
         meshes: &Meshes,
         allocator: &'p bumpalo::Bump,
     ) -> Result<Self, Box<dyn Error>> {
@@ -59,9 +60,15 @@ impl<'p> World<'p> {
                     texture_scale,
                     material,
                 } => {
-                    let material =
-                        Material::from_project(material, eval_context, programs, expressions)?;
+                    let material = Material::from_project(
+                        material,
+                        programs,
+                        expressions,
+                        materials,
+                        allocator,
+                    )?;
                     let emissive = material.is_emissive();
+                    let eval_context = EvalContext { expressions };
                     let texture_scale: Option<_> = texture_scale.evaluate(eval_context)?;
 
                     let shape = allocator.alloc(Shape::Sphere {
@@ -82,13 +89,20 @@ impl<'p> World<'p> {
                     texture_scale,
                     material,
                 } => {
+                    let material = Material::from_project(
+                        material,
+                        programs,
+                        expressions,
+                        materials,
+                        allocator,
+                    )?;
+                    let emissive = material.is_emissive();
+
+                    let eval_context = EvalContext { expressions };
                     let normal: Vector3<f32> = normal.evaluate(eval_context)?;
                     let normal = normal.normalize();
                     let (binormal, tangent) = crate::math::utils::basis(normal);
 
-                    let material =
-                        Material::from_project(material, eval_context, programs, expressions)?;
-                    let emissive = material.is_emissive();
                     let texture_scale: Option<_> = texture_scale.evaluate(eval_context)?;
 
                     let shape = Plane {
@@ -116,10 +130,16 @@ impl<'p> World<'p> {
                     bounds,
                     material,
                 } => {
-                    let material =
-                        Material::from_project(material, eval_context, programs, expressions)?;
+                    let material = Material::from_project(
+                        material,
+                        programs,
+                        expressions,
+                        materials,
+                        allocator,
+                    )?;
                     let emissive = material.is_emissive();
 
+                    let eval_context = EvalContext { expressions };
                     let bounds = match bounds {
                         crate::project::BoundingVolume::Box { min, max } => BoundingVolume::Box(
                             min.evaluate(eval_context)?,
@@ -184,23 +204,26 @@ impl<'p> World<'p> {
                 }
                 WorldObject::Mesh {
                     file,
-                    mut materials,
+                    materials: mut mesh_materials,
                     scale,
                     transform,
                 } => {
-                    let transform =
-                        transform.evaluate_or_else(eval_context, || Matrix4::identity())?;
-                    let scale = scale.evaluate_or(eval_context, 1.0)?;
                     let obj = meshes.get(file);
                     for object in &obj.objects {
                         println!("Adding object '{}'.", object.name);
 
-                        let (object_material, emissive) = match materials.remove(&object.name) {
-                            Some(m) => {
-                                let material =
-                                    Material::from_project(m, eval_context, programs, expressions)?;
+                        let (object_material, emissive) = match mesh_materials.remove(&object.name)
+                        {
+                            Some(material) => {
+                                let material = Material::from_project(
+                                    material,
+                                    programs,
+                                    expressions,
+                                    materials,
+                                    allocator,
+                                )?;
                                 let emissive = material.is_emissive();
-                                (Arc::new(material), emissive)
+                                (material, emissive)
                             }
                             None => {
                                 return Err(format!(
@@ -210,6 +233,11 @@ impl<'p> World<'p> {
                                 .into())
                             }
                         };
+
+                        let eval_context = EvalContext { expressions };
+                        let transform =
+                            transform.evaluate_or_else(eval_context, || Matrix4::identity())?;
+                        let scale = scale.evaluate_or(eval_context, 1.0)?;
 
                         for group in &object.groups {
                             for shape in &group.polys {
@@ -236,13 +264,17 @@ impl<'p> World<'p> {
                     direction,
                     width,
                     color,
-                } => lights.push(Lamp::Directional {
-                    direction: direction.evaluate(eval_context)?,
-                    width: width.evaluate(eval_context)?,
-                    color: programs.compile(&color, expressions)?,
-                }),
+                } => {
+                    let eval_context = EvalContext { expressions };
+
+                    lights.push(Lamp::Directional {
+                        direction: direction.evaluate(eval_context)?,
+                        width: width.evaluate(eval_context)?,
+                        color: programs.compile(&color, expressions)?,
+                    })
+                }
                 WorldObject::PointLight { position, color } => lights.push(Lamp::Point(
-                    position.evaluate(eval_context)?,
+                    position.evaluate(EvalContext { expressions })?,
                     programs.compile(&color, expressions)?,
                 )),
             }
@@ -304,7 +336,7 @@ fn make_triangle<'p, M: obj::GenPolygon>(
     obj::IndexTuple(v1, t1, n1): obj::IndexTuple,
     obj::IndexTuple(v2, t2, n2): obj::IndexTuple,
     obj::IndexTuple(v3, t3, n3): obj::IndexTuple,
-    material: Arc<Material<'p>>,
+    material: Material<'p>,
 ) -> Shape<'p> {
     let v1 = obj.position[v1].into();
     let v2 = obj.position[v2].into();

@@ -274,6 +274,22 @@ impl<'p> ExecutionContext<'p> {
                         self.registers.push_rgb(result);
                     }
                 },
+                Instruction::Clamp { value, min, max } => {
+                    let value = match value {
+                        NumberValue::Constant(value) => value,
+                        NumberValue::Register(value) => self.registers.get_number(value),
+                    };
+                    let min = match min {
+                        NumberValue::Constant(min) => min,
+                        NumberValue::Register(min) => self.registers.get_number(min),
+                    };
+                    let max = match max {
+                        NumberValue::Constant(max) => max,
+                        NumberValue::Register(max) => self.registers.get_number(max),
+                    };
+
+                    self.registers.push_number(value.min(max).max(min))
+                }
             }
         }
     }

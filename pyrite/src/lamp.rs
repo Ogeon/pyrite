@@ -124,7 +124,7 @@ pub(crate) enum Surface<'a> {
     Physical {
         normal: Vector3<f32>,
         texture: Point2<f32>,
-        material: &'a Material<'a>,
+        material: Material<'a>,
     },
     Color(LightProgram<'a>),
 }
