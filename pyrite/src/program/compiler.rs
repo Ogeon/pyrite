@@ -10,7 +10,7 @@ use bumpalo::Bump;
 use crate::project::expressions::{ComplexExpression, Expression, ExpressionId, Expressions};
 
 use super::{
-    instruction::{BinaryValueType, Instruction, NumberValue, ValueConversion},
+    instruction::{BinaryValueType, Instruction, NumberValue, ValueConversion, VectorValue},
     registers::{NumberRegister, RgbRegister, VectorRegister},
     FromValue, NumberInput, Program, ProgramOutput, ProgramOutputType, ProgramType, VectorInput,
 };
@@ -75,9 +75,6 @@ impl<'p> ProgramCompiler<'p> {
         let mut next_vector_register = 0;
         let mut next_rgb_register = 0;
 
-        let mut input_numbers = HashMap::new();
-        let mut input_vectors = HashMap::new();
-
         while let Some(expression_id) = pending.pop() {
             match status[&expression_id] {
                 ExpressionStatus::Pending(&ComplexExpression::Vector { x, y, z, w }) => {
@@ -86,7 +83,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let x = unwrap_or_push!(x, expression_id, pending);
@@ -96,7 +92,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let y = unwrap_or_push!(y, expression_id, pending);
@@ -106,7 +101,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let z = unwrap_or_push!(z, expression_id, pending);
@@ -116,7 +110,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let w = unwrap_or_push!(w, expression_id, pending);
@@ -136,7 +129,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let red = unwrap_or_push!(red, expression_id, pending);
@@ -146,7 +138,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let green = unwrap_or_push!(green, expression_id, pending);
@@ -156,7 +147,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let blue = unwrap_or_push!(blue, expression_id, pending);
@@ -169,26 +159,15 @@ impl<'p> ProgramCompiler<'p> {
                     next_rgb_register += 1;
                 }
                 ExpressionStatus::Pending(&ComplexExpression::Fresnel { ior, env_ior }) => {
-                    let normal = get_vector_input(
-                        VectorInput::Normal,
-                        &mut input_vectors,
-                        &mut instructions,
-                        &mut next_vector_register,
-                    )?;
+                    let normal = get_vector_input(VectorInput::Normal)?;
 
-                    let incident = get_vector_input(
-                        VectorInput::Incident,
-                        &mut input_vectors,
-                        &mut instructions,
-                        &mut next_vector_register,
-                    )?;
+                    let incident = get_vector_input(VectorInput::Incident)?;
 
                     let ior = try_get_number_value(
                         ior,
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let ior = unwrap_or_push!(ior, expression_id, pending);
@@ -198,7 +177,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let env_ior = unwrap_or_push!(env_ior, expression_id, pending);
@@ -218,25 +196,19 @@ impl<'p> ProgramCompiler<'p> {
                     next_number_register += 1;
                 }
                 ExpressionStatus::Pending(&ComplexExpression::Blackbody { temperature }) => {
-                    let wavelength = get_number_input(
-                        NumberInput::Wavelength,
-                        &mut input_numbers,
-                        &mut instructions,
-                        &mut next_number_register,
-                    )?;
+                    let wavelength = get_number_input(NumberInput::Wavelength)?;
 
                     let temperature = try_get_number_value(
                         temperature,
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let temperature = unwrap_or_push!(temperature, expression_id, pending);
 
                     instructions.push(Instruction::Blackbody {
-                        wavelength: NumberValue::Register(wavelength),
+                        wavelength,
                         temperature,
                     });
                     status.insert(
@@ -248,15 +220,10 @@ impl<'p> ProgramCompiler<'p> {
                     next_number_register += 1;
                 }
                 ExpressionStatus::Pending(&ComplexExpression::Spectrum { points }) => {
-                    let wavelength = get_number_input(
-                        NumberInput::Wavelength,
-                        &mut input_numbers,
-                        &mut instructions,
-                        &mut next_number_register,
-                    )?;
+                    let wavelength = get_number_input(NumberInput::Wavelength)?;
 
                     instructions.push(Instruction::SpectrumValue {
-                        wavelength: NumberValue::Register(wavelength),
+                        wavelength,
                         spectrum: points,
                     });
 
@@ -269,12 +236,7 @@ impl<'p> ProgramCompiler<'p> {
                     next_number_register += 1;
                 }
                 ExpressionStatus::Pending(&ComplexExpression::ColorTexture { texture }) => {
-                    let texture_coordinates = get_vector_input(
-                        VectorInput::TextureCoordinates,
-                        &mut input_vectors,
-                        &mut instructions,
-                        &mut next_vector_register,
-                    )?;
+                    let texture_coordinates = get_vector_input(VectorInput::TextureCoordinates)?;
 
                     instructions.push(Instruction::ColorTextureValue {
                         texture_coordinates,
@@ -287,12 +249,7 @@ impl<'p> ProgramCompiler<'p> {
                     next_rgb_register += 1;
                 }
                 ExpressionStatus::Pending(&ComplexExpression::MonoTexture { texture }) => {
-                    let texture_coordinates = get_vector_input(
-                        VectorInput::TextureCoordinates,
-                        &mut input_vectors,
-                        &mut instructions,
-                        &mut next_vector_register,
-                    )?;
+                    let texture_coordinates = get_vector_input(VectorInput::TextureCoordinates)?;
 
                     instructions.push(Instruction::MonoTextureValue {
                         texture_coordinates,
@@ -312,7 +269,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let amount = unwrap_or_push!(amount, expression_id, pending);
@@ -438,7 +394,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let value = unwrap_or_push!(value, expression_id, pending);
@@ -448,7 +403,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let min = unwrap_or_push!(min, expression_id, pending);
@@ -458,7 +412,6 @@ impl<'p> ProgramCompiler<'p> {
                         &mut status,
                         expressions,
                         &mut instructions,
-                        &mut input_numbers,
                         &mut next_number_register,
                     )?;
                     let max = unwrap_or_push!(max, expression_id, pending);
@@ -497,15 +450,10 @@ impl<'p> ProgramCompiler<'p> {
                 }
 
                 (Register::Rgb(register), ProgramOutputType::Number(convert)) => {
-                    let wavelength = get_number_input(
-                        NumberInput::Wavelength,
-                        &mut input_numbers,
-                        &mut instructions,
-                        &mut next_number_register,
-                    )?;
+                    let wavelength = get_number_input(NumberInput::Wavelength)?;
 
                     instructions.push(Instruction::RgbSpectrumValue {
-                        wavelength: NumberValue::Register(wavelength),
+                        wavelength,
                         source: register,
                     });
                     let register = NumberRegister(next_number_register);
@@ -578,9 +526,8 @@ fn try_get_number_value<'a, N, V>(
     status: &mut HashMap<ExpressionId, ExpressionStatus<'a>>,
     expressions: &'a Expressions,
     instructions: &mut Vec<Instruction<N, V>>,
-    input_numbers: &mut HashMap<NumberInput, NumberRegister>,
     next_number_register: &mut usize,
-) -> Result<Result<NumberValue, ExpressionId>, Box<dyn Error>>
+) -> Result<Result<NumberValue<N>, ExpressionId>, Box<dyn Error>>
 where
     N: TryFrom<NumberInput, Error = Cow<'static, str>>,
 {
@@ -593,15 +540,10 @@ where
             Err("cannot use a vector as a number".into())
         }
         Ok(NumberOrRegister::Register(Register::Rgb(rgb_register))) => {
-            let wavelength = get_number_input(
-                NumberInput::Wavelength,
-                input_numbers,
-                instructions,
-                next_number_register,
-            )?;
+            let wavelength = get_number_input(NumberInput::Wavelength)?;
 
             instructions.push(Instruction::RgbSpectrumValue {
-                wavelength: NumberValue::Register(wavelength),
+                wavelength,
                 source: rgb_register,
             });
             let register = NumberRegister(*next_number_register);
@@ -787,52 +729,16 @@ fn convert_operands<N, V>(
     }
 }
 
-fn get_number_input<N, V>(
-    input: NumberInput,
-    input_numbers: &mut HashMap<NumberInput, NumberRegister>,
-    instructions: &mut Vec<Instruction<N, V>>,
-    next_number_register: &mut usize,
-) -> Result<NumberRegister, Box<dyn Error>>
+fn get_number_input<N>(input: NumberInput) -> Result<NumberValue<N>, Box<dyn Error>>
 where
     N: TryFrom<NumberInput, Error = Cow<'static, str>>,
 {
-    let register = match input_numbers.entry(input) {
-        std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            instructions.push(Instruction::NumberInput {
-                input_value: input.try_into()?,
-            });
-            let register = NumberRegister(*next_number_register);
-            *next_number_register += 1;
-            entry.insert(register);
-            register
-        }
-    };
-
-    Ok(register)
+    Ok(NumberValue::Input(input.try_into()?))
 }
 
-fn get_vector_input<N, V>(
-    input: VectorInput,
-    input_vectors: &mut HashMap<VectorInput, VectorRegister>,
-    instructions: &mut Vec<Instruction<N, V>>,
-    next_vector_register: &mut usize,
-) -> Result<VectorRegister, Box<dyn Error>>
+fn get_vector_input<V>(input: VectorInput) -> Result<VectorValue<V>, Box<dyn Error>>
 where
     V: TryFrom<VectorInput, Error = Cow<'static, str>>,
 {
-    let register = match input_vectors.entry(input) {
-        std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            instructions.push(Instruction::VectorInput {
-                input_value: input.try_into()?,
-            });
-            let register = VectorRegister(*next_vector_register);
-            *next_vector_register += 1;
-            entry.insert(register);
-            register
-        }
-    };
-
-    Ok(register)
+    Ok(VectorValue::Input(input.try_into()?))
 }

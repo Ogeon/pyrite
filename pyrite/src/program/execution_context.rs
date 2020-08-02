@@ -1,9 +1,12 @@
 use super::{
-    instruction::{BinaryValueType, Instruction, NumberValue, ValueConversion},
+    instruction::{BinaryValueType, Instruction, NumberValue, ValueConversion, VectorValue},
     registers::{NumberRegister, Registers, RgbRegister, VectorRegister},
     ProgramFor, ProgramInput, Resources,
 };
-use crate::math::{blackbody, fresnel};
+use crate::{
+    math::{blackbody, fresnel},
+    project::expressions::Vector,
+};
 use cgmath::{Vector4, VectorSpace};
 use palette::{LinSrgba, Mix};
 
@@ -55,45 +58,18 @@ impl<'p> ExecutionContext<'p> {
 
         for instruction in instructions {
             match *instruction {
-                Instruction::NumberInput { input_value } => self
-                    .registers
-                    .push_number(input.get_number_input(input_value)),
-                Instruction::VectorInput { input_value } => self
-                    .registers
-                    .push_vector(input.get_vector_input(input_value)),
                 Instruction::NumberValue { number } => self.registers.push_number(number),
                 Instruction::VectorValue { x, y, z, w } => {
-                    let x = match x {
-                        NumberValue::Constant(x) => x,
-                        NumberValue::Register(x) => self.registers.get_number(x),
-                    };
-                    let y = match y {
-                        NumberValue::Constant(y) => y,
-                        NumberValue::Register(y) => self.registers.get_number(y),
-                    };
-                    let z = match z {
-                        NumberValue::Constant(z) => z,
-                        NumberValue::Register(z) => self.registers.get_number(z),
-                    };
-                    let w = match w {
-                        NumberValue::Constant(w) => w,
-                        NumberValue::Register(w) => self.registers.get_number(w),
-                    };
+                    let x = get_number_value(x, &self.registers, input);
+                    let y = get_number_value(y, &self.registers, input);
+                    let z = get_number_value(z, &self.registers, input);
+                    let w = get_number_value(w, &self.registers, input);
                     self.registers.push_vector(Vector4::new(x, y, z, w).into());
                 }
                 Instruction::RgbValue { red, green, blue } => {
-                    let red = match red {
-                        NumberValue::Constant(red) => red,
-                        NumberValue::Register(red) => self.registers.get_number(red),
-                    };
-                    let green = match green {
-                        NumberValue::Constant(green) => green,
-                        NumberValue::Register(green) => self.registers.get_number(green),
-                    };
-                    let blue = match blue {
-                        NumberValue::Constant(blue) => blue,
-                        NumberValue::Register(blue) => self.registers.get_number(blue),
-                    };
+                    let red = get_number_value(red, &self.registers, input);
+                    let green = get_number_value(green, &self.registers, input);
+                    let blue = get_number_value(blue, &self.registers, input);
                     self.registers
                         .push_rgb(LinSrgba::new(red, green, blue, 1.0));
                 }
@@ -101,10 +77,7 @@ impl<'p> ExecutionContext<'p> {
                     wavelength,
                     spectrum,
                 } => {
-                    let wavelength = match wavelength {
-                        NumberValue::Constant(wavelength) => wavelength,
-                        NumberValue::Register(wavelength) => self.registers.get_number(wavelength),
-                    };
+                    let wavelength = get_number_value(wavelength, &self.registers, input);
                     let intensity = self.resources.spectra.get(spectrum).get(wavelength);
                     self.registers.push_number(intensity);
                 }
@@ -112,7 +85,7 @@ impl<'p> ExecutionContext<'p> {
                     texture_coordinates,
                     texture,
                 } => {
-                    let position = self.registers.get_vector(texture_coordinates).into();
+                    let position = get_vector_value(texture_coordinates, input).into();
                     let color = self
                         .resources
                         .textures
@@ -124,7 +97,7 @@ impl<'p> ExecutionContext<'p> {
                     texture_coordinates,
                     texture,
                 } => {
-                    let position = self.registers.get_vector(texture_coordinates).into();
+                    let position = get_vector_value(texture_coordinates, input).into();
                     let color = self
                         .resources
                         .textures
@@ -133,10 +106,7 @@ impl<'p> ExecutionContext<'p> {
                     self.registers.push_number(color.luma);
                 }
                 Instruction::RgbSpectrumValue { wavelength, source } => {
-                    let wavelength = match wavelength {
-                        NumberValue::Constant(wavelength) => wavelength,
-                        NumberValue::Register(wavelength) => self.registers.get_number(wavelength),
-                    };
+                    let wavelength = get_number_value(wavelength, &self.registers, input);
 
                     let rgb = self.registers.get_rgb(source).color;
 
@@ -153,19 +123,13 @@ impl<'p> ExecutionContext<'p> {
                     ior,
                     env_ior,
                 } => {
-                    let ior = match ior {
-                        NumberValue::Constant(ior) => ior,
-                        NumberValue::Register(ior) => self.registers.get_number(ior),
-                    };
+                    let ior = get_number_value(ior, &self.registers, input);
 
-                    let env_ior = match env_ior {
-                        NumberValue::Constant(env_ior) => env_ior,
-                        NumberValue::Register(env_ior) => self.registers.get_number(env_ior),
-                    };
+                    let env_ior = get_number_value(env_ior, &self.registers, input);
 
-                    let normal = self.registers.get_vector(normal);
+                    let normal = get_vector_value(normal, input);
 
-                    let incident = self.registers.get_vector(incident);
+                    let incident = get_vector_value(incident, input);
 
                     let value = fresnel(ior, env_ior, normal.into(), incident.into());
                     self.registers.push_number(value);
@@ -174,17 +138,8 @@ impl<'p> ExecutionContext<'p> {
                     wavelength,
                     temperature,
                 } => {
-                    let wavelength = match wavelength {
-                        NumberValue::Constant(wavelength) => wavelength,
-                        NumberValue::Register(wavelength) => self.registers.get_number(wavelength),
-                    };
-
-                    let temperature = match temperature {
-                        NumberValue::Constant(temperature) => temperature,
-                        NumberValue::Register(temperature) => {
-                            self.registers.get_number(temperature)
-                        }
-                    };
+                    let wavelength = get_number_value(wavelength, &self.registers, input);
+                    let temperature = get_number_value(temperature, &self.registers, input);
 
                     self.registers
                         .push_number(blackbody(wavelength, temperature));
@@ -207,10 +162,7 @@ impl<'p> ExecutionContext<'p> {
                     rhs,
                     amount,
                 } => {
-                    let amount = match amount {
-                        NumberValue::Constant(amount) => amount,
-                        NumberValue::Register(amount) => self.registers.get_number(amount),
-                    };
+                    let amount = get_number_value(amount, &self.registers, input);
                     let amount = amount.min(1.0).max(0.0);
 
                     match value_type {
@@ -275,22 +227,31 @@ impl<'p> ExecutionContext<'p> {
                     }
                 },
                 Instruction::Clamp { value, min, max } => {
-                    let value = match value {
-                        NumberValue::Constant(value) => value,
-                        NumberValue::Register(value) => self.registers.get_number(value),
-                    };
-                    let min = match min {
-                        NumberValue::Constant(min) => min,
-                        NumberValue::Register(min) => self.registers.get_number(min),
-                    };
-                    let max = match max {
-                        NumberValue::Constant(max) => max,
-                        NumberValue::Register(max) => self.registers.get_number(max),
-                    };
+                    let value = get_number_value(value, &self.registers, input);
+                    let min = get_number_value(min, &self.registers, input);
+                    let max = get_number_value(max, &self.registers, input);
 
                     self.registers.push_number(value.min(max).max(min))
                 }
             }
         }
+    }
+}
+
+fn get_number_value<I: ProgramInput>(
+    value: NumberValue<I::NumberInput>,
+    registers: &Registers,
+    input: &I,
+) -> f32 {
+    match value {
+        NumberValue::Constant(value) => value,
+        NumberValue::Input(input_value) => input.get_number_input(input_value),
+        NumberValue::Register(value) => registers.get_number(value),
+    }
+}
+
+fn get_vector_value<I: ProgramInput>(value: VectorValue<I::VectorInput>, input: &I) -> Vector {
+    match value {
+        VectorValue::Input(input_value) => input.get_vector_input(input_value),
     }
 }
