@@ -16,11 +16,11 @@ return {
     image = {width = 512, height = 512, white = blackbody(4000)},
 
     renderer = renderer.bidirectional {
-        pixel_samples = 300,
+        pixel_samples = 600,
         spectrum_samples = 10,
         spectrum_bins = 50,
         tile_size = 32,
-        light_samples = 5,
+        light_samples = 1,
         bounces = 4,
         light_bounces = 4,
     },

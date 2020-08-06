@@ -11,11 +11,11 @@ return {
     },
 
     renderer = renderer.simple {
-        pixel_samples = 300,
+        pixel_samples = 600,
         spectrum_samples = 10,
         spectrum_bins = 50,
         tile_size = 32,
-        light_samples = 20,
+        light_samples = 4,
     },
 
     world = {

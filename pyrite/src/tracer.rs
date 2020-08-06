@@ -190,6 +190,7 @@ pub(crate) fn trace<'w, R: Rng>(
     exe: &mut ExecutionContext<'w>,
 ) {
     let mut sample_light = true;
+    let mut light_sample_events = 0;
 
     for _ in 0..bounces {
         match world.intersect(ray) {
@@ -227,23 +228,30 @@ pub(crate) fn trace<'w, R: Rng>(
                         dispersed,
                         brdf,
                     } => {
-                        let direct_light = if let Some(brdf) = brdf {
-                            trace_direct(
-                                rng,
-                                light_samples,
-                                wavelength,
-                                ray.direction,
-                                position,
-                                normal,
-                                world,
-                                brdf,
-                                exe,
-                            )
+                        let direct_light = if light_sample_events < 2 {
+                            sample_light = brdf.is_none() || light_samples == 0;
+
+                            if let Some(brdf) = brdf {
+                                light_sample_events += 1;
+
+                                trace_direct(
+                                    rng,
+                                    light_samples,
+                                    wavelength,
+                                    ray.direction,
+                                    position,
+                                    normal,
+                                    world,
+                                    brdf,
+                                    exe,
+                                )
+                            } else {
+                                vec![]
+                            }
                         } else {
+                            sample_light = true;
                             vec![]
                         };
-
-                        sample_light = brdf.is_none() || light_samples == 0;
 
                         let bounce_type = if let Some(brdf) = brdf {
                             BounceType::Diffuse(brdf, out_direction)

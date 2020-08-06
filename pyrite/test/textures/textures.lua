@@ -16,12 +16,12 @@ return {
     image = {width = 1024, height = 512},
 
     renderer = renderer.simple {
-        pixel_samples = 200,
+        pixel_samples = 400,
         spectrum_samples = 10,
         spectrum_bins = 50,
         tile_size = 32,
         bounces = 8,
-        light_samples = 4,
+        light_samples = 2,
     },
 
     camera = camera.perspective {
