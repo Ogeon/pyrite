@@ -87,7 +87,25 @@ fn render_tile<R: Rng>(
         let position = tile.sample_point(&mut rng);
 
         let ray = camera.ray_towards(&position, &mut rng);
-        let wavelength = film.sample_wavelength(&mut rng);
+
+        additional_samples.extend(
+            film.sample_many_wavelengths(&mut rng, renderer.spectrum_samples as usize)
+                .map(|wavelength| {
+                    (
+                        Sample {
+                            wavelength,
+                            brightness: 0.0,
+                            weight: 1.0,
+                        },
+                        1.0,
+                    )
+                }),
+        );
+
+        let mut main_sample =
+            additional_samples.swap_remove(rng.gen_range(0, additional_samples.len()));
+        let wavelength = main_sample.0.wavelength;
+
         trace(
             &mut path,
             &mut rng,
@@ -99,26 +117,7 @@ fn render_tile<R: Rng>(
             &mut exe,
         );
 
-        let mut main_sample = (
-            Sample {
-                wavelength,
-                brightness: 0.0,
-                weight: 1.0,
-            },
-            1.0,
-        );
-
         let mut used_additional = true;
-        additional_samples.extend((0..renderer.spectrum_samples - 1).map(|_| {
-            (
-                Sample {
-                    wavelength: film.sample_wavelength(&mut rng),
-                    brightness: 0.0,
-                    weight: 1.0,
-                },
-                1.0,
-            )
-        }));
 
         for bounce in &path {
             for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {

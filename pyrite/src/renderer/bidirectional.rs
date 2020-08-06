@@ -84,6 +84,7 @@ fn render_tile<R: Rng>(
 ) {
     let mut lamp_path = Vec::with_capacity(bidir_params.bounces as usize + 1);
     let mut camera_path = Vec::with_capacity(renderer.bounces as usize);
+    let mut additional_samples = Vec::with_capacity(renderer.spectrum_samples as usize - 1);
     let mut exe = ExecutionContext::new(resources);
 
     let iterations = tile.area() as u64 * renderer.pixel_samples as u64;
@@ -99,9 +100,26 @@ fn render_tile<R: Rng>(
 
         lamp_path.clear();
         camera_path.clear();
+        additional_samples.clear();
 
         let position = tile.sample_point(&mut rng);
-        let wavelength = film.sample_wavelength(&mut rng);
+        additional_samples.extend(
+            film.sample_many_wavelengths(&mut rng, renderer.spectrum_samples as usize)
+                .map(|wavelength| {
+                    (
+                        Sample {
+                            wavelength,
+                            brightness: 0.0,
+                            weight: 1.0,
+                        },
+                        1.0,
+                    )
+                }),
+        );
+
+        let mut main_sample =
+            additional_samples.swap_remove(rng.gen_range(0, additional_samples.len()));
+        let wavelength = main_sample.0.wavelength;
 
         let camera_ray = camera.ray_towards(&position, &mut rng);
         let lamp_sample = world
@@ -198,28 +216,7 @@ fn render_tile<R: Rng>(
         let total = (camera_path.len() * lamp_path.len()) as f32;
         let weight = 1.0 / total;
 
-        let mut main_sample = (
-            Sample {
-                wavelength: wavelength,
-                brightness: 0.0,
-                weight: 1.0,
-            },
-            1.0,
-        );
-
         let mut used_additional = true;
-        let mut additional_samples: Vec<_> = (0..renderer.spectrum_samples - 1)
-            .map(|_| {
-                (
-                    Sample {
-                        wavelength: film.sample_wavelength(&mut rng),
-                        brightness: 0.0,
-                        weight: 1.0,
-                    },
-                    1.0,
-                )
-            })
-            .collect();
 
         for bounce in camera_path.drain(..) {
             for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {

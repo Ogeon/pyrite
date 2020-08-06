@@ -68,6 +68,23 @@ impl Film {
         )
     }
 
+    pub fn sample_many_wavelengths<'a>(
+        &self,
+        rng: &'a mut impl Rng,
+        amount: usize,
+    ) -> impl Iterator<Item = f32> + 'a {
+        let step_size = self.wavelength_width / amount as f32;
+        let mut from = self.wavelength_start;
+
+        std::iter::repeat_with(move || {
+            let to = from + step_size;
+            let wavelength = rng.gen_range(from, to);
+            from = to;
+            wavelength
+        })
+        .take(amount)
+    }
+
     fn wavelength_to_grain(&self, wavelength: f32) -> usize {
         ((wavelength - self.wavelength_start) * self.grains_per_wavelength) as usize
     }

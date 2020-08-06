@@ -1,6 +1,6 @@
 use std::{cell::Cell, sync::Arc};
 
-use rand::{self, SeedableRng};
+use rand::{self, Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
 use cgmath::{EuclideanSpace, InnerSpace, Point2, Point3, Vector3};
@@ -62,14 +62,33 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
             |_index, (tile, mut rng), _progress| {
                 let mut all_bounces = vec![];
                 let mut bounces = Vec::with_capacity(renderer.bounces as usize);
+                let mut additional_samples =
+                    Vec::with_capacity(renderer.spectrum_samples as usize - 1);
                 let mut exe = ExecutionContext::new(resources);
 
                 for _ in 0..tile.area() as usize {
                     bounces.clear();
+                    additional_samples.clear();
 
                     let position = tile.sample_point(&mut rng);
                     let ray = camera.ray_towards(&position, &mut rng);
-                    let wavelength = film.sample_wavelength(&mut rng);
+                    additional_samples.extend(
+                        film.sample_many_wavelengths(&mut rng, renderer.spectrum_samples as usize)
+                            .map(|wavelength| {
+                                (
+                                    Sample {
+                                        wavelength,
+                                        brightness: 0.0,
+                                        weight: 1.0,
+                                    },
+                                    1.0,
+                                )
+                            }),
+                    );
+
+                    let mut main_sample =
+                        additional_samples.swap_remove(rng.gen_range(0, additional_samples.len()));
+                    let wavelength = main_sample.0.wavelength;
 
                     trace(
                         &mut bounces,
@@ -83,26 +102,7 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                     );
                     let p = 1.0 / renderer.bounces as f32;
 
-                    let mut sample = Sample {
-                        wavelength: wavelength,
-                        brightness: 0.0,
-                        weight: 1.0,
-                    };
-                    let mut reflectance = 1.0;
-
                     let mut used_additional = true;
-                    let mut additional_samples: Vec<_> = (0..renderer.spectrum_samples - 1)
-                        .map(|_| {
-                            (
-                                Sample {
-                                    wavelength: film.sample_wavelength(&mut rng),
-                                    brightness: 0.0,
-                                    weight: 1.0,
-                                },
-                                1.0,
-                            )
-                        })
-                        .collect();
 
                     let mut current = Parent::Source(position);
                     for bounce in bounces.drain(..) {
@@ -111,7 +111,10 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                                 contribute(&bounce, sample, reflectance, true, &mut exe)
                                     && used_additional;
                         }
-                        contribute(&bounce, &mut sample, &mut reflectance, false, &mut exe);
+                        {
+                            let (ref mut sample, ref mut reflectance) = main_sample;
+                            contribute(&bounce, sample, reflectance, false, &mut exe);
+                        }
 
                         match bounce.ty {
                             BounceType::Diffuse(_, _) => {
@@ -143,9 +146,9 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                         }
                     }
 
-                    film.expose(position, sample);
+                    film.expose(position, main_sample.0);
                     if used_additional {
-                        for (sample, _) in additional_samples {
+                        for (sample, _) in additional_samples.drain(..) {
                             film.expose(position, sample);
                         }
                     }
