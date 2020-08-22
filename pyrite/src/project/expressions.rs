@@ -550,6 +550,12 @@ impl FromValue for Vector {
     }
 }
 
+impl Default for Vector {
+    fn default() -> Self {
+        Vector(Vector4::new(0.0, 0.0, 0.0, 0.0))
+    }
+}
+
 impl Add for Vector {
     type Output = Self;
 

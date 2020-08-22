@@ -4,49 +4,67 @@ use crate::project::{
     textures::{ColorTextureId, MonoTextureId},
 };
 
-use super::registers::{NumberRegister, RgbRegister};
+use super::{
+    registers::{NumberRegister, RgbRegister, VectorRegister},
+    Inputs,
+};
 
 #[derive(Copy, Clone)]
-pub(super) enum Instruction<N, V> {
+pub(super) struct Instruction<N, V> {
+    pub instruction_type: InstructionType<N, V>,
+    pub dependencies: Inputs,
+}
+
+#[derive(Copy, Clone)]
+pub(super) enum InstructionType<N, V> {
     NumberValue {
         number: f32,
+        output: NumberRegister,
     },
     VectorValue {
         x: NumberValue<N>,
         y: NumberValue<N>,
         z: NumberValue<N>,
         w: NumberValue<N>,
+        output: VectorRegister,
     },
     RgbValue {
         red: NumberValue<N>,
         green: NumberValue<N>,
         blue: NumberValue<N>,
+        output: RgbRegister,
     },
     SpectrumValue {
         wavelength: NumberValue<N>,
         spectrum: SpectrumId,
+        output: NumberRegister,
     },
     ColorTextureValue {
         texture_coordinates: VectorValue<V>,
         texture: ColorTextureId,
+        output: RgbRegister,
     },
     MonoTextureValue {
         texture_coordinates: VectorValue<V>,
         texture: MonoTextureId,
+        output: NumberRegister,
     },
     RgbSpectrumValue {
         wavelength: NumberValue<N>,
         source: RgbRegister,
+        output: NumberRegister,
     },
     Fresnel {
         ior: NumberValue<N>,
         env_ior: NumberValue<N>,
         normal: VectorValue<V>,
         incident: VectorValue<V>,
+        output: NumberRegister,
     },
     Blackbody {
         wavelength: NumberValue<N>,
         temperature: NumberValue<N>,
+        output: NumberRegister,
     },
     Convert {
         conversion: ValueConversion,
@@ -56,17 +74,20 @@ pub(super) enum Instruction<N, V> {
         operator: BinaryOperator,
         lhs: usize,
         rhs: usize,
+        output: usize,
     },
     Mix {
         value_type: BinaryValueType,
         lhs: usize,
         rhs: usize,
         amount: NumberValue<N>,
+        output: usize,
     },
     Clamp {
         value: NumberValue<N>,
         min: NumberValue<N>,
         max: NumberValue<N>,
+        output: NumberRegister,
     },
 }
 
@@ -84,7 +105,10 @@ pub(super) enum VectorValue<V> {
 
 #[derive(Copy, Clone)]
 pub(super) enum ValueConversion {
-    RgbToVector { source: RgbRegister },
+    RgbToVector {
+        source: RgbRegister,
+        output: VectorRegister,
+    },
 }
 
 #[derive(Copy, Clone)]

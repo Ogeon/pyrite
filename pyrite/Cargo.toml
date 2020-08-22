@@ -28,6 +28,7 @@ rlua_serde = "0.4"
 bumpalo = "^3.4"
 path-slash = "0.1"
 indicatif = "0.15"
+bitflags = "^1.2"
 
 [build-dependencies]
 csv = "^1.1"

@@ -7,7 +7,9 @@ use crate::{
     lamp::{self, Lamp},
     materials::{ProbabilityInput, Scattering},
     math::DIST_EPSILON,
-    program::{ExecutionContext, NumberInput, ProgramFor, ProgramInput, VectorInput},
+    program::{
+        ExecutionContext, Inputs, MemoizedInput, NumberInput, ProgramFor, ProgramInput, VectorInput,
+    },
     project::expressions::Vector,
     world::World,
 };
@@ -95,6 +97,29 @@ impl ProgramInput for RenderContext {
     }
 }
 
+impl<'a> MemoizedInput<'a> for RenderContext {
+    type Updater = RenderContextUpdater<'a>;
+
+    fn new_updater(&'a mut self, changes: &'a mut Inputs) -> Self::Updater {
+        RenderContextUpdater {
+            input: self,
+            changes,
+        }
+    }
+}
+
+pub(crate) struct RenderContextUpdater<'a> {
+    input: &'a mut RenderContext,
+    changes: &'a mut Inputs,
+}
+
+impl<'a> RenderContextUpdater<'a> {
+    pub fn set_wavelength(&mut self, wavelength: f32) {
+        self.input.wavelength = wavelength;
+        self.changes.insert(Inputs::WAVELENGTH);
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum RenderNumberInput {
     Wavelength,
@@ -170,6 +195,7 @@ pub(crate) struct DirectLight<'a> {
     pub color: LightProgram<'a>,
     pub incident: Vector3<f32>,
     pub normal: Vector3<f32>,
+    pub texture: Point2<f32>,
     pub probability: f32,
 }
 
@@ -363,36 +389,37 @@ fn trace_direct<'w, R: Rng>(
                     };
 
                     if !blocked {
-                        let (color, material_probability, dispersed, target_normal) = match surface
-                        {
-                            lamp::Surface::Physical {
-                                normal: target_normal,
-                                material,
-                                texture,
-                            } => {
-                                let component = material.choose_emissive(rng);
-                                let input = ProbabilityInput {
-                                    wavelength,
-                                    wavelength_used: Cell::new(false),
+                        let (color, material_probability, dispersed, target_normal, texture) =
+                            match surface {
+                                lamp::Surface::Physical {
                                     normal: target_normal,
-                                    incident: ray_out.direction,
-                                    texture_coordinate: texture,
-                                };
+                                    material,
+                                    texture,
+                                } => {
+                                    let component = material.choose_emissive(rng);
+                                    let input = ProbabilityInput {
+                                        wavelength,
+                                        wavelength_used: Cell::new(false),
+                                        normal: target_normal,
+                                        incident: ray_out.direction,
+                                        texture_coordinate: texture,
+                                    };
 
-                                let probability = component.get_probability(exe, &input);
+                                    let probability = component.get_probability(exe, &input);
 
-                                (
-                                    component.bsdf.color,
-                                    probability,
-                                    input.wavelength_used.get(),
-                                    target_normal,
-                                )
-                            }
-                            lamp::Surface::Color(color) => {
-                                let target_normal = -ray_out.direction;
-                                (color, 1.0, false, target_normal)
-                            }
-                        };
+                                    (
+                                        component.bsdf.color,
+                                        probability,
+                                        input.wavelength_used.get(),
+                                        target_normal,
+                                        texture,
+                                    )
+                                }
+                                lamp::Surface::Color(color) => {
+                                    let target_normal = -ray_out.direction;
+                                    (color, 1.0, false, target_normal, Point2::origin())
+                                }
+                            };
                         let scale = weight * probability * brdf(ray_in, normal, ray_out.direction);
 
                         return Some(DirectLight {
@@ -400,6 +427,7 @@ fn trace_direct<'w, R: Rng>(
                             color,
                             incident: ray_out.direction,
                             normal: target_normal,
+                            texture,
                             probability: scale * material_probability,
                         });
                     }

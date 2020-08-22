@@ -21,30 +21,33 @@ impl Registers {
         self.number[register.0]
     }
 
-    pub fn push_number(&mut self, number: f32) {
-        self.number.push(number);
+    pub fn set_number(&mut self, number: f32, register: NumberRegister) {
+        self.number[register.0] = number;
     }
 
     pub fn get_vector(&self, register: VectorRegister) -> Vector {
         self.vector[register.0]
     }
 
-    pub fn push_vector(&mut self, vector: Vector) {
-        self.vector.push(vector);
+    pub fn set_vector(&mut self, vector: Vector, register: VectorRegister) {
+        self.vector[register.0] = vector;
     }
 
     pub fn get_rgb(&self, register: RgbRegister) -> LinSrgba {
         self.rgb[register.0]
     }
 
-    pub fn push_rgb(&mut self, rgb: LinSrgba) {
-        self.rgb.push(rgb);
+    pub fn set_rgb(&mut self, rgb: LinSrgba, register: RgbRegister) {
+        self.rgb[register.0] = rgb;
     }
 
-    pub fn clear(&mut self) {
-        self.number.clear();
-        self.vector.clear();
-        self.rgb.clear();
+    pub fn reserve(&mut self, numbers: usize, vectors: usize, rgb_values: usize) {
+        self.number
+            .resize_with(numbers.max(self.number.len()), Default::default);
+        self.vector
+            .resize_with(vectors.max(self.vector.len()), Default::default);
+        self.rgb
+            .resize_with(rgb_values.max(self.rgb.len()), Default::default);
     }
 }
 

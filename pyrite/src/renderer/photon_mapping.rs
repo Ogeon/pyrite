@@ -5,11 +5,13 @@ use rand_xorshift::XorShiftRng;
 
 use cgmath::{EuclideanSpace, InnerSpace, Point2, Point3, Vector3};
 
-use super::{algorithm::make_tiles, Progress, Renderer, TaskRunner};
+use super::{
+    algorithm::{contribute, make_tiles},
+    Progress, Renderer, TaskRunner,
+};
 use crate::cameras::Camera;
 use crate::film::{DetachedPixel, Film, Sample};
 use crate::lamp::Surface;
-use crate::renderer::algorithm::contribute;
 use crate::spatial::kd_tree::{self, KdTree};
 use crate::spatial::Dim3;
 use crate::tracer::{trace, Bounce, BounceType, RenderContext};
@@ -102,19 +104,18 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                     );
                     let p = 1.0 / renderer.bounces as f32;
 
-                    let mut used_additional = true;
+                    let mut use_additional = true;
 
                     let mut current = Parent::Source(position);
                     for bounce in bounces.drain(..) {
-                        for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
-                            used_additional =
-                                contribute(&bounce, sample, reflectance, true, &mut exe)
-                                    && used_additional;
-                        }
-                        {
-                            let (ref mut sample, ref mut reflectance) = main_sample;
-                            contribute(&bounce, sample, reflectance, false, &mut exe);
-                        }
+                        use_additional = !bounce.dispersed && use_additional;
+                        let additional_samples = if use_additional {
+                            &mut *additional_samples
+                        } else {
+                            &mut []
+                        };
+
+                        contribute(&bounce, &mut main_sample, additional_samples, &mut exe);
 
                         match bounce.ty {
                             BounceType::Diffuse(_, _) => {
@@ -147,7 +148,7 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                     }
 
                     film.expose(position, main_sample.0);
-                    if used_additional {
+                    if use_additional {
                         for (sample, _) in additional_samples.drain(..) {
                             film.expose(position, sample);
                         }

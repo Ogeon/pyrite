@@ -216,18 +216,17 @@ fn render_tile<R: Rng>(
         let total = (camera_path.len() * lamp_path.len()) as f32;
         let weight = 1.0 / total;
 
-        let mut used_additional = true;
+        let mut use_additional = true;
 
-        for bounce in camera_path.drain(..) {
-            for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
-                used_additional =
-                    contribute(&bounce, sample, reflectance, true, &mut exe) && used_additional;
-            }
+        for bounce in &camera_path {
+            use_additional = !bounce.dispersed && use_additional;
+            let additional_samples_slice = if use_additional {
+                &mut *additional_samples
+            } else {
+                &mut []
+            };
 
-            {
-                let (ref mut sample, ref mut reflectance) = main_sample;
-                contribute(&bounce, sample, reflectance, false, &mut exe);
-            }
+            contribute(bounce, &mut main_sample, additional_samples_slice, &mut exe);
 
             for mut contribution in connect_paths(
                 &bounce,
@@ -235,7 +234,7 @@ fn render_tile<R: Rng>(
                 &additional_samples,
                 &lamp_path,
                 world,
-                used_additional,
+                use_additional,
                 &mut exe,
             ) {
                 contribution.weight = weight;
@@ -245,7 +244,7 @@ fn render_tile<R: Rng>(
 
         film.expose(position, main_sample.0.clone());
 
-        if used_additional {
+        if use_additional {
             for &(ref sample, _) in &additional_samples {
                 film.expose(position, sample.clone());
             }
@@ -270,7 +269,7 @@ fn render_tile<R: Rng>(
                     main_sample.0.weight = weight;
                     main_sample.1 = scale;
 
-                    used_additional = true;
+                    use_additional = true;
                     for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
                         sample.brightness = 0.0;
                         sample.weight = weight;
@@ -278,25 +277,26 @@ fn render_tile<R: Rng>(
                     }
 
                     for (i, bounce) in lamp_path[i..].iter().enumerate() {
-                        for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
-                            used_additional =
-                                contribute(bounce, sample, reflectance, true, &mut exe)
-                                    && used_additional;
-                            if i == 0 {
+                        use_additional = !bounce.dispersed && use_additional;
+                        let additional_samples = if use_additional {
+                            &mut *additional_samples
+                        } else {
+                            &mut []
+                        };
+
+                        contribute(bounce, &mut main_sample, additional_samples, &mut exe);
+
+                        if i == 0 {
+                            main_sample.1 *= brdf_in;
+                            for (_, reflectance) in additional_samples {
                                 *reflectance *= brdf_in;
                             }
-                        }
-
-                        let (ref mut sample, ref mut reflectance) = main_sample;
-                        contribute(bounce, sample, reflectance, false, &mut exe);
-                        if i == 0 {
-                            *reflectance *= brdf_in;
                         }
                     }
 
                     film.expose(position, main_sample.0.clone());
 
-                    if used_additional {
+                    if use_additional {
                         for &(ref sample, _) in &additional_samples {
                             film.expose(position, sample.clone());
                         }
@@ -371,18 +371,20 @@ fn connect_paths<'a>(
         main.1 *= scale;
 
         for (i, bounce) in path[i..].iter().enumerate() {
-            for &mut (ref mut sample, ref mut reflectance) in &mut additional {
-                use_additional =
-                    contribute(bounce, sample, reflectance, true, exe) && use_additional;
-                if i == 0 {
+            use_additional = !bounce.dispersed && use_additional;
+            let additional_samples = if use_additional {
+                &mut *additional
+            } else {
+                &mut []
+            };
+
+            contribute(bounce, &mut main, additional_samples, exe);
+
+            if i == 0 {
+                main.1 *= brdf_in;
+                for (_, reflectance) in additional_samples {
                     *reflectance *= brdf_in;
                 }
-            }
-
-            let (ref mut sample, ref mut reflectance) = main;
-            contribute(bounce, sample, reflectance, false, exe);
-            if i == 0 {
-                *reflectance *= brdf_in;
             }
         }
 

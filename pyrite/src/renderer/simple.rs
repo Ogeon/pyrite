@@ -117,21 +117,22 @@ fn render_tile<R: Rng>(
             &mut exe,
         );
 
-        let mut used_additional = true;
+        let mut use_additional = true;
 
         for bounce in &path {
-            for &mut (ref mut sample, ref mut reflectance) in &mut additional_samples {
-                used_additional =
-                    contribute(bounce, sample, reflectance, true, &mut exe) && used_additional;
-            }
+            use_additional = !bounce.dispersed && use_additional;
+            let additional_samples = if use_additional {
+                &mut *additional_samples
+            } else {
+                &mut []
+            };
 
-            let (ref mut sample, ref mut reflectance) = main_sample;
-            contribute(bounce, sample, reflectance, false, &mut exe);
+            contribute(bounce, &mut main_sample, additional_samples, &mut exe);
         }
 
         film.expose(position, main_sample.0);
 
-        if used_additional {
+        if use_additional {
             for (sample, _) in additional_samples.drain(..) {
                 film.expose(position, sample);
             }
