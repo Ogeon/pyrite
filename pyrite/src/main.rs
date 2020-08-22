@@ -345,9 +345,9 @@ fn render<P: AsRef<Path>>(
 fn spectrum_to_rgb(
     step_size: f32,
     spectrum: Spectrum,
-    red: &project::spectra::Spectrum,
-    green: &project::spectra::Spectrum,
-    blue: &project::spectra::Spectrum,
+    red: &project::spectra::Spectrum<f32>,
+    green: &project::spectra::Spectrum<f32>,
+    blue: &project::spectra::Spectrum<f32>,
 ) -> LinSrgb {
     spectrum_to_tristimulus(
         spectrum.spectrum_width(),
@@ -384,9 +384,9 @@ fn spectrum_to_tristimulus<T, S>(
     step_size: f32,
     spectrum: S,
     mut sample: impl FnMut(&S, f32) -> f32,
-    first: &project::spectra::Spectrum,
-    second: &project::spectra::Spectrum,
-    third: &project::spectra::Spectrum,
+    first: &project::spectra::Spectrum<f32>,
+    second: &project::spectra::Spectrum<f32>,
+    third: &project::spectra::Spectrum<f32>,
 ) -> T
 where
     T: ComponentWise<Scalar = f32>

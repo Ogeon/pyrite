@@ -145,12 +145,9 @@ impl<'p> ExecutionContext<'p> {
                     let wavelength = get_number_value(wavelength, &self.registers, input);
 
                     let rgb = self.registers.get_rgb(source).color;
+                    let response = rgb * crate::rgb::response::RGB.get(wavelength);
 
-                    let red_response = rgb.red * crate::rgb::response::RED.get(wavelength);
-                    let green_response = rgb.green * crate::rgb::response::GREEN.get(wavelength);
-                    let blue_response = rgb.blue * crate::rgb::response::BLUE.get(wavelength);
-
-                    let intensity = red_response + green_response + blue_response;
+                    let intensity = response.red + response.green + response.blue;
                     self.registers.set_number(intensity, output);
                 }
                 InstructionType::Fresnel {

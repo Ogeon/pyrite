@@ -3,42 +3,49 @@ use cgmath::Vector3;
 pub const DIST_EPSILON: f32 = 0.0001;
 
 pub mod utils {
-    use std;
+    use std::{
+        self,
+        ops::{Add, Mul, Sub},
+    };
 
     use rand::Rng;
 
     use super::DIST_EPSILON;
     use cgmath::{InnerSpace, Vector3};
 
-    pub struct Interpolated<T = Vec<(f32, f32)>> {
-        pub points: T,
+    pub struct Interpolated<P = Vec<(f32, f32)>> {
+        pub points: P,
     }
 
-    impl<P: AsRef<[(f32, f32)]>> Interpolated<P> {
-        pub fn get(&self, input: f32) -> f32 {
+    impl<P> Interpolated<P> {
+        pub fn get<T>(&self, input: f32) -> T
+        where
+            P: AsRef<[(f32, T)]>,
+            T: Clone + Default + Add<Output = T> + Sub<Output = T> + Mul<f32, Output = T>,
+        {
             let points = self.points.as_ref();
             if points.len() == 0 {
-                return 0.0;
+                return Default::default();
             }
 
             let mut min = 0;
             let mut max = points.len() - 1;
 
-            let (min_x, _min_y) = points[min];
+            let (min_x, _min_y) = points[min].clone();
 
             if min_x >= input {
-                return 0.0; // min_y
+                return Default::default(); // min_y
             }
 
-            let (max_x, _max_y) = points[max];
+            let (max_x, _max_y) = points[max].clone();
 
             if max_x <= input {
-                return 0.0; // max_y
+                return Default::default(); // max_y
             }
 
             while max > min + 1 {
                 let check = (max + min) / 2;
-                let (check_x, check_y) = points[check];
+                let (check_x, check_y) = points[check].clone();
 
                 if check_x == input {
                     return check_y;
@@ -51,15 +58,15 @@ pub mod utils {
                 }
             }
 
-            let (min_x, min_y) = points[min];
-            let (max_x, max_y) = points[max];
+            let (min_x, min_y) = points[min].clone();
+            let (max_x, max_y) = points[max].clone();
 
             if input < min_x {
-                0.0 //min_y
+                Default::default() //min_y
             } else if input > max_x {
-                0.0 //max_y
+                Default::default() //max_y
             } else {
-                min_y + (max_y - min_y) * (input - min_x) / (max_x - min_x)
+                min_y.clone() + (max_y - min_y) * ((input - min_x) / (max_x - min_x))
             }
         }
     }
