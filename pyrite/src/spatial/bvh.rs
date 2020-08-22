@@ -1,9 +1,9 @@
-use cgmath::{EuclideanSpace, InnerSpace, Point3};
-use collision::{Aabb, Aabb3, Continuous, Ray3, SurfaceArea, Union};
+use cgmath::{EuclideanSpace, Point3};
+use collision::{Aabb, Aabb3, Ray3, SurfaceArea, Union};
 
 use super::Dim3;
 
-use crate::math::DIST_EPSILON;
+use crate::math::{aabb_intersection_distance, DIST_EPSILON};
 
 pub(crate) struct Bvh<T> {
     nodes: Vec<FlatBvhNode<T>>,
@@ -205,14 +205,12 @@ pub struct Intersections<'a, T> {
 
 impl<'a, T> Intersections<'a, T> {
     pub fn next(&mut self, max_distance: f32) -> Option<&T> {
-        let max_sq_distance = max_distance * max_distance;
-
         // Contains the next node after skipping a few
         let mut next_node = None;
 
         while let Some(node) = next_node.take().or_else(|| self.nodes.next()) {
-            if let Some(intersection) = node.bounding_box.intersection(&self.ray) {
-                if (intersection - self.ray.origin).magnitude2() >= max_sq_distance {
+            if let Some(distance) = aabb_intersection_distance(node.bounding_box, self.ray) {
+                if distance >= max_distance {
                     if node.subtree_size() > 0 {
                         next_node = self.nodes.nth(node.subtree_size());
                     }

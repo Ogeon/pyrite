@@ -1,4 +1,5 @@
-use cgmath::Vector3;
+use cgmath::{ElementWise, Vector3};
+use collision::{Aabb3, Ray3};
 
 pub const DIST_EPSILON: f32 = 0.0001;
 
@@ -178,4 +179,29 @@ pub(crate) fn blackbody(wavelength: f32, temperature: f32) -> f32 {
     let power_term = 3.74183e-16 * wavelength.powi(-5);
 
     power_term / ((1.4388e-2 / (wavelength * temperature)).exp() - 1.0)
+}
+
+pub(crate) fn aabb_intersection_distance(aabb: Aabb3<f32>, ray: Ray3<f32>) -> Option<f32> {
+    let inv_dir = Vector3::new(1.0, 1.0, 1.0).div_element_wise(ray.direction);
+
+    let mut t1 = (aabb.min.x - ray.origin.x) * inv_dir.x;
+    let mut t2 = (aabb.max.x - ray.origin.x) * inv_dir.x;
+
+    let mut tmin = t1.min(t2);
+    let mut tmax = t1.max(t2);
+
+    for i in 1..3 {
+        t1 = (aabb.min[i] - ray.origin[i]) * inv_dir[i];
+        t2 = (aabb.max[i] - ray.origin[i]) * inv_dir[i];
+
+        tmin = tmin.max(t1.min(t2));
+        tmax = tmax.min(t1.max(t2));
+    }
+
+    // Add && (tmin >= 0.0 || tmax >= 0.0) back?
+    if tmax >= tmin && tmax >= 0.0 {
+        Some(tmin.max(0.0))
+    } else {
+        None
+    }
 }
