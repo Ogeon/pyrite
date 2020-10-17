@@ -12,10 +12,9 @@ return {
 
     renderer = renderer.simple {
         pixel_samples = 600,
-        spectrum_samples = 10,
+        spectrum_samples = 20,
         spectrum_bins = 50,
         tile_size = 32,
-        light_samples = 4,
     },
 
     world = {
@@ -23,43 +22,52 @@ return {
             shape.sphere {
                 radius = 50.0,
                 position = vector(0, -50, 10),
-                material = {surface = material.diffuse {color = 1}},
+                material = {
+                    surface = {reflection = material.diffuse {color = 1}},
+                },
             },
 
             ball:with{
                 position = ball.position:with{y = 1.5},
-                material = {
-                    surface = material.emissive {color = light_source.d65 * 3},
-                },
+                material = {surface = {emission = light_source.d65 * 3}},
             },
 
             ball:with{
                 position = ball.position:with{x = -3},
                 material = {
-                    surface = mix(
-                        material.mirror {color = 1}, material.diffuse {
-                            color = spectrum {
-                                format = "curve",
-                                points = {
-                                    {400, 0},
-                                    {450, 0.3},
-                                    {500, 0},
-                                    {550, 1},
-                                    {600, 0},
+                    surface = {
+                        reflection = mix(
+                            material.mirror {color = 1}, material.diffuse {
+                                color = spectrum {
+                                    format = "curve",
+                                    points = {
+                                        {400, 0},
+                                        {450, 0.3},
+                                        {500, 0},
+                                        {550, 1},
+                                        {600, 0},
+                                    },
                                 },
-                            },
-                        }, fresnel(1.5)
-                    ),
+                            }, fresnel(1.5)
+                        ),
+                    },
                 },
             },
 
             ball:with{
                 position = ball.position:with{x = 3},
                 material = {
-                    surface = material.diffuse {
-                        color = spectrum {
-                            format = "curve",
-                            points = {{580, 0}, {600, 1}, {610, 1}, {650, 0}},
+                    surface = {
+                        reflection = material.diffuse {
+                            color = spectrum {
+                                format = "curve",
+                                points = {
+                                    {580, 0},
+                                    {600, 1},
+                                    {610, 1},
+                                    {650, 0},
+                                },
+                            },
                         },
                     },
                 },

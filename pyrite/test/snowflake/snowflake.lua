@@ -1,30 +1,33 @@
 local ice = {
-    surface = material.refractive {
-        ior = 1.30144,
-        dispersion = 0.00287,
-        color = 1,
+    surface = {
+        reflection = material.refractive {
+            ior = 1.30144,
+            dispersion = 0.00287,
+            color = 1,
+        },
     },
 }
 
 local background = {
-    surface = material.diffuse {
-        color = spectrum {
-            format = "curve",
-            points = {{400, 0.025}, {600, 0.0175}, {700, 0.01}},
-        } * 0.2,
+    surface = {
+        reflection = material.diffuse {
+            color = spectrum {
+                format = "curve",
+                points = {{400, 0.025}, {600, 0.0175}, {700, 0.01}},
+            } * 0.2,
+        },
     },
 }
 
 return {
     image = {width = 512, height = 512},
 
-    renderer = renderer.bidirectional {
-        pixel_samples = 100,
+    renderer = renderer.simple {
+        pixel_samples = 300,
         spectrum_samples = 5,
         spectrum_bins = 50,
         tile_size = 32,
         bounces = 256,
-        light_samples = 2,
     },
 
     camera = camera.perspective {
@@ -50,16 +53,12 @@ return {
             shape.sphere {
                 position = vector(0, 150, 50),
                 radius = 30,
-                material = {
-                    surface = material.emissive {color = light_source.d65 * 6},
-                },
+                material = {surface = {emission = light_source.d65 * 6}},
             },
             shape.sphere {
                 position = vector(100, -100, 50),
                 radius = 10,
-                material = {
-                    surface = material.emissive {color = light_source.d65 * 3},
-                },
+                material = {surface = {emission = light_source.d65 * 3}},
             },
             shape.sphere {
                 radius = 200,

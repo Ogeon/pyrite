@@ -1,7 +1,5 @@
 use std::error::Error;
 
-use rand::Rng;
-
 use genmesh;
 use obj;
 
@@ -312,7 +310,7 @@ impl<'p> World<'p> {
 
         let mut intersections = self.finite_objects.ray_intersect(ray);
         while let Some(&object) = intersections.next(closest_distance) {
-            if let Some(intersection) = object.ray_intersect(&ray) {
+            if let Some(intersection) = object.ray_intersect(ray) {
                 if intersection.distance > DIST_EPSILON && intersection.distance < closest_distance
                 {
                     closest_distance = intersection.distance;
@@ -322,12 +320,6 @@ impl<'p> World<'p> {
         }
 
         result
-    }
-
-    pub fn pick_lamp(&self, rng: &mut impl Rng) -> Option<(&Lamp, f32)> {
-        self.lights
-            .get(rng.gen_range(0, self.lights.len()))
-            .map(|l| (l, 1.0 / self.lights.len() as f32))
     }
 }
 
@@ -342,56 +334,59 @@ fn make_triangle<'p, M: obj::GenPolygon>(
     let v2 = obj.position[v2].into();
     let v3 = obj.position[v3].into();
 
+    let delta_position1: Vector3<f32> = v2 - v1;
+    let delta_position2: Vector3<f32> = v3 - v1;
+    let mut face_normal = delta_position1.cross(delta_position2).normalize();
+
     let (n1, n2, n3) = match (n1, n2, n3) {
         (Some(n1), Some(n2), Some(n3)) => {
             let n1 = obj.normal[n1].into();
             let n2 = obj.normal[n2].into();
             let n3 = obj.normal[n3].into();
+
+            if face_normal.dot(n1) < 0.0 {
+                face_normal = -face_normal;
+            }
+
             (n1, n2, n3)
         }
-        _ => {
-            let a: Vector3<_> = v2 - v1;
-            let b = v3 - v1;
-            let normal = a.cross(b).normalize();
-            (normal, normal, normal)
-        }
+        _ => (face_normal, face_normal, face_normal),
     };
 
-    let t1 = t1
-        .map(|t1| obj.texture[t1].into())
-        .unwrap_or(Point2::origin());
-    let t2 = t2
-        .map(|t2| obj.texture[t2].into())
-        .unwrap_or(Point2::origin());
-    let t3 = t3
-        .map(|t3| obj.texture[t3].into())
-        .unwrap_or(Point2::origin());
+    let t1 = t1.map(|t1| obj.texture[t1].into());
+    let t2 = t2.map(|t2| obj.texture[t2].into());
+    let t3 = t3.map(|t3| obj.texture[t3].into());
 
-    let delta_position1 = v2 - v1;
-    let delta_position2 = v3 - v1;
+    let (tangent, bitangent) = if let (Some(t1), Some(t2), Some(t3)) = (t1, t2, t3) {
+        let delta_texture1: Vector2<f32> = t2 - t1;
+        let delta_texture2: Vector2<f32> = t3 - t1;
 
-    let delta_texture1 = t2 - t1;
-    let delta_texture2 = t3 - t1;
-
-    let r = 1.0 / (delta_texture1.x * delta_texture2.y - delta_texture1.y * delta_texture2.x);
-    let tangent = (delta_position1 * delta_texture2.y - delta_position2 * delta_texture1.y) * r;
-    let bitangent = (delta_position2 * delta_texture1.x - delta_position1 * delta_texture2.x) * r;
+        let r = 1.0 / (delta_texture1.x * delta_texture2.y - delta_texture1.y * delta_texture2.x);
+        let tangent: Vector3<f32> =
+            (delta_position1 * delta_texture2.y - delta_position2 * delta_texture1.y) * r;
+        let tangent = tangent.normalize();
+        (tangent, face_normal.cross(tangent).normalize())
+    } else {
+        let bitangent = face_normal.cross(delta_position1).normalize();
+        let tangent = bitangent.cross(face_normal).normalize();
+        (tangent, bitangent)
+    };
 
     Triangle {
         v1: Vertex {
             position: v1,
             normal: Normal::new(n1, Matrix3::from_cols(tangent, bitangent, n1).into()),
-            texture: t1,
+            texture: t1.unwrap_or(Point2::origin()),
         },
         v2: Vertex {
             position: v2,
             normal: Normal::new(n2, Matrix3::from_cols(tangent, bitangent, n2).into()),
-            texture: t2,
+            texture: t2.unwrap_or(Point2::origin()),
         },
         v3: Vertex {
             position: v3,
             normal: Normal::new(n3, Matrix3::from_cols(tangent, bitangent, n3).into()),
-            texture: t3,
+            texture: t3.unwrap_or(Point2::origin()),
         },
         edge1: delta_position1,
         edge2: delta_position2,

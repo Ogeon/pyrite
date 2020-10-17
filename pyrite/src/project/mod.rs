@@ -216,6 +216,7 @@ impl<'lua> Parse<'lua> for Camera {
 pub enum Renderer {
     Simple {
         shared: RendererShared,
+        direct_light: Option<bool>,
     },
     Bidirectional {
         shared: RendererShared,
@@ -239,6 +240,7 @@ impl<'lua> Parse<'lua> for Renderer {
         parse_enum!(context {
             "simple" => Ok(Renderer::Simple {
                 shared,
+                direct_light: context.expect_field("direct_light")?,
             }),
             "bidirectional" => Ok(Renderer::Bidirectional {
                 shared,
@@ -259,8 +261,7 @@ pub struct RendererShared {
     pub threads: Option<usize>,
     pub bounces: Option<u32>,
     pub pixel_samples: u32,
-    pub light_samples: Option<usize>,
-    pub spectrum_samples: Option<u32>,
+    pub spectrum_samples: Option<usize>,
     pub spectrum_resolution: Option<usize>,
     pub tile_size: Option<usize>,
 }
@@ -273,7 +274,6 @@ impl RendererShared {
             threads: context.expect_field("threads")?,
             bounces: context.expect_field("bounces")?,
             pixel_samples: context.expect_field("pixel_samples")?,
-            light_samples: context.expect_field("light_samples")?,
             spectrum_samples: context.expect_field("spectrum_samples")?,
             spectrum_resolution: context.expect_field("spectrum_resolution")?,
             tile_size: context.expect_field("tile_size")?,
@@ -454,7 +454,7 @@ impl<'lua> Parse<'lua> for JuliaType {
 }
 
 pub(crate) struct Material {
-    pub surface: MaterialId,
+    pub surface: SurfaceMaterial,
     pub normal_map: Option<expressions::Expression>,
 }
 
@@ -463,78 +463,29 @@ impl<'lua> Parse<'lua> for Material {
 
     fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
         Ok(Material {
-            surface: context.materials.insert(context.expect_field("surface")?)?,
+            surface: context.parse_field("surface")?,
             normal_map: context.parse_field("normal_map")?,
         })
     }
 }
 
-pub enum SurfaceMaterial {
-    Diffuse {
-        color: self::expressions::Expression,
-    },
-    Emission {
-        color: self::expressions::Expression,
-    },
-    Mirror {
-        color: self::expressions::Expression,
-    },
-    Refractive {
-        color: self::expressions::Expression,
-        ior: self::expressions::Expression,
-        dispersion: Option<self::expressions::Expression>,
-        env_ior: Option<self::expressions::Expression>,
-        env_dispersion: Option<self::expressions::Expression>,
-    },
-    Mix {
-        amount: self::expressions::Expression,
-        lhs: Box<SurfaceMaterial>,
-        rhs: Box<SurfaceMaterial>,
-    },
-    FresnelMix {
-        ior: self::expressions::Expression,
-        dispersion: Option<self::expressions::Expression>,
-        env_ior: Option<self::expressions::Expression>,
-        env_dispersion: Option<self::expressions::Expression>,
-        reflect: Box<SurfaceMaterial>,
-        refract: Box<SurfaceMaterial>,
-    },
+pub(crate) struct SurfaceMaterial {
+    pub reflection: Option<MaterialId>,
+    pub emission: Option<expressions::Expression>,
 }
 
 impl<'lua> Parse<'lua> for SurfaceMaterial {
     type Input = rlua::Table<'lua>;
 
     fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        parse_enum!(context {
-            "diffuse" => Ok(SurfaceMaterial::Diffuse {
-                color: context.parse_field("color")?,
-            }),
-            "emission" => Ok(SurfaceMaterial::Emission {
-                color: context.parse_field("color")?,
-            }),
-            "mirror" => Ok(SurfaceMaterial::Mirror {
-                color: context.parse_field("color")?,
-            }),
-            "refractive" => Ok(SurfaceMaterial::Refractive {
-                color: context.parse_field("color")?,
-                ior: context.parse_field("ior")?,
-                env_ior: context.parse_field("env_ior")?,
-                dispersion: context.parse_field("dispersion")?,
-                env_dispersion: context.parse_field("env_dispersion")?,
-            }),
-            "mix" => Ok(SurfaceMaterial::Mix {
-                amount: context.parse_field("amount")?,
-                lhs: Box::new(context.parse_field("lhs")?),
-                rhs: Box::new(context.parse_field("rhs")?),
-            }),
-            "fresnel_mix" => Ok(SurfaceMaterial::FresnelMix {
-                ior: context.parse_field("ior")?,
-                env_ior: context.parse_field("env_ior")?,
-                dispersion: context.parse_field("dispersion")?,
-                env_dispersion: context.parse_field("env_dispersion")?,
-                reflect: Box::new(context.parse_field("reflect")?),
-                refract: Box::new(context.parse_field("refract")?),
-            }),
+        let reflection = context
+            .expect_field::<Option<_>>("reflection")?
+            .map(|table| context.materials.insert(table))
+            .transpose()?;
+
+        Ok(SurfaceMaterial {
+            reflection,
+            emission: context.parse_field("emission")?,
         })
     }
 }

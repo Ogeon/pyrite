@@ -127,7 +127,7 @@ impl Into<Inputs> for NumberInput {
 #[derive(Hash, Eq, PartialEq, Copy, Clone)]
 pub(crate) enum VectorInput {
     Normal,
-    Incident,
+    RayDirection,
     TextureCoordinates,
 }
 
@@ -135,7 +135,7 @@ impl Into<Inputs> for VectorInput {
     fn into(self) -> Inputs {
         match self {
             VectorInput::Normal => Inputs::NORMAL,
-            VectorInput::Incident => Inputs::INCIDENT,
+            VectorInput::RayDirection => Inputs::RAY_DIRECTION,
             VectorInput::TextureCoordinates => Inputs::TEXTURE_COORDINATES,
         }
     }
@@ -152,7 +152,7 @@ bitflags! {
         const WAVELENGTH = 0b0000_0001;
 
         const NORMAL = 0b0001_0000;
-        const INCIDENT = 0b0010_0000;
+        const RAY_DIRECTION = 0b0010_0000;
         const TEXTURE_COORDINATES = 0b0100_0000;
     }
 }

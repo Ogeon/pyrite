@@ -6,11 +6,10 @@ use cgmath::{
 };
 use collision::{Aabb, Aabb3, Continuous, Ray3};
 
-use rand::Rng;
-
 use crate::{
     materials::Material,
     math::{self, DIST_EPSILON},
+    renderer::samplers::Sampler,
     spatial::bvh::Bounded,
     tracer::ParametricValue,
 };
@@ -52,7 +51,7 @@ pub(crate) enum Shape<'p> {
 }
 
 impl<'p> Shape<'p> {
-    pub fn ray_intersect(&self, ray: &Ray3<f32>) -> Option<Intersection> {
+    pub fn ray_intersect(&self, ray: Ray3<f32>) -> Option<Intersection> {
         match *self {
             Sphere {
                 ref position,
@@ -64,7 +63,7 @@ impl<'p> Shape<'p> {
                     center: position.clone(),
                 };
 
-                sphere.intersection(ray).map(|intersection| Intersection {
+                sphere.intersection(&ray).map(|intersection| Intersection {
                     distance: (intersection - ray.origin).magnitude(),
                     surface_point: SurfacePoint {
                         position: intersection,
@@ -163,14 +162,14 @@ impl<'p> Shape<'p> {
         }
     }
 
-    pub fn sample_point(&self, rng: &mut impl Rng) -> Option<SurfacePoint> {
+    pub fn sample_point(&self, sampler: &mut dyn Sampler) -> Option<SurfacePoint> {
         match *self {
             Sphere {
                 ref position,
                 radius,
                 ..
             } => {
-                let sphere_point = math::utils::sample_sphere(rng);
+                let sphere_point = math::utils::sample_sphere(sampler);
 
                 Some(SurfacePoint {
                     position: position + sphere_point * radius,
@@ -183,8 +182,8 @@ impl<'p> Shape<'p> {
                 ref v3,
                 ..
             } => {
-                let u: f32 = rng.gen();
-                let v = rng.gen();
+                let u: f32 = sampler.gen();
+                let v = sampler.gen();
 
                 let a = v2.position - v1.position;
                 let b = v3.position - v1.position;
@@ -206,7 +205,11 @@ impl<'p> Shape<'p> {
         }
     }
 
-    pub fn sample_towards(&self, rng: &mut impl Rng, target: &Point3<f32>) -> Option<Intersection> {
+    pub fn sample_towards(
+        &self,
+        sampler: &mut dyn Sampler,
+        target: &Point3<f32>,
+    ) -> Option<Intersection> {
         match *self {
             Sphere {
                 ref position,
@@ -220,9 +223,9 @@ impl<'p> Shape<'p> {
                 if dist2 > radius * radius {
                     let cos_theta_max = (1.0 - (radius * radius) / dist2).max(0.0).sqrt();
 
-                    let ray_dir = math::utils::sample_cone(rng, dir.normalize(), cos_theta_max);
+                    let ray_dir = math::utils::sample_cone(sampler, dir.normalize(), cos_theta_max);
 
-                    let intersection = self.ray_intersect(&Ray3::new(*target, ray_dir));
+                    let intersection = self.ray_intersect(Ray3::new(*target, ray_dir));
 
                     if let Some(intersection) = intersection {
                         Some(intersection)
@@ -237,36 +240,19 @@ impl<'p> Shape<'p> {
                         })
                     }
                 } else {
-                    self.sample_point(rng).map(|surface_point| Intersection {
-                        distance: (surface_point.position - target).magnitude(),
-                        surface_point,
-                    })
+                    self.sample_point(sampler)
+                        .map(|surface_point| Intersection {
+                            distance: (surface_point.position - target).magnitude(),
+                            surface_point,
+                        })
                 }
             }
-            _ => self.sample_point(rng).map(|surface_point| Intersection {
-                distance: (surface_point.position - target).magnitude(),
-                surface_point,
-            }),
-        }
-    }
-
-    pub fn solid_angle_towards(&self, target: &Point3<f32>) -> Option<f32> {
-        match *self {
-            Sphere {
-                ref position,
-                radius,
-                ..
-            } => {
-                let dist2 = (position - target).magnitude2();
-                if dist2 > radius * radius {
-                    let cos_theta_max = (1.0 - (radius * radius) / dist2).max(0.0).sqrt();
-                    let a = math::utils::solid_angle(cos_theta_max);
-                    Some(a)
-                } else {
-                    None
-                }
-            }
-            _ => None,
+            _ => self
+                .sample_point(sampler)
+                .map(|surface_point| Intersection {
+                    distance: (surface_point.position - target).magnitude(),
+                    surface_point,
+                }),
         }
     }
 
@@ -284,6 +270,43 @@ impl<'p> Shape<'p> {
                 0.5 * a.cross(b).magnitude()
             }
             RayMarched { .. } => INFINITY,
+        }
+    }
+
+    pub fn emission_pdf(
+        &self,
+        target: Point3<f32>,
+        in_direction: Vector3<f32>,
+        normal: Vector3<f32>,
+    ) -> f32 {
+        let ray = Ray3::new(target, in_direction);
+        let intersection = if let Some(intersection) = self.ray_intersect(ray) {
+            intersection
+        } else {
+            return 0.0;
+        };
+
+        match *self {
+            Sphere {
+                position, radius, ..
+            } => {
+                let dist2 = (position - target).magnitude2();
+                if dist2 > radius * radius {
+                    let cos_theta_max = (1.0 - (radius * radius) / dist2).max(0.0).sqrt();
+                    if cos_theta_max < 1.0 {
+                        1.0 / (2.0 * std::f32::consts::PI * (1.0 - cos_theta_max))
+                    } else {
+                        0.0
+                    }
+                } else {
+                    intersection.distance * intersection.distance
+                        / (normal.dot(-in_direction).abs() * self.surface_area())
+                }
+            }
+            _ => {
+                intersection.distance * intersection.distance
+                    / (normal.dot(-in_direction).abs() * self.surface_area())
+            }
         }
     }
 
@@ -502,6 +525,15 @@ impl<'a> SurfacePoint<'a> {
             ShapeSurfacePoint::RayMarched { shape, .. } => shape.get_material(),
         }
     }
+
+    pub fn is_shape(&self, other_shape: &'a Shape<'a>) -> bool {
+        match self.shape {
+            ShapeSurfacePoint::Sphere { shape }
+            | ShapeSurfacePoint::Triangle { shape, .. }
+            | ShapeSurfacePoint::RayMarched { shape, .. } => std::ptr::eq(shape, other_shape),
+            ShapeSurfacePoint::Plane { .. } => false,
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -536,7 +568,10 @@ pub struct Normal {
 
 impl Normal {
     pub fn new(vector: Vector3<f32>, from_space: Quaternion<f32>) -> Self {
-        Normal { vector, from_space }
+        Normal {
+            vector: vector.normalize(),
+            from_space: from_space.normalize(),
+        }
     }
 
     pub fn from_vector(vector: Vector3<f32>) -> Self {
@@ -581,6 +616,14 @@ impl Normal {
 
         Normal { vector, from_space }
     }
+
+    pub fn tilted(&self, new_vector: Vector3<f32>) -> Normal {
+        Normal {
+            vector: new_vector.normalize(),
+            from_space: Quaternion::from_arc(self.vector, new_vector, None).normalize()
+                * self.from_space,
+        }
+    }
 }
 
 pub enum BoundingVolume {
@@ -589,7 +632,7 @@ pub enum BoundingVolume {
 }
 
 impl BoundingVolume {
-    pub fn intersect(&self, ray: &Ray3<f32>) -> Option<(f32, f32)> {
+    pub fn intersect(&self, ray: Ray3<f32>) -> Option<(f32, f32)> {
         match *self {
             BoundingVolume::Box(min, max) => {
                 let inv_dir = Vector3::new(

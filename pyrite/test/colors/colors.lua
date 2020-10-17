@@ -5,12 +5,12 @@ local ball = shape.sphere {radius = 1, position = vector {z = 1}}
 return {
     image = {width = 512, height = 512},
 
-    renderer = renderer.bidirectional {
-        pixel_samples = 1000,
+    renderer = renderer.simple {
+        pixel_samples = 500,
         spectrum_samples = 10,
         spectrum_bins = 50,
         tile_size = 32,
-        bounces = 4,
+        bounces = 8,
         light_samples = 0,
         light_bounces = 4,
     },

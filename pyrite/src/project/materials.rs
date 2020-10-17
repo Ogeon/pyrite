@@ -95,9 +95,6 @@ impl<'lua> MaterialEntry<'lua> {
 }
 
 pub(crate) enum SurfaceMaterial {
-    Emissive {
-        color: Expression,
-    },
     Diffuse {
         color: Expression,
     },
@@ -128,9 +125,6 @@ impl<'lua> Parse<'lua> for SurfaceMaterial {
         let material_type = context.expect_field::<String>("type")?;
 
         match &*material_type {
-            "emissive" => Ok(SurfaceMaterial::Emissive {
-                color: context.parse_field("color")?,
-            }),
             "diffuse" => Ok(SurfaceMaterial::Diffuse {
                 color: context.parse_field("color")?,
             }),

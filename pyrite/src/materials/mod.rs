@@ -3,6 +3,7 @@ use std::{borrow::Cow, cell::Cell, convert::TryFrom, error::Error};
 use cgmath::{InnerSpace, Point2, Vector3};
 
 use crate::{
+    light::{Light, Wavelengths},
     program::{
         ExecutionContext, NumberInput, Program, ProgramCompiler, ProgramFor, ProgramInput,
         VectorInput,
@@ -13,14 +14,15 @@ use crate::{
         materials::{MaterialId, Materials, SurfaceMaterial as MaterialNode},
     },
     shapes::Normal,
-    tracer::{Brdf, LightProgram, NormalInput},
+    tracer::{LightProgram, NormalInput, RenderContext},
+    utils::Tools,
 };
-use rand::{prelude::SliceRandom, Rng};
 
 mod diffuse;
 mod mirror;
 mod refractive;
 
+/// Corresponding to BSDF in the PBR book.
 #[derive(Copy, Clone)]
 pub(crate) struct Material<'a> {
     surface: SurfaceMaterial<'a>,
@@ -50,24 +52,198 @@ impl<'a> Material<'a> {
         })
     }
 
-    pub(crate) fn choose_component(&self, rng: &mut impl Rng) -> MaterialComponent<'a> {
-        self.surface
-            .components
-            .choose(rng)
-            .cloned()
-            .expect("there should be at least one component")
+    /// Corresponds to Sample_f in the PBR book.
+    pub(crate) fn sample_reflection<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        normal: Normal,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> Option<SurfaceInteraction<'t>> {
+        let components = self.surface.components;
+        let num_components = components.len();
+        let component_index = tools.sampler.gen_index(num_components)?;
+        let component = components[component_index];
+
+        let mut interaction = component.sample_reflection(
+            out_direction,
+            texture_coordinate,
+            normal,
+            wavelengths,
+            tools,
+        );
+
+        if interaction.pdf == 0.0 {
+            interaction.reflectivity.set_all(0.0);
+            return Some(interaction);
+        }
+
+        let in_direction = interaction.in_direction;
+        if num_components > 1 {
+            let input = MaterialInput {
+                wavelength: wavelengths.hero(),
+                wavelength_used: false.into(),
+                normal: normal.vector(),
+                ray_direction: -out_direction,
+                texture_coordinate,
+            };
+
+            if interaction.diffuse {
+                for (i, component) in components.iter().enumerate() {
+                    if i != component_index {
+                        interaction.pdf += component.pdf(
+                            out_direction,
+                            normal,
+                            in_direction,
+                            &input,
+                            tools.execution_context,
+                        );
+                    }
+                }
+            } else {
+                for (i, component) in components.iter().enumerate() {
+                    if i != component_index {
+                        interaction.pdf +=
+                            component.get_probability(tools.execution_context, &input);
+                    }
+                }
+            }
+
+            interaction.pdf /= num_components as f32;
+
+            if interaction.diffuse {
+                let reflected =
+                    in_direction.dot(normal.vector()) * out_direction.dot(normal.vector()) > 0.0;
+                interaction.reflectivity.set_all(0.0);
+
+                for component in components {
+                    if (reflected && component.has_reflection())
+                        || (!reflected && component.has_transmission())
+                    {
+                        interaction.reflectivity += component.evaluate(
+                            out_direction,
+                            normal,
+                            in_direction,
+                            texture_coordinate,
+                            wavelengths,
+                            &input,
+                            tools,
+                        );
+                    }
+                }
+            }
+
+            if input.wavelength_used.get() {
+                interaction.reflectivity.set_single_wavelength();
+            }
+        }
+
+        Some(interaction)
     }
 
-    pub(crate) fn choose_emissive(&self, rng: &mut impl Rng) -> MaterialComponent<'a> {
-        self.surface
-            .emissive
-            .choose(rng)
-            .cloned()
-            .expect("the material is not emissive")
+    // Corresponds to f in the PBR book.
+    pub(crate) fn evaluate<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        in_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> Light<'t> {
+        let mut reflectivity = tools.light_pool.get();
+        let reflected =
+            in_direction.dot(normal.vector()) * out_direction.dot(normal.vector()) > 0.0;
+
+        let input = MaterialInput {
+            wavelength: wavelengths.hero(),
+            wavelength_used: false.into(),
+            normal: normal.vector(),
+            ray_direction: -out_direction,
+            texture_coordinate,
+        };
+
+        for component in self.surface.components {
+            if (reflected && component.has_reflection())
+                || (!reflected && component.has_transmission())
+            {
+                reflectivity += component.evaluate(
+                    out_direction,
+                    normal,
+                    in_direction,
+                    texture_coordinate,
+                    wavelengths,
+                    &input,
+                    tools,
+                );
+            }
+        }
+
+        if input.wavelength_used.get() {
+            reflectivity.set_single_wavelength();
+        }
+
+        reflectivity
+    }
+
+    pub(crate) fn pdf(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        in_direction: Vector3<f32>,
+        input: &MaterialInput,
+        execution_context: &mut ExecutionContext<'a>,
+    ) -> f32 {
+        if self.surface.components.is_empty() {
+            return 0.0; // Should terminate path
+        }
+
+        let mut pdf = 0.0;
+        for component in self.surface.components {
+            pdf += component.pdf(
+                out_direction,
+                normal,
+                in_direction,
+                input,
+                execution_context,
+            );
+        }
+
+        pdf / self.surface.components.len() as f32
+    }
+
+    pub(crate) fn light_emission<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Vector3<f32>,
+        texture_coordingate: Point2<f32>,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> Option<Light<'t>> {
+        let input = RenderContext {
+            wavelength: wavelengths.hero(),
+            normal,
+            ray_direction: -out_direction,
+            texture: texture_coordingate,
+        };
+
+        let mut color_program = self
+            .surface
+            .emission?
+            .memoize(input, tools.execution_context);
+
+        let mut light = tools.light_pool.get();
+        for (bin, wavelength) in light.iter_mut().zip(wavelengths) {
+            color_program.update_input().set_wavelength(wavelength);
+            *bin = color_program.run();
+        }
+
+        Some(light)
     }
 
     pub(crate) fn is_emissive(&self) -> bool {
-        !self.surface.emissive.is_empty()
+        self.surface.emission.is_some()
     }
 
     pub fn apply_normal_map(
@@ -88,12 +264,12 @@ impl<'a> Material<'a> {
 #[derive(Copy, Clone)]
 pub(crate) struct SurfaceMaterial<'a> {
     components: &'a [MaterialComponent<'a>],
-    emissive: &'a [MaterialComponent<'a>],
+    emission: Option<LightProgram<'a>>,
 }
 
 impl<'a> SurfaceMaterial<'a> {
     pub(crate) fn from_project(
-        material: MaterialId,
+        material: crate::project::SurfaceMaterial,
         programs: ProgramCompiler<'a>,
         expressions: &mut Expressions,
         materials: &Materials,
@@ -104,33 +280,23 @@ impl<'a> SurfaceMaterial<'a> {
             probability: Option<Expression>,
         }
 
-        let mut stack = vec![StackEntry {
-            material,
-            probability: None,
-        }];
+        let mut stack = vec![];
+        if let Some(reflection) = material.reflection {
+            stack.push(StackEntry {
+                material: reflection,
+                probability: None,
+            });
+        }
 
         let mut components = Vec::new();
-        let mut emissive = Vec::new();
+        let emission = material
+            .emission
+            .map(|expression| programs.compile(&expression, expressions))
+            .transpose()?;
 
         while let Some(entry) = stack.pop() {
             match materials.get(entry.material) {
-                MaterialNode::Emissive { color } => {
-                    let component = MaterialComponent {
-                        selection_compensation: 1.0,
-                        probability: entry
-                            .probability
-                            .map(|expression| programs.compile(&expression, expressions))
-                            .transpose()?,
-                        bsdf: SurfaceBsdf {
-                            color: programs.compile(color, expressions)?,
-                            bsdf_type: SurfaceBsdfType::Emissive,
-                        },
-                    };
-                    components.push(component);
-                    emissive.push(component);
-                }
                 MaterialNode::Diffuse { color } => components.push(MaterialComponent {
-                    selection_compensation: 1.0,
                     probability: entry
                         .probability
                         .map(|expression| programs.compile(&expression, expressions))
@@ -141,7 +307,6 @@ impl<'a> SurfaceMaterial<'a> {
                     },
                 }),
                 MaterialNode::Mirror { color } => components.push(MaterialComponent {
-                    selection_compensation: 1.0,
                     probability: entry
                         .probability
                         .map(|expression| programs.compile(&expression, expressions))
@@ -160,7 +325,6 @@ impl<'a> SurfaceMaterial<'a> {
                 } => {
                     let eval_context = EvalContext { expressions };
                     components.push(MaterialComponent {
-                        selection_compensation: 1.0,
                         probability: entry
                             .probability
                             .map(|expression| programs.compile(&expression, expressions))
@@ -208,59 +372,121 @@ impl<'a> SurfaceMaterial<'a> {
             }
         }
 
-        let selection_compensation = components.len() as f32;
-        for component in &mut components {
-            component.selection_compensation = selection_compensation;
-        }
-
-        let selection_compensation = emissive.len() as f32;
-        for component in &mut emissive {
-            component.selection_compensation = selection_compensation;
-        }
-
         Ok(SurfaceMaterial {
             components: allocator.alloc_slice_copy(&components),
-            emissive: allocator.alloc_slice_copy(&emissive),
+            emission,
         })
     }
 }
 
 #[derive(Copy, Clone)]
 pub(crate) struct MaterialComponent<'a> {
-    selection_compensation: f32,
-    probability: Option<Program<'a, ProbabilityNumberInput, ProbabilityVectorInput, f32>>,
+    probability: Option<Program<'a, MaterialNumberInput, MaterialVectorInput, f32>>,
     pub(crate) bsdf: SurfaceBsdf<'a>,
 }
 
 impl<'a> MaterialComponent<'a> {
-    pub(crate) fn get_probability(
+    /// Corresponds to Sample_f in the PBR book.
+    fn sample_reflection<'t>(
         &self,
-        exe: &mut ExecutionContext<'a>,
-        input: &ProbabilityInput,
+        out_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        normal: Normal,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> SurfaceInteraction<'t> {
+        let mut interaction = self.bsdf.sample_reflection(
+            out_direction,
+            normal,
+            texture_coordinate,
+            wavelengths,
+            tools,
+        );
+
+        let input = MaterialInput {
+            wavelength: wavelengths.hero(),
+            wavelength_used: false.into(),
+            normal: normal.vector(),
+            ray_direction: -out_direction,
+            texture_coordinate,
+        };
+
+        let selection_probability = self.get_probability(tools.execution_context, &input);
+        interaction.reflectivity *= selection_probability;
+        interaction.pdf *= selection_probability;
+
+        if input.wavelength_used.get() {
+            interaction.reflectivity.set_single_wavelength();
+        }
+
+        interaction
+    }
+
+    fn pdf(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        in_direction: Vector3<f32>,
+        input: &MaterialInput,
+        execution_context: &mut ExecutionContext<'a>,
     ) -> f32 {
+        self.bsdf.pdf(out_direction, normal, in_direction)
+            * self.get_probability(execution_context, &input)
+    }
+
+    // Corresponds to f in the PBR book.
+    fn evaluate<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        in_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        wavelengths: &Wavelengths,
+        input: &MaterialInput,
+        tools: &mut Tools<'t, 'a>,
+    ) -> Light<'t> {
+        self.bsdf.evaluate(
+            out_direction,
+            normal,
+            in_direction,
+            texture_coordinate,
+            wavelengths,
+            tools,
+        ) * self.get_probability(tools.execution_context, input)
+    }
+
+    fn has_reflection(&self) -> bool {
+        self.bsdf.has_reflection()
+    }
+
+    fn has_transmission(&self) -> bool {
+        self.bsdf.has_transmission()
+    }
+
+    fn get_probability(&self, exe: &mut ExecutionContext<'a>, input: &MaterialInput) -> f32 {
         if let Some(program) = self.probability {
-            exe.run(program, input) * self.selection_compensation
+            exe.run(program, input) // self.selection_compensation
         } else {
-            self.selection_compensation
+            1.0 // self.selection_compensation
         }
     }
 }
 
-pub(crate) struct ProbabilityInput {
+pub(crate) struct MaterialInput {
     pub(crate) wavelength: f32,
     pub(crate) wavelength_used: Cell<bool>,
     pub(crate) normal: Vector3<f32>,
-    pub(crate) incident: Vector3<f32>,
+    pub(crate) ray_direction: Vector3<f32>,
     pub(crate) texture_coordinate: Point2<f32>,
 }
 
-impl ProgramInput for ProbabilityInput {
-    type NumberInput = ProbabilityNumberInput;
-    type VectorInput = ProbabilityVectorInput;
+impl ProgramInput for MaterialInput {
+    type NumberInput = MaterialNumberInput;
+    type VectorInput = MaterialVectorInput;
 
     fn get_number_input(&self, input: Self::NumberInput) -> f32 {
         match input {
-            ProbabilityNumberInput::Wavelength => {
+            MaterialNumberInput::Wavelength => {
                 self.wavelength_used.set(true);
                 self.wavelength
             }
@@ -269,43 +495,43 @@ impl ProgramInput for ProbabilityInput {
 
     fn get_vector_input(&self, input: Self::VectorInput) -> Vector {
         match input {
-            ProbabilityVectorInput::Normal => self.normal.into(),
-            ProbabilityVectorInput::Incident => self.incident.into(),
-            ProbabilityVectorInput::TextureCoordinates => self.texture_coordinate.into(),
+            MaterialVectorInput::Normal => self.normal.into(),
+            MaterialVectorInput::RayDirection => self.ray_direction.into(),
+            MaterialVectorInput::TextureCoordinates => self.texture_coordinate.into(),
         }
     }
 }
 
 #[derive(Copy, Clone)]
-pub(crate) enum ProbabilityNumberInput {
+pub(crate) enum MaterialNumberInput {
     Wavelength,
 }
 
-impl TryFrom<NumberInput> for ProbabilityNumberInput {
+impl TryFrom<NumberInput> for MaterialNumberInput {
     type Error = Cow<'static, str>;
 
     fn try_from(value: NumberInput) -> Result<Self, Self::Error> {
         match value {
-            NumberInput::Wavelength => Ok(ProbabilityNumberInput::Wavelength),
+            NumberInput::Wavelength => Ok(MaterialNumberInput::Wavelength),
         }
     }
 }
 
 #[derive(Copy, Clone)]
-pub(crate) enum ProbabilityVectorInput {
+pub(crate) enum MaterialVectorInput {
     Normal,
-    Incident,
+    RayDirection,
     TextureCoordinates,
 }
 
-impl TryFrom<VectorInput> for ProbabilityVectorInput {
+impl TryFrom<VectorInput> for MaterialVectorInput {
     type Error = Cow<'static, str>;
 
     fn try_from(value: VectorInput) -> Result<Self, Self::Error> {
         match value {
-            VectorInput::Normal => Ok(ProbabilityVectorInput::Normal),
-            VectorInput::Incident => Ok(ProbabilityVectorInput::Incident),
-            VectorInput::TextureCoordinates => Ok(ProbabilityVectorInput::TextureCoordinates),
+            VectorInput::Normal => Ok(MaterialVectorInput::Normal),
+            VectorInput::RayDirection => Ok(MaterialVectorInput::RayDirection),
+            VectorInput::TextureCoordinates => Ok(MaterialVectorInput::TextureCoordinates),
         }
     }
 }
@@ -317,51 +543,159 @@ pub(crate) struct SurfaceBsdf<'a> {
 }
 
 impl<'a> SurfaceBsdf<'a> {
-    pub(crate) fn scatter(
+    /// Corresponds to Sample_f in the PBR book.
+    fn sample_reflection<'t>(
         &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        texture_coordinate: Point2<f32>,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> SurfaceInteraction<'t> {
+        self.bsdf_type.sample_reflection(
+            out_direction,
+            normal,
+            texture_coordinate,
+            self.color,
+            wavelengths,
+            tools,
+        )
+    }
+
+    /// Corresponds to f in the PBR book.
+    fn evaluate<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
         in_direction: Vector3<f32>,
-        normal: Vector3<f32>,
-        wavelength: f32,
-        rng: &mut impl Rng,
-    ) -> Scattering {
-        self.bsdf_type
-            .scatter(in_direction, normal, wavelength, rng)
+        texture_coordinate: Point2<f32>,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> Light<'t> {
+        self.bsdf_type.evaluate(
+            out_direction,
+            normal,
+            in_direction,
+            texture_coordinate,
+            self.color,
+            wavelengths,
+            tools,
+        )
+    }
+
+    fn pdf(&self, out_direction: Vector3<f32>, normal: Normal, in_direction: Vector3<f32>) -> f32 {
+        self.bsdf_type.pdf(out_direction, normal, in_direction)
+    }
+
+    fn has_reflection(&self) -> bool {
+        self.bsdf_type.has_reflection()
+    }
+
+    fn has_transmission(&self) -> bool {
+        self.bsdf_type.has_transmission()
     }
 }
 
 #[derive(Copy, Clone)]
 enum SurfaceBsdfType {
-    Emissive,
     Diffuse,
     Mirror,
     Refractive { properties: refractive::Properties },
 }
 
 impl SurfaceBsdfType {
-    pub(crate) fn scatter(
+    pub(crate) fn sample_reflection<'t, 'a>(
         &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        texture_coordinate: Point2<f32>,
+        color: LightProgram<'a>,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> SurfaceInteraction<'t> {
+        let out_direction = normal.into_space(out_direction);
+
+        let mut interaction = match self {
+            SurfaceBsdfType::Diffuse => diffuse::sample_reflection(
+                out_direction,
+                texture_coordinate,
+                color,
+                wavelengths,
+                tools,
+            ),
+            SurfaceBsdfType::Mirror => mirror::sample_reflection(
+                out_direction,
+                texture_coordinate,
+                color,
+                wavelengths,
+                tools,
+            ),
+            SurfaceBsdfType::Refractive { properties } => refractive::sample_reflection(
+                properties,
+                out_direction,
+                texture_coordinate,
+                color,
+                wavelengths,
+                tools,
+            ),
+        };
+
+        interaction.in_direction = normal.from_space(interaction.in_direction);
+        interaction
+    }
+
+    fn evaluate<'t, 'a>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
         in_direction: Vector3<f32>,
-        normal: Vector3<f32>,
-        wavelength: f32,
-        rng: &mut impl Rng,
-    ) -> Scattering {
+        texture_coordinate: Point2<f32>,
+        color: LightProgram<'a>,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> Light<'t> {
+        let out_direction = normal.into_space(out_direction);
+        let _in_direction = normal.into_space(in_direction);
+
         match self {
-            SurfaceBsdfType::Emissive => Scattering::Emitted,
-            SurfaceBsdfType::Diffuse => diffuse::scatter(in_direction, normal, rng),
-            SurfaceBsdfType::Mirror => mirror::scatter(in_direction, normal),
-            SurfaceBsdfType::Refractive { properties } => {
-                refractive::scatter(properties, in_direction, normal, wavelength, rng)
+            SurfaceBsdfType::Diffuse => {
+                diffuse::evaluate(out_direction, texture_coordinate, color, wavelengths, tools)
             }
+            SurfaceBsdfType::Mirror | SurfaceBsdfType::Refractive { .. } => tools.light_pool.get(),
+        }
+    }
+
+    fn pdf(&self, out_direction: Vector3<f32>, normal: Normal, in_direction: Vector3<f32>) -> f32 {
+        let out_direction = normal.into_space(out_direction);
+        let in_direction = normal.into_space(in_direction);
+
+        match self {
+            SurfaceBsdfType::Diffuse => diffuse::pdf(out_direction, in_direction),
+            SurfaceBsdfType::Mirror => 0.0,
+            SurfaceBsdfType::Refractive { .. } => 0.0,
+        }
+    }
+
+    fn has_reflection(&self) -> bool {
+        match self {
+            SurfaceBsdfType::Diffuse => true,
+            SurfaceBsdfType::Mirror => true,
+            SurfaceBsdfType::Refractive { .. } => true,
+        }
+    }
+
+    fn has_transmission(&self) -> bool {
+        match self {
+            SurfaceBsdfType::Diffuse => false,
+            SurfaceBsdfType::Mirror => false,
+            SurfaceBsdfType::Refractive { .. } => true,
         }
     }
 }
 
-pub(crate) enum Scattering {
-    Reflected {
-        out_direction: Vector3<f32>,
-        probability: f32,
-        dispersed: bool,
-        brdf: Option<Brdf>,
-    },
-    Emitted,
+pub(crate) struct SurfaceInteraction<'a> {
+    pub reflectivity: Light<'a>,
+    pub pdf: f32,
+    pub diffuse: bool,
+    pub in_direction: Vector3<f32>,
 }

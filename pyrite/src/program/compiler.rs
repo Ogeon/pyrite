@@ -181,7 +181,8 @@ impl<'p> ProgramCompiler<'p> {
                 ExpressionStatus::Pending(&ComplexExpression::Fresnel { ior, env_ior }) => {
                     let (normal, normal_deps) = get_vector_input(VectorInput::Normal)?;
 
-                    let (incident, incident_deps) = get_vector_input(VectorInput::Incident)?;
+                    let (ray_direction, ray_direction_deps) =
+                        get_vector_input(VectorInput::RayDirection)?;
 
                     let ior = try_get_number_value(
                         ior,
@@ -202,13 +203,13 @@ impl<'p> ProgramCompiler<'p> {
                     let (env_ior, env_ior_deps) = unwrap_or_push!(env_ior, expression_id, pending);
 
                     let output = number_registers.next();
-                    let dependencies = normal_deps | incident_deps | ior_deps | env_ior_deps;
+                    let dependencies = normal_deps | ray_direction_deps | ior_deps | env_ior_deps;
                     instructions.push(Instruction {
                         instruction_type: InstructionType::Fresnel {
                             ior,
                             env_ior,
                             normal,
-                            incident,
+                            incident: ray_direction,
                             output,
                         },
                         dependencies,

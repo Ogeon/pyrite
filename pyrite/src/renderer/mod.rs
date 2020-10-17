@@ -7,9 +7,9 @@ use crate::{film::Film, program::Resources};
 use indicatif::ProgressBar;
 
 mod algorithm;
-mod bidirectional;
-mod photon_mapping;
-mod simple;
+mod integrators;
+
+pub(crate) mod samplers;
 
 static DEFAULT_SPECTRUM_SPAN: (f32, f32) = (380.0, 780.0);
 
@@ -17,8 +17,7 @@ pub struct Renderer {
     pub threads: usize,
     bounces: u32,
     pixel_samples: u32,
-    light_samples: usize,
-    spectrum_samples: u32,
+    spectrum_samples: usize,
     pub spectrum_bins: usize,
     pub spectrum_span: (f32, f32),
     pub tile_size: usize,
@@ -28,33 +27,36 @@ pub struct Renderer {
 impl Renderer {
     pub fn from_project(project: crate::project::Renderer) -> Self {
         match project {
-            crate::project::Renderer::Simple { shared } => {
-                Self::from_shared(shared, Algorithm::Simple)
+            crate::project::Renderer::Simple {
+                shared,
+                direct_light,
+            } => Self::from_shared(
+                shared,
+                Algorithm::Simple(integrators::simple::Config {
+                    direct_light: direct_light.unwrap_or(true),
+                }),
+            ),
+            crate::project::Renderer::Bidirectional { .. } => {
+                unimplemented!("bidirectional path tracing is temporarily removed")
+                /*Self::from_shared(
+                    shared,
+                    Algorithm::Bidirectional(bidirectional::BidirParams {
+                        bounces: light_bounces.unwrap_or(8),
+                    }),
+                )*/
             }
-            crate::project::Renderer::Bidirectional {
-                shared,
-                light_bounces,
-            } => Self::from_shared(
-                shared,
-                Algorithm::Bidirectional(bidirectional::BidirParams {
-                    bounces: light_bounces.unwrap_or(8),
-                }),
-            ),
-            crate::project::Renderer::PhotonMapping {
-                shared,
-                radius,
-                photons,
-                photon_bounces,
-                photon_passes,
-            } => Self::from_shared(
-                shared,
-                Algorithm::PhotonMapping(photon_mapping::Config {
-                    radius: radius.unwrap_or(0.1),
-                    photon_bounces: photon_bounces.unwrap_or(8),
-                    photons: photons.unwrap_or(10000),
-                    photon_passes: photon_passes.unwrap_or(1),
-                }),
-            ),
+            crate::project::Renderer::PhotonMapping { .. } => {
+                unimplemented!("photon mapping is temporarily removed")
+                /*Self::from_shared(
+                    shared,
+                    Algorithm::PhotonMapping(photon_mapping::Config {
+                        radius: radius.unwrap_or(0.1),
+                        photon_bounces: photon_bounces.unwrap_or(8),
+                        photons: photons.unwrap_or(10000),
+                        photon_passes: photon_passes.unwrap_or(1),
+                    }),
+                )*/
+            }
         }
     }
 
@@ -63,7 +65,6 @@ impl Renderer {
             threads: shared.threads.unwrap_or_else(|| num_cpus::get()),
             bounces: shared.bounces.unwrap_or(8),
             pixel_samples: shared.pixel_samples,
-            light_samples: shared.light_samples.unwrap_or(4),
             spectrum_samples: shared.spectrum_samples.unwrap_or(10),
             spectrum_bins: shared.spectrum_resolution.unwrap_or(64),
             spectrum_span: DEFAULT_SPECTRUM_SPAN,
@@ -82,20 +83,7 @@ impl Renderer {
         resources: Resources,
     ) {
         match self.algorithm {
-            Algorithm::Simple => {
-                simple::render(film, task_runner, on_status, self, world, camera, resources)
-            }
-            Algorithm::Bidirectional(ref config) => bidirectional::render(
-                film,
-                task_runner,
-                on_status,
-                self,
-                config,
-                world,
-                camera,
-                resources,
-            ),
-            Algorithm::PhotonMapping(ref config) => photon_mapping::render(
+            Algorithm::Simple(ref config) => integrators::simple::render(
                 film,
                 task_runner,
                 on_status,
@@ -109,10 +97,10 @@ impl Renderer {
     }
 }
 
-pub enum Algorithm {
-    Simple,
-    Bidirectional(bidirectional::BidirParams),
-    PhotonMapping(photon_mapping::Config),
+pub(crate) enum Algorithm {
+    Simple(integrators::simple::Config),
+    //Bidirectional(bidirectional::BidirParams),
+    //PhotonMapping(photon_mapping::Config),
 }
 
 pub(crate) struct TaskRunner {

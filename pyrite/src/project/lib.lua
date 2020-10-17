@@ -241,11 +241,6 @@ material = {
         _pyrite.make_expression(properties)
         return properties
     end,
-    emissive = function(properties)
-        properties.type = "emissive"
-        _pyrite.make_expression(properties)
-        return properties
-    end,
     mirror = function(properties)
         properties.type = "mirror"
         _pyrite.make_expression(properties)

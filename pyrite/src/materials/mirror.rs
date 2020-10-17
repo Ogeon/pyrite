@@ -1,21 +1,44 @@
-use cgmath::{InnerSpace, Vector3};
+use cgmath::{Point2, Vector3};
 
-use super::Scattering;
+use crate::{light::Wavelengths, tracer::LightProgram, tracer::RenderContext, utils::Tools};
 
-pub(crate) fn scatter(in_direction: Vector3<f32>, normal: Vector3<f32>) -> Scattering {
-    let mut normal = if in_direction.dot(normal) < 0.0 {
-        normal
-    } else {
-        -normal
-    };
+use super::SurfaceInteraction;
 
-    let perp = in_direction.dot(normal) * 2.0;
-    normal *= perp;
+pub(super) fn sample_reflection<'t, 'a>(
+    out_direction: Vector3<f32>,
+    texture_coordinate: Point2<f32>,
+    color: LightProgram<'a>,
+    wavelengths: &Wavelengths,
+    tools: &mut Tools<'t, 'a>,
+) -> SurfaceInteraction<'t> {
+    let in_direction = Vector3::new(-out_direction.x, -out_direction.y, out_direction.z);
 
-    Scattering::Reflected {
-        out_direction: in_direction - normal,
-        probability: 1.0,
-        dispersed: false,
-        brdf: None,
+    let mut reflectivity = tools.light_pool.get();
+
+    if in_direction.z != 0.0 {
+        let initial_input = RenderContext {
+            wavelength: wavelengths.hero(),
+            normal: Vector3::unit_z(),
+            ray_direction: -out_direction,
+            texture: texture_coordinate,
+        };
+
+        let mut color_program = color.memoize(initial_input, tools.execution_context);
+
+        let abs_cos_in = in_direction.z.abs();
+
+        if abs_cos_in > 0.0 {
+            for (bin, wavelength) in reflectivity.iter_mut().zip(wavelengths) {
+                color_program.update_input().set_wavelength(wavelength);
+                *bin = color_program.run() / abs_cos_in;
+            }
+        }
+    }
+
+    SurfaceInteraction {
+        in_direction,
+        pdf: if in_direction.z == 0.0 { 0.0 } else { 1.0 },
+        diffuse: false,
+        reflectivity,
     }
 }

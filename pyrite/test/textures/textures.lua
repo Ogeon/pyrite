@@ -1,14 +1,17 @@
 local light_ball = shape.sphere {
-    material = {surface = material.emissive {color = light_source.d65 * 20}},
+    material = {surface = {emission = light_source.d65 * 20}},
     position = vector(0, 0, 0),
     radius = 1,
 }
 
 local floor_material = {
-    surface = mix(
-        material.mirror {color = 1},
-            material.diffuse {color = texture("tiles/color.jpg")}, fresnel(1.5)
-    ),
+    surface = {
+        reflection = mix(
+            material.mirror {color = 1},
+                material.diffuse {color = texture("tiles/color.jpg")},
+                fresnel(1.5)
+        ),
+    },
     normal_map = texture("tiles/normal.jpg", "linear") * vector(1, -1, 1),
 }
 
@@ -16,12 +19,10 @@ return {
     image = {width = 1024, height = 512},
 
     renderer = renderer.simple {
-        pixel_samples = 400,
+        pixel_samples = 200,
         spectrum_samples = 10,
         spectrum_bins = 50,
         tile_size = 32,
-        bounces = 8,
-        light_samples = 2,
     },
 
     camera = camera.perspective {
@@ -46,8 +47,10 @@ return {
                 file = "color_checker.obj",
                 materials = {
                     color_checker = {
-                        surface = material.diffuse {
-                            color = texture("color_checker.jpg"),
+                        surface = {
+                            reflection = material.diffuse {
+                                color = texture("color_checker.jpg"),
+                            },
                         },
                     },
                 },
@@ -57,8 +60,10 @@ return {
                 radius = 1,
                 texture_scale = vector(0.5, 1),
                 material = {
-                    surface = material.diffuse {
-                        color = texture("tactile_paving/color.jpg"),
+                    surface = {
+                        reflection = material.diffuse {
+                            color = texture("tactile_paving/color.jpg"),
+                        },
                     },
                     normal_map = texture("tactile_paving/normal.jpg", "linear") *
                         vector(1, -1, 1),
@@ -72,8 +77,10 @@ return {
                 },
                 materials = {
                     cube = {
-                        surface = material.diffuse {
-                            color = texture("fabric/color.jpg"),
+                        surface = {
+                            reflection = material.diffuse {
+                                color = texture("fabric/color.jpg"),
+                            },
                         },
                         normal_map = texture("fabric/normal.jpg", "linear") *
                             vector(1, -1, 0.1), -- artificially enhances the contrast

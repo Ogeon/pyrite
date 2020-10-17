@@ -2,26 +2,27 @@ local colors = require "colors"
 local lamp = require "lamp"
 
 local light = {
-    surface = material.emissive {color = lamp.color * 3} +
-        material.diffuse {color = 0.78},
+    surface = {
+        reflection = material.diffuse {color = 0.78},
+        emission = lamp.color * 3,
+    },
 }
 
-local white = {surface = material.diffuse {color = colors.white}}
+local white = {surface = {reflection = material.diffuse {color = colors.white}}}
 
-local green = {surface = material.diffuse {color = colors.green}}
+local green = {surface = {reflection = material.diffuse {color = colors.green}}}
 
-local red = {surface = material.diffuse {color = colors.red}}
+local red = {surface = {reflection = material.diffuse {color = colors.red}}}
 
 return {
     image = {width = 512, height = 512, white = blackbody(4000)},
 
-    renderer = renderer.bidirectional {
-        pixel_samples = 600,
+    renderer = renderer.simple {
+        pixel_samples = 100,
         spectrum_samples = 10,
         spectrum_bins = 50,
         tile_size = 32,
-        light_samples = 1,
-        bounces = 4,
+        bounces = 8,
         light_bounces = 4,
     },
 
@@ -65,10 +66,12 @@ return {
                 },
 
                 material = {
-                    surface = mix(
-                        material.mirror {color = 1},
-                            material.diffuse {color = 0.8}, fresnel(1.5)
-                    ),
+                    surface = {
+                        reflection = mix(
+                            material.mirror {color = 1},
+                                material.diffuse {color = 0.8}, fresnel(1.5)
+                        ),
+                    },
                 },
             },
         },

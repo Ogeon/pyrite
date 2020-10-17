@@ -1,4 +1,4 @@
-use cgmath::{ElementWise, Vector3};
+use cgmath::{ElementWise, InnerSpace, Vector3};
 use collision::{Aabb3, Ray3};
 
 pub const DIST_EPSILON: f32 = 0.0001;
@@ -6,13 +6,14 @@ pub const DIST_EPSILON: f32 = 0.0001;
 pub mod utils {
     use std::{
         self,
+        f32::consts,
         ops::{Add, Mul, Sub},
     };
 
-    use rand::Rng;
+    use crate::renderer::samplers::Sampler;
 
     use super::DIST_EPSILON;
-    use cgmath::{InnerSpace, Vector3};
+    use cgmath::{InnerSpace, Point2, Vector3};
 
     pub struct Interpolated<P = Vec<(f32, f32)>> {
         pub points: P,
@@ -122,51 +123,57 @@ pub mod utils {
         (y, z)
     }
 
-    pub fn sample_cone<R: ?Sized + Rng>(
-        rng: &mut R,
+    pub(crate) fn sample_cone(
+        rng: &mut dyn Sampler,
         direction: Vector3<f32>,
         cos_half: f32,
     ) -> Vector3<f32> {
         let o1 = ortho(direction).normalize();
         let o2 = direction.cross(o1).normalize();
-        let r1: f32 = std::f32::consts::PI * 2.0 * rng.gen::<f32>();
-        let r2: f32 = cos_half + (1.0 - cos_half) * rng.gen::<f32>();
+        let r1: f32 = std::f32::consts::PI * 2.0 * rng.gen_f32();
+        let r2: f32 = cos_half + (1.0 - cos_half) * rng.gen_f32();
         let oneminus = (1.0 - r2 * r2).sqrt();
 
         o1 * r1.cos() * oneminus + o2 * r1.sin() * oneminus + &direction * r2
     }
 
-    pub fn solid_angle(cos_half: f32) -> f32 {
-        if cos_half >= 1.0 {
-            0.0
-        } else {
-            2.0 * std::f32::consts::PI * (1.0 - cos_half)
-        }
-    }
-
-    pub fn sample_sphere<R: ?Sized + Rng>(rng: &mut R) -> Vector3<f32> {
-        let u = rng.gen::<f32>();
-        let v = rng.gen::<f32>();
+    pub(crate) fn sample_sphere(rng: &mut dyn Sampler) -> Vector3<f32> {
+        let u = rng.gen_f32();
+        let v = rng.gen_f32();
         let theta = 2.0 * std::f32::consts::PI * u;
         let phi = (2.0 * v - 1.0).acos();
         Vector3::new(phi.sin() * theta.cos(), phi.sin() * theta.sin(), phi.cos())
     }
 
-    pub fn sample_hemisphere<R: ?Sized + Rng>(
-        rng: &mut R,
-        direction: Vector3<f32>,
-    ) -> Vector3<f32> {
-        let s = sample_sphere(rng);
-        let x = ortho(direction).normalize_to(s.x);
-        let y = x.cross(direction).normalize_to(s.y);
-        let z = direction.normalize_to(s.z.abs());
-        x + y + z
+    /// Samples a unit disk by turning 2D grid squares into concentric circles.
+    #[inline(always)]
+    pub(crate) fn sample_concentric_disk(sampler: &mut dyn Sampler) -> Point2<f32> {
+        let u1 = -1.0 + sampler.gen_f32() * 2.0;
+        let u2 = -1.0 + sampler.gen_f32() * 2.0;
+
+        if u1 == 0.0 && u2 == 0.0 {
+            Point2::new(0.0, 0.0)
+        } else {
+            let (theta, radius) = if u1.abs() > u2.abs() {
+                (consts::FRAC_PI_4 * (u2 / u1), u1)
+            } else {
+                (consts::FRAC_PI_2 - consts::FRAC_PI_4 * (u1 / u2), u2)
+            };
+
+            radius * Point2::new(theta.cos(), theta.sin())
+        }
+    }
+
+    /// Samples a cosine weighted unit hemisphere, where positive Z is "up".
+    #[inline(always)]
+    pub(crate) fn sample_cosine_hemisphere(sampler: &mut dyn Sampler) -> Vector3<f32> {
+        let Point2 { x, y } = sample_concentric_disk(sampler);
+        let z = 0.0f32.max(1.0 - x * x - y * y).sqrt();
+        Vector3::new(x, y, z)
     }
 }
 
 pub(crate) fn fresnel(ior: f32, env_ior: f32, normal: Vector3<f32>, incident: Vector3<f32>) -> f32 {
-    use cgmath::InnerSpace;
-
     if incident.dot(normal) < 0.0 {
         utils::schlick(env_ior, ior, normal, incident)
     } else {
@@ -203,5 +210,27 @@ pub(crate) fn aabb_intersection_distance(aabb: Aabb3<f32>, ray: Ray3<f32>) -> Op
         Some(tmin.max(0.0))
     } else {
         None
+    }
+}
+
+/// Checks if two vectors are within the same hemisphere, centered around the Z axis.
+#[inline(always)]
+pub(crate) fn same_hemisphere(v1: Vector3<f32>, v2: Vector3<f32>) -> bool {
+    v1.z * v2.z > 0.0
+}
+
+#[inline(always)]
+pub(crate) fn power_heuristic(nf: f32, f_pdf: f32, ng: f32, g_pdf: f32) -> f32 {
+    let f = nf * f_pdf;
+    let g = ng * g_pdf;
+    (f * f) / (f * f + g * g)
+}
+
+#[inline(always)]
+pub(crate) fn face_forward(vector: Vector3<f32>, forward: Vector3<f32>) -> Vector3<f32> {
+    if vector.dot(forward) < 0.0 {
+        -vector
+    } else {
+        vector
     }
 }

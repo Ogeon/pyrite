@@ -36,6 +36,7 @@ use renderer::ProgressIndicator;
 mod cameras;
 mod film;
 mod lamp;
+mod light;
 mod light_source;
 mod materials;
 mod math;
@@ -315,6 +316,7 @@ fn render<P: AsRef<Path>>(
                 config.resources,
             );
             global_progress.finish_and_clear();
+            preview_progress.finish_and_clear();
         });
 
         progress.join_and_clear().unwrap();
@@ -521,9 +523,9 @@ impl TryFrom<VectorInput> for SpectrumSamplingVectorInput {
             VectorInput::Normal => {
                 Err("the surface normal cannot be used while sampling a constant spectrum".into())
             }
-            VectorInput::Incident => {
-                Err("the incident vector cannot be used while sampling a constant spectrum".into())
-            }
+            VectorInput::RayDirection => Err(
+                "the ray direction vector cannot be used while sampling a constant spectrum".into(),
+            ),
             VectorInput::TextureCoordinates => {
                 Err("texture coordinates cannot be used while sampling a constant spectrum".into())
             }

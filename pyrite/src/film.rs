@@ -4,7 +4,7 @@ use noisy_float::prelude::*;
 
 use cgmath::{BaseNum, Point2, Vector2};
 
-use rand::Rng;
+use crate::renderer::samplers::Sampler;
 
 pub struct Film {
     width: usize,
@@ -61,32 +61,25 @@ impl Film {
         self.get_pixel(self.aspect_ratio.to_pixel(position)?)
     }
 
-    pub fn sample_wavelength<R: Rng>(&self, rng: &mut R) -> f32 {
-        rng.gen_range(
-            self.wavelength_start,
-            self.wavelength_start + self.wavelength_width,
-        )
-    }
-
-    pub fn sample_many_wavelengths<'a>(
+    pub(crate) fn sample_many_wavelengths<'a>(
         &self,
-        rng: &'a mut impl Rng,
+        rng: &'a mut dyn Sampler,
         amount: usize,
     ) -> impl Iterator<Item = f32> + 'a {
         let step_size = self.wavelength_width / amount as f32;
         let mut from = self.wavelength_start;
 
         std::iter::repeat_with(move || {
-            let to = from + step_size;
-            let wavelength = rng.gen_range(from, to);
-            from = to;
+            let wavelength = from + rng.gen_f32() * step_size;
+            from += step_size;
             wavelength
         })
         .take(amount)
     }
 
     fn wavelength_to_grain(&self, wavelength: f32) -> usize {
-        ((wavelength - self.wavelength_start) * self.grains_per_wavelength) as usize
+        (((wavelength - self.wavelength_start) * self.grains_per_wavelength) as usize)
+            .min(self.grains_per_pixel - 1)
     }
 
     pub fn expose(&self, position: Point2<f32>, sample: Sample) {
@@ -94,20 +87,6 @@ impl Film {
 
         if let Some(pixel) = self.get_pixel_f(position) {
             pixel[grain_index].expose(sample.brightness, sample.weight);
-        }
-    }
-
-    pub fn get_pixel_ref_f(&self, position: Point2<f32>) -> Option<DetachedPixel> {
-        Some(DetachedPixel {
-            grains: self.get_pixel_f(position)?,
-        })
-    }
-
-    pub fn to_pixel_sample(&self, sample: &Sample) -> PixelSample {
-        PixelSample {
-            value: sample.brightness,
-            weight: sample.weight,
-            grain: self.wavelength_to_grain(sample.wavelength),
         }
     }
 
@@ -185,22 +164,6 @@ impl GrainData {
             weight: self.weight + weight,
         }
     }
-}
-
-pub struct DetachedPixel<'a> {
-    grains: &'a [Grain],
-}
-
-impl<'a> DetachedPixel<'a> {
-    pub fn expose(&self, sample: PixelSample) {
-        self.grains[sample.grain].expose(sample.value, sample.weight);
-    }
-}
-
-pub struct PixelSample {
-    value: f32,
-    weight: f32,
-    grain: usize,
 }
 
 struct AspectRatio {

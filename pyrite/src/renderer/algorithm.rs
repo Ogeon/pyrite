@@ -2,102 +2,9 @@ use std::cmp::Ordering;
 
 use cgmath::{EuclideanSpace, InnerSpace, Point2, Vector2};
 
-use rand::Rng;
+use crate::{cameras::Camera, film::Area};
 
-use crate::{
-    cameras::Camera,
-    film::{Area, Sample},
-    program::ExecutionContext,
-    tracer::{self, Bounce, RenderContext},
-};
-
-pub(crate) fn contribute<'a>(
-    bounce: &Bounce<'a>,
-    main_sample: &mut (Sample, f32),
-    additional_samples: &mut [(Sample, f32)],
-    exe: &mut ExecutionContext<'a>,
-) {
-    let &Bounce {
-        ref ty,
-        dispersed: _,
-        color,
-        incident,
-        position: _,
-        normal,
-        texture,
-        probability,
-        ref direct_light,
-    } = bounce;
-
-    if ty.is_emission() {
-        let initial_input = RenderContext {
-            wavelength: main_sample.0.wavelength,
-            incident,
-            normal,
-            texture,
-        };
-        let mut exe = color.memoize(initial_input, exe);
-
-        main_sample.0.brightness += exe.run() * probability * main_sample.1;
-
-        for &mut (ref mut sample, reflectance) in additional_samples {
-            exe.update_input().set_wavelength(sample.wavelength);
-            sample.brightness += exe.run() * probability * reflectance;
-        }
-    } else {
-        {
-            let initial_input = RenderContext {
-                wavelength: main_sample.0.wavelength,
-                incident,
-                normal,
-                texture,
-            };
-            let mut exe = color.memoize(initial_input, exe);
-
-            main_sample.1 *= exe.run() * probability;
-
-            for (sample, reflectance) in &mut *additional_samples {
-                exe.update_input().set_wavelength(sample.wavelength);
-                *reflectance *= exe.run() * probability;
-            }
-        }
-
-        for direct in direct_light {
-            let &tracer::DirectLight {
-                dispersed: l_dispersed,
-                color: l_color,
-                incident: l_incident,
-                normal: l_normal,
-                probability: l_probability,
-                texture: l_texture,
-            } = direct;
-
-            let initial_input = RenderContext {
-                wavelength: main_sample.0.wavelength,
-                incident: l_incident,
-                normal: l_normal,
-                texture: l_texture,
-            };
-            let mut exe = l_color.memoize(initial_input, exe);
-
-            main_sample.0.brightness += exe.run() * l_probability * main_sample.1;
-
-            if !l_dispersed {
-                for &mut (ref mut sample, reflectance) in &mut *additional_samples {
-                    exe.update_input().set_wavelength(sample.wavelength);
-                    sample.brightness += exe.run() * l_probability * reflectance;
-                }
-            }
-        }
-
-        let brdf = ty.brdf(incident, normal);
-        main_sample.1 *= brdf;
-
-        for (_, reflectance) in additional_samples {
-            *reflectance *= brdf;
-        }
-    }
-}
+use super::samplers::Sampler;
 
 pub struct Tile {
     pub area: Area<f32>,
@@ -110,7 +17,7 @@ impl Tile {
         self.width * self.height
     }
 
-    pub fn sample_point<R: Rng>(&self, rng: &mut R) -> Point2<f32> {
+    pub(crate) fn sample_point(&self, rng: &mut dyn Sampler) -> Point2<f32> {
         let offset = Vector2::new(
             self.area.size.x * rng.gen::<f32>(),
             self.area.size.y * rng.gen::<f32>(),
