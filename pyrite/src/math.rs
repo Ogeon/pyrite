@@ -1,3 +1,5 @@
+use std::ops::{Add, Mul};
+
 use cgmath::{ElementWise, InnerSpace, Vector3};
 use collision::{Aabb3, Ray3};
 
@@ -233,4 +235,12 @@ pub(crate) fn face_forward(vector: Vector3<f32>, forward: Vector3<f32>) -> Vecto
     } else {
         vector
     }
+}
+
+#[inline(always)]
+pub(crate) fn lerp<T>(lhs: T, rhs: T, amount: f32) -> T
+where
+    T: Mul<f32, Output = T> + Add<T, Output = T>,
+{
+    lhs * (1.0 - amount) + rhs * amount
 }

@@ -5,12 +5,11 @@ use bitflags::bitflags;
 use crate::project::{expressions::Vector, spectra::Spectra, textures::Textures};
 
 use instruction::Instruction;
-use memoized::MemoizedProgram;
 use registers::{NumberRegister, VectorRegister};
 
 pub(crate) use compiler::ProgramCompiler;
 pub(crate) use execution_context::ExecutionContext;
-pub(crate) use memoized::MemoizedInput;
+pub(crate) use memoized::{MemoizedInput, MemoizedProgram};
 
 mod compiler;
 mod execution_context;

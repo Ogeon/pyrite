@@ -315,6 +315,7 @@ fn render<P: AsRef<Path>>(
                 &config.world,
                 config.resources,
             );
+            preview_progress.finish();
             global_progress.finish_and_clear();
             preview_progress.finish_and_clear();
         });

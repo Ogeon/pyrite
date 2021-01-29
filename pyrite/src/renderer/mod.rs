@@ -62,7 +62,7 @@ impl Renderer {
 
     fn from_shared(shared: crate::project::RendererShared, algorithm: Algorithm) -> Self {
         Self {
-            threads: shared.threads.unwrap_or_else(|| num_cpus::get()),
+            threads: shared.threads.unwrap_or_else(|| num_cpus::get().max(2) - 1),
             bounces: shared.bounces.unwrap_or(8),
             pixel_samples: shared.pixel_samples,
             spectrum_samples: shared.spectrum_samples.unwrap_or(10),
@@ -117,7 +117,7 @@ impl TaskRunner {
         R: FnMut(usize, T),
         T: Send,
     {
-        crossbeam::thread::scope(|scope| {
+        let thread_result = crossbeam::thread::scope(|scope| {
             let (result_receiver, sender_receiver) = {
                 let (sender_sender, sender_receiver) = crossbeam::channel::bounded(self.threads);
                 let (result_sender, result_receiver) = crossbeam::channel::unbounded();
@@ -167,8 +167,11 @@ impl TaskRunner {
             for (index, result) in result_receiver {
                 with_result(index, result);
             }
-        })
-        .unwrap();
+        });
+
+        if let Err(thread_error) = thread_result {
+            self.progress.bars[0].println(&format!("{:?}", thread_error));
+        }
 
         self.progress.clear_local_progress();
     }

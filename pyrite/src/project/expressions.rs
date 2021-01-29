@@ -9,7 +9,7 @@ use cgmath::{
 };
 
 use crate::{
-    light_source,
+    light_source, math,
     program::{FromValue, ProgramOutputType},
 };
 
@@ -478,8 +478,7 @@ impl ExpressionValue for f32 {
     }
 
     fn mix(lhs: Self, rhs: Self, amount: f32) -> Result<Self, Box<dyn Error>> {
-        let amount = amount.min(1.0).max(0.0);
-        Ok(lhs * (1.0 - amount) + rhs * amount)
+        Ok(math::lerp(lhs, rhs, amount))
     }
 
     fn clamp(value: Self, min: Self, max: Self) -> Result<Self, Box<dyn Error>> {

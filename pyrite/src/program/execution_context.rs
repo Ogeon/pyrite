@@ -6,7 +6,7 @@ use super::{
     Inputs, ProgramFor, ProgramInput, Resources,
 };
 use crate::{
-    math::{blackbody, fresnel},
+    math::{blackbody, fresnel, lerp},
     project::expressions::Vector,
 };
 use cgmath::{Vector4, VectorSpace};
@@ -206,7 +206,7 @@ impl<'p> ExecutionContext<'p> {
                         BinaryValueType::Number => {
                             let lhs = self.registers.get_number(NumberRegister(lhs));
                             let rhs = self.registers.get_number(NumberRegister(rhs));
-                            let result = lhs * (1.0 - amount) + rhs * amount;
+                            let result = lerp(lhs, rhs, amount);
                             self.registers.set_number(result, NumberRegister(output));
                         }
                         BinaryValueType::Vector => {
