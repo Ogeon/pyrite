@@ -8,10 +8,11 @@ use indicatif::ProgressBar;
 
 mod algorithm;
 mod integrators;
+mod sample_light;
 
 pub(crate) mod samplers;
 
-static DEFAULT_SPECTRUM_SPAN: (f32, f32) = (380.0, 780.0);
+static DEFAULT_SPECTRUM_SPAN: (f32, f32) = (360.0, 830.0);
 
 pub struct Renderer {
     pub threads: usize,
@@ -45,18 +46,21 @@ impl Renderer {
                     }),
                 )*/
             }
-            crate::project::Renderer::PhotonMapping { .. } => {
-                unimplemented!("photon mapping is temporarily removed")
-                /*Self::from_shared(
-                    shared,
-                    Algorithm::PhotonMapping(photon_mapping::Config {
-                        radius: radius.unwrap_or(0.1),
-                        photon_bounces: photon_bounces.unwrap_or(8),
-                        photons: photons.unwrap_or(10000),
-                        photon_passes: photon_passes.unwrap_or(1),
-                    }),
-                )*/
-            }
+            crate::project::Renderer::PhotonMapping {
+                shared,
+                initial_radius,
+                iterations,
+                photons,
+                direct_light,
+            } => Self::from_shared(
+                shared,
+                Algorithm::PhotonMapping(integrators::photon_mapping::Config {
+                    initial_radius: initial_radius.unwrap_or(0.1),
+                    iterations: iterations.unwrap_or(1000),
+                    photons: photons.unwrap_or(10000),
+                    direct_light: direct_light.unwrap_or(true),
+                }),
+            ),
         }
     }
 
@@ -93,6 +97,17 @@ impl Renderer {
                 camera,
                 resources,
             ),
+
+            Algorithm::PhotonMapping(ref config) => integrators::photon_mapping::render(
+                film,
+                task_runner,
+                on_status,
+                self,
+                config,
+                world,
+                camera,
+                resources,
+            ),
         }
     }
 }
@@ -100,12 +115,13 @@ impl Renderer {
 pub(crate) enum Algorithm {
     Simple(integrators::simple::Config),
     //Bidirectional(bidirectional::BidirParams),
-    //PhotonMapping(photon_mapping::Config),
+    PhotonMapping(integrators::photon_mapping::Config),
 }
 
 pub(crate) struct TaskRunner {
     pub(crate) threads: usize,
     pub(crate) progress: ProgressIndicator,
+    pub(crate) pool: rayon_core::ThreadPool,
 }
 
 impl TaskRunner {
@@ -175,6 +191,60 @@ impl TaskRunner {
 
         self.progress.clear_local_progress();
     }
+
+    pub(crate) fn scoped_pool<W, I>(
+        &self,
+        mut workers: Vec<W>,
+        tasks: I,
+    ) -> (Vec<W>, Vec<W::Output>)
+    where
+        I: IntoIterator + Send,
+        I::Item: Send,
+        W: Worker<I::Item> + Send,
+    {
+        let num_workers = workers.len();
+        let (worker_sender, worker_receiver) = crossbeam::channel::unbounded();
+        let mut results = Vec::new();
+
+        for worker in workers.drain(..) {
+            worker_sender
+                .send((worker, None))
+                .expect("could not send worker");
+        }
+
+        let worker_receiver = {
+            let results = &mut results;
+            self.pool.scope(move |scope| {
+                for task in tasks {
+                    let (mut worker, result) =
+                        worker_receiver.recv().expect("could not receive worker");
+                    results.extend(result);
+                    let worker_sender = worker_sender.clone();
+                    scope.spawn(move |_| {
+                        let result = worker.do_work(task);
+                        worker_sender
+                            .send((worker, Some(result)))
+                            .expect("could not send worker");
+                    });
+                }
+
+                worker_receiver
+            })
+        };
+
+        for (worker, result) in worker_receiver {
+            workers.push(worker);
+            results.extend(result);
+        }
+
+        assert_eq!(workers.len(), num_workers);
+
+        (workers, results)
+    }
+
+    pub(crate) fn pool_size(&self) -> usize {
+        self.threads
+    }
 }
 
 enum Message<T> {
@@ -218,4 +288,10 @@ impl LocalProgress {
 pub(crate) struct Progress<'a> {
     pub(crate) progress: u8,
     pub(crate) message: &'a str,
+}
+
+pub(crate) trait Worker<T> {
+    type Output: Send;
+
+    fn do_work(&mut self, task: T) -> Self::Output;
 }

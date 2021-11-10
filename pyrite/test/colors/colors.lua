@@ -5,7 +5,7 @@ local ball = shape.sphere {radius = 1, position = vector {z = 1}}
 return {
     image = {width = 512, height = 512},
 
-    renderer = renderer.simple {
+    renderer = renderer.photon_mapping {
         pixel_samples = 500,
         spectrum_samples = 10,
         spectrum_bins = 50,
@@ -13,6 +13,9 @@ return {
         bounces = 8,
         light_samples = 0,
         light_bounces = 4,
+        iterations = 500,
+        photons = 100000,
+        initial_radius = 0.1,
     },
 
     camera = camera.perspective {

@@ -5,6 +5,10 @@ use collision::{Aabb3, Ray3};
 
 pub const DIST_EPSILON: f32 = 0.0001;
 
+const INV_4_PI: f32 = 0.07957747154594766788;
+
+pub(crate) const SPHERE_PDF: f32 = INV_4_PI;
+
 pub mod utils {
     use std::{
         self,
@@ -172,6 +176,12 @@ pub mod utils {
         let Point2 { x, y } = sample_concentric_disk(sampler);
         let z = 0.0f32.max(1.0 - x * x - y * y).sqrt();
         Vector3::new(x, y, z)
+    }
+
+    /// Gives the probability of receiving a vector with a certain `z` value from [`sample_cosine_hemisphere`].
+    #[inline(always)]
+    pub(crate) fn cosine_hemisphere_pdf(z: f32) -> f32 {
+        z * std::f32::consts::FRAC_1_PI
     }
 }
 

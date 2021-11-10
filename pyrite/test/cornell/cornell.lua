@@ -17,13 +17,16 @@ local red = {surface = {reflection = material.diffuse {color = colors.red}}}
 return {
     image = {width = 512, height = 512, white = blackbody(4000)},
 
-    renderer = renderer.simple {
-        pixel_samples = 100,
+    renderer = renderer.photon_mapping {
+        pixel_samples = 200,
         spectrum_samples = 10,
         spectrum_bins = 50,
         tile_size = 32,
         bounces = 8,
         light_bounces = 4,
+        iterations = 100,
+        photons = 1000000,
+        initial_radius = 0.02,
     },
 
     camera = camera.perspective {
@@ -49,6 +52,15 @@ return {
                     back = white,
                     ceiling = white,
                     floor = white,
+                },
+            },
+            shape.sphere {
+                position = vector(-4, 1, 0.5),
+                radius = 0.5,
+                material = {
+                    surface = {
+                        reflection = material.refractive {color = 1, ior = 1.5},
+                    },
                 },
             },
             shape.ray_marched {

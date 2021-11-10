@@ -1,39 +1,25 @@
 use cgmath::{InnerSpace, Point2, Vector3};
 
 use crate::{
-    light::Wavelengths,
+    light::{DispersedLight, Wavelengths},
     math::face_forward,
     tracer::{LightProgram, RenderContext},
     utils::Tools,
 };
 
-use super::SurfaceInteraction;
+use super::{CoherentOutput, DispersedOutput, InteractionOutput, SurfaceInteraction};
 
 // Mostly based on the PBR book.
-pub(super) fn sample_reflection<'t, 'a>(
+pub(super) fn sample_reflection_coherent<'t, 'a>(
     properties: &Properties,
     out_direction: Vector3<f32>,
     texture_coordinate: Point2<f32>,
     color: LightProgram<'a>,
     wavelengths: &Wavelengths,
     tools: &mut Tools<'t, 'a>,
-) -> SurfaceInteraction<'t> {
+) -> SurfaceInteraction<InteractionOutput<'t>> {
     let dispersed = properties.dispersion != 0.0 || properties.env_dispersion != 0.0;
-
-    let mut reflectivity = tools.light_pool.get();
-
-    let (ior, env_ior) = if dispersed {
-        reflectivity.set_single_wavelength();
-
-        let wl = wavelengths.hero() * 0.001;
-        let ior = properties.ior + properties.dispersion / (wl * wl);
-        let env_ior = properties.env_ior + properties.env_dispersion / (wl * wl);
-        (ior, env_ior)
-    } else {
-        (properties.ior, properties.env_ior)
-    };
-
-    let fresnel = fresnel_dielectric(out_direction.z, env_ior, ior);
+    let refraction_threshold = tools.sampler.gen_f32();
 
     let initial_input = RenderContext {
         wavelength: wavelengths.hero(),
@@ -43,17 +29,129 @@ pub(super) fn sample_reflection<'t, 'a>(
     };
     let mut color_program = color.memoize(initial_input, tools.execution_context);
 
-    let (in_direction, pdf) = if tools.sampler.gen_f32() < fresnel {
-        let in_direction = Vector3::new(-out_direction.x, -out_direction.y, out_direction.z);
+    if dispersed {
+        let output = wavelengths
+            .into_iter()
+            .enumerate()
+            .map(|(index, wavelength)| {
+                let wl = wavelength * 0.001;
+                let ior = properties.ior + properties.dispersion / (wl * wl);
+                let env_ior = properties.env_ior + properties.env_dispersion / (wl * wl);
 
+                let (in_direction, pdf) =
+                    reflect_or_refract(refraction_threshold, out_direction, ior, env_ior);
+
+                let abs_cos_in = in_direction.z.abs();
+                let reflectivity = if abs_cos_in > 0.0 {
+                    color_program.update_input().set_wavelength(wavelength);
+                    pdf * color_program.run() / abs_cos_in
+                } else {
+                    0.0
+                };
+
+                DispersedOutput {
+                    in_direction,
+                    pdf: if in_direction.z == 0.0 { 0.0 } else { pdf },
+                    reflectivity: DispersedLight::new(index, reflectivity),
+                }
+            });
+
+        SurfaceInteraction {
+            diffuse: false,
+            glossy: false,
+            output: InteractionOutput::Dispersed(
+                tools.interaction_output_pool.get_fill_iter(output),
+            ),
+        }
+    } else {
+        let ior = properties.ior;
+        let env_ior = properties.env_ior;
+
+        let (in_direction, pdf) =
+            reflect_or_refract(refraction_threshold, out_direction, ior, env_ior);
+
+        let mut reflectivity = tools.light_pool.get();
         let abs_cos_in = in_direction.z.abs();
-
         if abs_cos_in > 0.0 {
             for (bin, wavelength) in reflectivity.iter_mut().zip(wavelengths) {
                 color_program.update_input().set_wavelength(wavelength);
-                *bin = fresnel * color_program.run() / abs_cos_in;
+                *bin = pdf * color_program.run() / abs_cos_in;
             }
         }
+
+        SurfaceInteraction {
+            diffuse: false,
+            glossy: false,
+            output: InteractionOutput::Coherent(CoherentOutput {
+                reflectivity,
+                pdf: if in_direction.z == 0.0 { 0.0 } else { pdf },
+                in_direction,
+            }),
+        }
+    }
+}
+
+// Mostly based on the PBR book.
+pub(super) fn sample_reflection_dispersed<'t, 'a>(
+    properties: &Properties,
+    out_direction: Vector3<f32>,
+    texture_coordinate: Point2<f32>,
+    color: LightProgram<'a>,
+    wavelength_index: usize,
+    wavelengths: &Wavelengths,
+    tools: &mut Tools<'t, 'a>,
+) -> SurfaceInteraction<DispersedOutput> {
+    let dispersed = properties.dispersion != 0.0 || properties.env_dispersion != 0.0;
+    let refraction_threshold = tools.sampler.gen_f32();
+
+    let input = RenderContext {
+        wavelength: wavelengths[wavelength_index],
+        normal: Vector3::unit_z(),
+        ray_direction: -out_direction,
+        texture: texture_coordinate,
+    };
+
+    let (ior, env_ior) = if dispersed {
+        let wl = wavelengths[wavelength_index] * 0.001;
+        let ior = properties.ior + properties.dispersion / (wl * wl);
+        let env_ior = properties.env_ior + properties.env_dispersion / (wl * wl);
+        (ior, env_ior)
+    } else {
+        let ior = properties.ior;
+        let env_ior = properties.env_ior;
+        (ior, env_ior)
+    };
+
+    let (in_direction, pdf) = reflect_or_refract(refraction_threshold, out_direction, ior, env_ior);
+
+    let abs_cos_in = in_direction.z.abs();
+    let reflectivity = if abs_cos_in > 0.0 {
+        pdf * tools.execution_context.run(color, &input) / abs_cos_in
+    } else {
+        0.0
+    };
+
+    SurfaceInteraction {
+        diffuse: false,
+        glossy: false,
+        output: DispersedOutput {
+            in_direction,
+            pdf: if in_direction.z == 0.0 { 0.0 } else { pdf },
+            reflectivity: DispersedLight::new(wavelength_index, reflectivity),
+        },
+    }
+}
+
+fn reflect_or_refract(
+    refraction_threshold: f32,
+    out_direction: Vector3<f32>,
+    ior: f32,
+    env_ior: f32,
+) -> (Vector3<f32>, f32) {
+    let fresnel = fresnel_dielectric(out_direction.z, env_ior, ior);
+
+    if refraction_threshold < fresnel {
+        let in_direction = Vector3::new(-out_direction.x, -out_direction.y, out_direction.z);
 
         (in_direction, fresnel)
     } else {
@@ -74,23 +172,7 @@ pub(super) fn sample_reflection<'t, 'a>(
             unreachable!();
         };
 
-        let abs_cos_in = in_direction.z.abs();
-
-        if abs_cos_in > 0.0 {
-            for (bin, wavelength) in reflectivity.iter_mut().zip(wavelengths) {
-                color_program.update_input().set_wavelength(wavelength);
-                *bin = (1.0 - fresnel) * color_program.run() / abs_cos_in;
-            }
-        }
-
         (in_direction, 1.0 - fresnel)
-    };
-
-    SurfaceInteraction {
-        reflectivity,
-        pdf: if in_direction.z == 0.0 { 0.0 } else { pdf },
-        diffuse: false,
-        in_direction,
     }
 }
 

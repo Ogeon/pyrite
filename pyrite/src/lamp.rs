@@ -1,8 +1,11 @@
+use std::unimplemented;
+
 use cgmath::{InnerSpace, Point2, Point3, Vector3};
 use collision::Ray3;
 
 use crate::{
-    light::{Light, Wavelengths},
+    light::{CoherentLight, Wavelengths},
+    math::utils::{cosine_hemisphere_pdf, sample_cosine_hemisphere, sample_sphere},
     shapes::{Intersection, Shape},
     tracer::{LightProgram, NormalInput, RenderContext},
     utils::Tools,
@@ -143,12 +146,106 @@ impl<'p> Lamp<'p> {
             }
         }
     }
+
+    pub(crate) fn sample_emission_out<'t>(
+        &self,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'p>,
+    ) -> LightSampleOut<'t> {
+        match *self {
+            Lamp::Directional {
+                direction,
+                width,
+                color,
+            } => unimplemented!(),
+            Lamp::Point(center, color) => {
+                let ray = Ray3::new(center, sample_sphere(tools.sampler));
+                let mut light = tools.light_pool.get();
+
+                let initial_input = RenderContext {
+                    wavelength: wavelengths.hero(),
+                    normal: Vector3::unit_z(),
+                    ray_direction: -ray.direction,
+                    texture: Point2::new(0.0, 0.0),
+                };
+
+                let mut color_program = color.memoize(initial_input, tools.execution_context);
+
+                for (bin, wavelength) in light.iter_mut().zip(wavelengths) {
+                    color_program.update_input().set_wavelength(wavelength);
+                    *bin = color_program.run();
+                }
+
+                LightSampleOut {
+                    light,
+                    pdf_pos: 1.0,
+                    pdf_dir: crate::math::SPHERE_PDF,
+                    ray,
+                    normal: ray.direction,
+                }
+            }
+            Lamp::Shape(shape) => {
+                let surface_point = shape
+                    .sample_point(tools.sampler)
+                    .expect("trying to sample infinite surface light");
+                let surface_data = surface_point.get_surface_data();
+                let material = surface_point.get_material();
+
+                let normal_input = NormalInput {
+                    normal: surface_data.normal.vector(),
+                    incident: surface_data.normal.vector(),
+                    texture: surface_data.texture,
+                };
+                let normal = material.apply_normal_map(
+                    surface_data.normal,
+                    normal_input,
+                    tools.execution_context,
+                );
+
+                let normal_space_direction = sample_cosine_hemisphere(tools.sampler);
+                let ray = Ray3::new(
+                    surface_point.position,
+                    surface_data
+                        .normal
+                        .tilted(normal)
+                        .from_space(normal_space_direction),
+                );
+
+                let light = surface_point
+                    .get_material()
+                    .light_emission(
+                        ray.direction,
+                        normal,
+                        surface_data.texture,
+                        wavelengths,
+                        tools,
+                    )
+                    .expect("lamps should have emissive materials");
+
+                LightSampleOut {
+                    light,
+                    pdf_pos: 1.0 / surface_point.get_surface_area(),
+                    pdf_dir: cosine_hemisphere_pdf(normal_space_direction.z),
+                    ray,
+                    normal: surface_data.normal.vector(),
+                }
+            }
+        }
+    }
 }
 
 pub(crate) struct LightSample<'a> {
-    pub light: Light<'a>,
+    pub light: CoherentLight<'a>,
     pub pdf: f32,
     pub in_direction: Vector3<f32>,
     pub normal: Vector3<f32>,
     pub visible: bool,
+}
+
+pub(crate) struct LightSampleOut<'a> {
+    pub light: CoherentLight<'a>,
+    pub pdf_pos: f32,
+    pub pdf_dir: f32,
+    pub ray: Ray3<f32>,
+    pub normal: Vector3<f32>,
 }

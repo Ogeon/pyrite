@@ -1,16 +1,23 @@
+use std::usize;
+
 use cgmath::{Point2, Vector3};
 
-use crate::{light::Wavelengths, tracer::LightProgram, tracer::RenderContext, utils::Tools};
+use crate::{
+    light::{DispersedLight, Wavelengths},
+    tracer::LightProgram,
+    tracer::RenderContext,
+    utils::Tools,
+};
 
-use super::SurfaceInteraction;
+use super::{CoherentOutput, DispersedOutput, InteractionOutput, SurfaceInteraction};
 
-pub(super) fn sample_reflection<'t, 'a>(
+pub(super) fn sample_reflection_coherent<'t, 'a>(
     out_direction: Vector3<f32>,
     texture_coordinate: Point2<f32>,
     color: LightProgram<'a>,
     wavelengths: &Wavelengths,
     tools: &mut Tools<'t, 'a>,
-) -> SurfaceInteraction<'t> {
+) -> SurfaceInteraction<InteractionOutput<'t>> {
     let in_direction = Vector3::new(-out_direction.x, -out_direction.y, out_direction.z);
 
     let mut reflectivity = tools.light_pool.get();
@@ -36,9 +43,46 @@ pub(super) fn sample_reflection<'t, 'a>(
     }
 
     SurfaceInteraction {
-        in_direction,
-        pdf: if in_direction.z == 0.0 { 0.0 } else { 1.0 },
         diffuse: false,
-        reflectivity,
+        glossy: false,
+        output: InteractionOutput::Coherent(CoherentOutput {
+            in_direction,
+            pdf: if in_direction.z == 0.0 { 0.0 } else { 1.0 },
+            reflectivity,
+        }),
+    }
+}
+
+pub(super) fn sample_reflection_dispersed<'t, 'a>(
+    out_direction: Vector3<f32>,
+    texture_coordinate: Point2<f32>,
+    color: LightProgram<'a>,
+    wavelength_index: usize,
+    wavelengths: &Wavelengths,
+    tools: &mut Tools<'t, 'a>,
+) -> SurfaceInteraction<DispersedOutput> {
+    let in_direction = Vector3::new(-out_direction.x, -out_direction.y, out_direction.z);
+
+    let reflectivity = if in_direction.z != 0.0 {
+        let input = RenderContext {
+            wavelength: wavelengths[wavelength_index],
+            normal: Vector3::unit_z(),
+            ray_direction: -out_direction,
+            texture: texture_coordinate,
+        };
+
+        tools.execution_context.run(color, &input) / in_direction.z.abs()
+    } else {
+        0.0
+    };
+
+    SurfaceInteraction {
+        diffuse: false,
+        glossy: false,
+        output: DispersedOutput {
+            in_direction,
+            pdf: if in_direction.z == 0.0 { 0.0 } else { 1.0 },
+            reflectivity: DispersedLight::new(wavelength_index, reflectivity),
+        },
     }
 }

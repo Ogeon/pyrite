@@ -1,5 +1,5 @@
-use cgmath::{EuclideanSpace, Point3};
-use collision::{Aabb, Aabb3, Ray3, SurfaceArea, Union};
+use cgmath::Point3;
+use collision::{Aabb, Aabb3, Contains, Ray3, SurfaceArea, Union};
 
 use super::Dim3;
 
@@ -10,38 +10,36 @@ pub(crate) struct Bvh<T> {
 }
 
 impl<T: Bounded> Bvh<T> {
-    pub fn new(items: Vec<T>) -> Bvh<T> {
-        if items.is_empty() {
+    pub fn new(mut all_items: Vec<T>) -> Bvh<T> {
+        let mut hull = if let Some(item) = all_items.get(0) {
+            Hull::new(item.aabb())
+        } else {
             return Bvh { nodes: Vec::new() };
-        }
+        };
 
         let mut stack = Vec::new();
-        let mut nodes: Vec<BvhNode<T>> = Vec::new();
+        let mut nodes: Vec<BvhNode> = Vec::with_capacity(all_items.len());
+        let mut bucket_indices = Vec::with_capacity(all_items.len());
 
-        let mut hull = items
-            .get(0)
-            .map_or_else(Hull::empty, |item| Hull::new(item.aabb()));
-
-        let mut item_refs = Vec::with_capacity(items.len());
-        for item in items {
+        for item in &all_items {
             hull = hull.expand(&item.aabb());
-            item_refs.push(item);
         }
 
         stack.push(StackEntry::Split {
-            items: item_refs,
+            begin: 0,
+            end: all_items.len(),
             hull,
         });
 
         while let Some(entry) = stack.pop() {
             match entry {
                 StackEntry::Join { bounding_box } => {
-                    let first = nodes
-                        .pop()
-                        .expect("a first node should be on the node stack");
                     let second = nodes
                         .pop()
                         .expect("a second node should be on the node stack");
+                    let first = nodes
+                        .pop()
+                        .expect("a first node should be on the node stack");
                     nodes.push(BvhNode {
                         bounding_box,
                         node_type: BvhNodeType::Node {
@@ -51,13 +49,13 @@ impl<T: Bounded> Bvh<T> {
                         },
                     });
                 }
-                StackEntry::Split { mut items, hull } => {
+                StackEntry::Split { begin, end, hull } => {
+                    let items = &mut all_items[begin..end];
+
                     if items.len() == 1 {
                         nodes.push(BvhNode {
                             bounding_box: hull.aabbs,
-                            node_type: BvhNodeType::Leaf {
-                                item: items.pop().unwrap(),
-                            },
+                            node_type: BvhNodeType::Leaf { index: begin },
                         });
                         continue;
                     }
@@ -67,14 +65,14 @@ impl<T: Bounded> Bvh<T> {
                     let (split_axis_width, split_axis) = hull.largest_axis();
                     if split_axis_width < DIST_EPSILON {
                         // Split the items evenly between the child nodes.
-                        let second_items = items.split_off(items.len() / 2);
-                        let first_items = items;
+                        let middle = items.len() / 2;
+                        let (first_items, second_items) = items.split_at(middle);
                         let mut first_hull = Hull::new(first_items[0].aabb());
-                        for item in &first_items {
+                        for item in first_items {
                             first_hull = first_hull.expand(&item.aabb());
                         }
                         let mut second_hull = Hull::new(second_items[0].aabb());
-                        for item in &second_items {
+                        for item in second_items {
                             second_hull = second_hull.expand(&item.aabb());
                         }
 
@@ -82,31 +80,37 @@ impl<T: Bounded> Bvh<T> {
                             bounding_box: hull.aabbs,
                         });
                         stack.push(StackEntry::Split {
-                            items: second_items,
+                            begin: begin + middle,
+                            end,
                             hull: second_hull,
                         });
                         stack.push(StackEntry::Split {
-                            items: first_items,
+                            begin,
+                            end: begin + middle,
                             hull: first_hull,
                         });
                     } else {
                         // Partition the axis into a number of evenly distributed buckets the items can fall into.
                         const BUCKETS: usize = 6;
-                        let mut buckets: [Option<(Vec<_>, Hull)>; BUCKETS] = Default::default();
+                        let mut bucket_sizes: [usize; BUCKETS] = Default::default();
+                        let mut bucket_hulls: [Option<Hull>; BUCKETS] = Default::default();
 
                         let min_bound = split_axis.point_element(hull.centroids.min);
-                        for item in items {
+                        bucket_indices.clear();
+                        for item in &*items {
                             let bounding_box = item.aabb();
                             let position = split_axis.point_element(bounding_box.center());
                             let float_index =
                                 BUCKETS as f32 * (position - min_bound) / split_axis_width;
                             let index = (float_index as usize).min(BUCKETS - 1);
 
-                            if let Some((bucket, hull)) = &mut buckets[index] {
-                                bucket.push(item);
+                            bucket_indices.push(index);
+                            bucket_sizes[index] += 1;
+
+                            if let Some(hull) = &mut bucket_hulls[index] {
                                 *hull = hull.expand(&bounding_box);
                             } else {
-                                buckets[index] = Some((vec![item], Hull::new(bounding_box)));
+                                bucket_hulls[index] = Some(Hull::new(bounding_box));
                             }
                         }
 
@@ -115,9 +119,12 @@ impl<T: Bounded> Bvh<T> {
                         let mut min_cost_split = 0;
                         let hull_area = hull.aabbs.surface_area();
                         for index in 1..BUCKETS {
-                            let (first_buckets, second_buckets) = buckets.split_at(index);
-                            let (first_count, first_area) = get_bucket_stats(first_buckets);
-                            let (second_count, second_area) = get_bucket_stats(second_buckets);
+                            let (first_sizes, second_sizes) = bucket_sizes.split_at(index);
+                            let (first_hulls, second_hulls) = bucket_hulls.split_at(index);
+                            let (first_count, first_area) =
+                                get_bucket_stats(first_sizes, first_hulls);
+                            let (second_count, second_area) =
+                                get_bucket_stats(second_sizes, second_hulls);
 
                             let cost = (first_area * first_count as f32
                                 + second_area * second_count as f32)
@@ -129,19 +136,43 @@ impl<T: Bounded> Bvh<T> {
                             }
                         }
 
-                        let (first_buckets, second_buckets) = buckets.split_at_mut(min_cost_split);
-                        let (first_items, first_hull) = merge_buckets(first_buckets);
-                        let (second_items, second_hull) = merge_buckets(second_buckets);
+                        let mut index = 0;
+                        let mut new_index = items.len() - 1;
+                        loop {
+                            while bucket_indices[index] < min_cost_split {
+                                index += 1;
+                            }
+
+                            while bucket_indices[new_index] >= min_cost_split {
+                                new_index -= 1;
+                            }
+
+                            if index >= new_index {
+                                break;
+                            }
+
+                            items.swap(index, new_index);
+                            bucket_indices.swap(index, new_index);
+                        }
+
+                        let (first_sizes, second_sizes) = bucket_sizes.split_at(min_cost_split);
+                        let (first_hulls, second_hulls) = bucket_hulls.split_at_mut(min_cost_split);
+                        let (first_begin, first_end, first_hull) =
+                            merge_buckets(begin, first_sizes, first_hulls);
+                        let (second_begin, second_end, second_hull) =
+                            merge_buckets(first_end, second_sizes, second_hulls);
 
                         stack.push(StackEntry::Join {
                             bounding_box: hull.aabbs,
                         });
                         stack.push(StackEntry::Split {
-                            items: second_items,
+                            begin: second_begin,
+                            end: second_end,
                             hull: second_hull.expect("there should be a second items hull"),
                         });
                         stack.push(StackEntry::Split {
-                            items: first_items,
+                            begin: first_begin,
+                            end: first_end,
                             hull: first_hull.expect("there should be a first items hull"),
                         });
                     }
@@ -150,66 +181,80 @@ impl<T: Bounded> Bvh<T> {
         }
 
         Self {
-            nodes: nodes.pop().map_or_else(Vec::new, BvhNode::flatten),
+            nodes: nodes
+                .pop()
+                .map_or_else(Vec::new, |node| node.flatten(all_items)),
         }
     }
 }
 
 impl<T> Bvh<T> {
-    pub fn ray_intersect(&self, ray: Ray3<f32>) -> Intersections<T> {
+    pub fn ray_intersect(&self, ray: Ray3<f32>) -> Intersections<T, Ray3<f32>> {
         Intersections {
             nodes: self.nodes.iter(),
-            ray,
+            intersecting: ray,
+        }
+    }
+
+    pub fn point_intersect(&self, point: Point3<f32>) -> Intersections<T, Point3<f32>> {
+        Intersections {
+            nodes: self.nodes.iter(),
+            intersecting: point,
         }
     }
 }
 
-fn get_bucket_stats<T>(buckets: &[Option<(Vec<T>, Hull)>]) -> (usize, f32) {
-    let (count, aabb) =
-        buckets
-            .iter()
-            .fold((0, None), |acc: (usize, Option<Aabb3<f32>>), bucket| {
-                if let Some((bucket, hull)) = bucket {
-                    let aabb = acc.1.map_or(hull.aabbs, |aabb| aabb.union(&hull.aabbs));
-                    (acc.0 + bucket.len(), Some(aabb))
-                } else {
-                    acc
-                }
-            });
+fn get_bucket_stats(sizes: &[usize], hulls: &[Option<Hull>]) -> (usize, f32) {
+    let (count, aabb) = sizes.iter().zip(hulls).fold(
+        (0, None),
+        |(acc_size, acc_hull): (usize, Option<Aabb3<f32>>), (&size, hull)| {
+            if let Some(hull) = hull {
+                let aabb = acc_hull.map_or(hull.aabbs, |aabb| aabb.union(&hull.aabbs));
+                (acc_size + size, Some(aabb))
+            } else {
+                assert_eq!(size, 0);
+                (acc_size, acc_hull)
+            }
+        },
+    );
     let area = aabb.as_ref().map_or(0.0, Aabb3::surface_area);
 
     (count, area)
 }
 
-fn merge_buckets<T>(buckets: &mut [Option<(Vec<T>, Hull)>]) -> (Vec<T>, Option<Hull>) {
-    buckets.iter_mut().fold(
-        (Vec::new(), None),
-        |mut acc: (Vec<_>, Option<Hull>), bucket| {
-            if let Some((bucket, hull)) = bucket.take() {
-                let hull = acc
-                    .1
-                    .map_or_else(|| hull.clone(), |acc_hull| hull.join(&acc_hull));
-                acc.0.extend(bucket);
-                (acc.0, Some(hull))
+fn merge_buckets(
+    begin: usize,
+    sizes: &[usize],
+    hulls: &mut [Option<Hull>],
+) -> (usize, usize, Option<Hull>) {
+    sizes.iter().zip(hulls).fold(
+        (begin, begin, None),
+        |(acc_begin, acc_end, acc_hull), (&size, hull)| {
+            if let Some(hull) = hull.take() {
+                let hull = acc_hull.map_or_else(|| hull.clone(), |acc_hull| hull.join(&acc_hull));
+
+                (acc_begin, acc_end + size, Some(hull))
             } else {
-                acc
+                assert_eq!(size, 0);
+                (acc_begin, acc_end, acc_hull)
             }
         },
     )
 }
 
-pub struct Intersections<'a, T> {
+pub struct Intersections<'a, T, I> {
     nodes: std::slice::Iter<'a, FlatBvhNode<T>>,
-    ray: Ray3<f32>,
+    intersecting: I,
 }
 
-impl<'a, T> Intersections<'a, T> {
+impl<'a, T> Intersections<'a, T, Ray3<f32>> {
     pub fn next(&mut self, max_distance: f32) -> Option<&T> {
         // Contains the next node after skipping a few
         let mut next_node = None;
 
         while let Some(node) = next_node.take().or_else(|| self.nodes.next()) {
-            if let Some(distance) = aabb_intersection_distance(node.bounding_box, self.ray) {
+            if let Some(distance) = aabb_intersection_distance(node.bounding_box, self.intersecting)
+            {
                 if distance >= max_distance {
                     if node.subtree_size() > 0 {
                         next_node = self.nodes.nth(node.subtree_size());
@@ -229,17 +274,44 @@ impl<'a, T> Intersections<'a, T> {
     }
 }
 
-enum StackEntry<T> {
-    Split { items: Vec<T>, hull: Hull },
-    Join { bounding_box: Aabb3<f32> },
+impl<'a, T> Iterator for Intersections<'a, T, Point3<f32>> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Contains the next node after skipping a few
+        let mut next_node = None;
+
+        while let Some(node) = next_node.take().or_else(|| self.nodes.next()) {
+            if node.bounding_box.contains(&self.intersecting) {
+                if let FlatBvhNodeType::Leaf { item } = &node.node_type {
+                    return Some(item);
+                }
+            } else if node.subtree_size() > 0 {
+                next_node = self.nodes.nth(node.subtree_size());
+            }
+        }
+
+        None
+    }
 }
 
-struct BvhNode<T> {
+enum StackEntry {
+    Split {
+        begin: usize,
+        end: usize,
+        hull: Hull,
+    },
+    Join {
+        bounding_box: Aabb3<f32>,
+    },
+}
+
+struct BvhNode {
     bounding_box: Aabb3<f32>,
-    node_type: BvhNodeType<T>,
+    node_type: BvhNodeType,
 }
 
-impl<T> BvhNode<T> {
+impl BvhNode {
     fn subtree_size(&self) -> usize {
         match self.node_type {
             BvhNodeType::Node { subtree_size, .. } => subtree_size,
@@ -247,9 +319,12 @@ impl<T> BvhNode<T> {
         }
     }
 
-    fn flatten(self) -> Vec<FlatBvhNode<T>> {
+    fn flatten<T>(self, values: Vec<T>) -> Vec<FlatBvhNode<T>> {
+        let mut values = values.into_iter();
         let mut flat_nodes = Vec::new();
         let mut stack = vec![self];
+
+        let mut next_index = 0;
 
         while let Some(node) = stack.pop() {
             let node_type = match node.node_type {
@@ -262,7 +337,13 @@ impl<T> BvhNode<T> {
                     stack.push(*first);
                     FlatBvhNodeType::Node { subtree_size }
                 }
-                BvhNodeType::Leaf { item } => FlatBvhNodeType::Leaf { item },
+                BvhNodeType::Leaf { index } => {
+                    assert_eq!(index, next_index);
+                    next_index += 1;
+                    FlatBvhNodeType::Leaf {
+                        item: values.next().unwrap(),
+                    }
+                }
             };
 
             flat_nodes.push(FlatBvhNode {
@@ -275,14 +356,14 @@ impl<T> BvhNode<T> {
     }
 }
 
-enum BvhNodeType<T> {
+enum BvhNodeType {
     Node {
-        first: Box<BvhNode<T>>,
-        second: Box<BvhNode<T>>,
+        first: Box<BvhNode>,
+        second: Box<BvhNode>,
         subtree_size: usize,
     },
     Leaf {
-        item: T,
+        index: usize,
     },
 }
 
@@ -326,13 +407,6 @@ impl Hull {
         Self {
             aabbs: aabb,
             centroids: Aabb3::new(aabb.center(), aabb.center()),
-        }
-    }
-
-    fn empty() -> Self {
-        Self {
-            aabbs: Aabb3::new(Point3::origin(), Point3::origin()),
-            centroids: Aabb3::new(Point3::origin(), Point3::origin()),
         }
     }
 

@@ -534,6 +534,14 @@ impl<'a> SurfacePoint<'a> {
             ShapeSurfacePoint::Plane { .. } => false,
         }
     }
+
+    pub fn get_surface_area(&self) -> f32 {
+        match self.shape {
+            ShapeSurfacePoint::Sphere { shape } => shape.surface_area(),
+            ShapeSurfacePoint::Triangle { shape, .. } => shape.surface_area(),
+            ShapeSurfacePoint::Plane { .. } | ShapeSurfacePoint::RayMarched { .. } => f32::INFINITY,
+        }
+    }
 }
 
 #[derive(Copy, Clone)]

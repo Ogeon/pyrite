@@ -9,14 +9,22 @@ local diamond = {
 }
 
 local plexi = {
-    surface = {reflection = material.mirror {color = mix(0, 0.2, fresnel(1.1))}},
+    surface = {
+        reflection = material.mirror {
+            color = mix(
+                0, 0.2, fresnel(
+                    1.1
+                )
+            ),
+        },
+    },
 }
 
 return {
     image = {width = 512, height = 300},
 
     renderer = renderer.simple {
-        pixel_samples = 1000,
+        pixel_samples = 10000,
         spectrum_samples = 1,
         spectrum_bins = 50,
         tile_size = 32,
@@ -25,9 +33,15 @@ return {
 
     camera = camera.perspective {
         fov = 12.5,
+        focus_distance = 11.08,
+        aperture = 0.01,
         transform = transform.look_at {
-            from = vector(-6.55068, -8.55076, 4.0),
-            to = vector(0.1, 0, 0.1),
+            from = vector(
+                -6.55068, -8.55076, 4.0
+            ),
+            to = vector(
+                0.1, 0, 0.1
+            ),
             up = vector {z = 1},
         },
     },

@@ -224,10 +224,10 @@ pub enum Renderer {
     },
     PhotonMapping {
         shared: RendererShared,
-        radius: Option<f32>,
-        photon_bounces: Option<u32>,
-        photons: Option<usize>,
-        photon_passes: Option<usize>,
+        initial_radius: Option<f32>,
+        iterations: Option<u64>,
+        photons: Option<u64>,
+        direct_light: Option<bool>,
     },
 }
 
@@ -248,10 +248,10 @@ impl<'lua> Parse<'lua> for Renderer {
             }),
             "photon_mapping" => Ok(Renderer::PhotonMapping {
                 shared,
-                radius: context.expect_field("radius")?,
-                photon_bounces: context.expect_field("photon_bounces")?,
+                initial_radius: context.expect_field("initial_radius")?,
+                iterations: context.expect_field("iterations")?,
                 photons: context.expect_field("photons")?,
-                photon_passes: context.expect_field("photon_passes")?,
+                direct_light: context.expect_field("direct_light")?,
             })
         })
     }

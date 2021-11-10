@@ -40,6 +40,7 @@ mod light;
 mod light_source;
 mod materials;
 mod math;
+mod pooling;
 mod program;
 mod project;
 mod renderer;
@@ -170,6 +171,10 @@ fn render<P: AsRef<Path>>(
                 .take(config.renderer.threads)
                 .collect(),
         },
+        pool: rayon_core::ThreadPoolBuilder::new()
+            .num_threads(config.renderer.threads)
+            .build()
+            .expect("could not build render thread pool"),
     };
 
     let global_progress = progress.add(ProgressBar::new(100)).with_style(

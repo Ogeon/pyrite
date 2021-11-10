@@ -18,6 +18,7 @@ pub struct Film {
 }
 
 impl Film {
+    #[inline(always)]
     pub fn new(
         width: usize,
         height: usize,
@@ -40,14 +41,17 @@ impl Film {
         }
     }
 
+    #[inline(always)]
     pub fn width(&self) -> usize {
         self.width
     }
 
+    #[inline(always)]
     pub fn height(&self) -> usize {
         self.height
     }
 
+    #[inline(always)]
     pub fn get_pixel(&self, position: Point2<usize>) -> Option<&[Grain]> {
         if position.x >= self.width || position.y >= self.height {
             return None;
@@ -57,10 +61,12 @@ impl Film {
         Some(&self.grains[index..index + self.grains_per_pixel])
     }
 
+    #[inline(always)]
     pub fn get_pixel_f(&self, position: Point2<f32>) -> Option<&[Grain]> {
         self.get_pixel(self.aspect_ratio.to_pixel(position)?)
     }
 
+    #[inline(always)]
     pub(crate) fn sample_many_wavelengths<'a>(
         &self,
         rng: &'a mut dyn Sampler,
@@ -77,11 +83,13 @@ impl Film {
         .take(amount)
     }
 
-    fn wavelength_to_grain(&self, wavelength: f32) -> usize {
+    #[inline(always)]
+    pub fn wavelength_to_grain(&self, wavelength: f32) -> usize {
         (((wavelength - self.wavelength_start) * self.grains_per_wavelength) as usize)
             .min(self.grains_per_pixel - 1)
     }
 
+    #[inline(always)]
     pub fn expose(&self, position: Point2<f32>, sample: Sample) {
         let grain_index = self.wavelength_to_grain(sample.wavelength);
 
@@ -90,6 +98,20 @@ impl Film {
         }
     }
 
+    #[inline(always)]
+    pub fn overwrite(
+        &self,
+        position: Point2<f32>,
+        grain_index: usize,
+        brightness: f32,
+        weight: f32,
+    ) {
+        if let Some(pixel) = self.get_pixel_f(position) {
+            pixel[grain_index].overwrite(brightness, weight);
+        }
+    }
+
+    #[inline(always)]
     pub fn developed_pixels(&self) -> DevelopedPixels<'_> {
         DevelopedPixels::new(self)
     }
@@ -101,16 +123,27 @@ pub struct Grain {
 }
 
 impl Grain {
+    #[inline(always)]
     fn new() -> Self {
         Self {
             data: AtomicCell::new(GrainData::new()),
         }
     }
 
+    #[inline(always)]
     pub fn expose(&self, value: f32, weight: f32) {
         self.increment(value * weight, weight);
     }
 
+    #[inline(always)]
+    pub fn overwrite(&self, value: f32, weight: f32) {
+        self.data.store(GrainData {
+            accumulator: N32::new(value * weight),
+            weight: N32::new(weight),
+        });
+    }
+
+    #[inline(always)]
     pub fn develop(&self) -> f32 {
         let GrainData {
             weight,
@@ -124,6 +157,7 @@ impl Grain {
         }
     }
 
+    #[inline(always)]
     fn increment(&self, increment: f32, weight: f32) {
         let mut currant_data = self.data.load();
         let mut attempts = 0;
@@ -217,6 +251,7 @@ enum Orientation {
     Vertical,
 }
 
+#[derive(Clone)]
 pub struct Area<S> {
     pub from: Point2<S>,
     pub size: Vector2<S>,
@@ -235,6 +270,16 @@ impl<S> Area<S> {
         S: BaseNum,
     {
         self.from + self.size / (S::one() + S::one())
+    }
+}
+
+impl Area<f32> {
+    pub(crate) fn sample_point(&self, rng: &mut dyn Sampler) -> Point2<f32> {
+        let offset = Vector2::new(
+            self.size.x * rng.gen::<f32>(),
+            self.size.y * rng.gen::<f32>(),
+        );
+        self.from + offset
     }
 }
 

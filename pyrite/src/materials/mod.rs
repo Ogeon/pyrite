@@ -1,9 +1,10 @@
-use std::{borrow::Cow, cell::Cell, convert::TryFrom, error::Error};
+use std::{borrow::Cow, convert::TryFrom, error::Error};
 
 use cgmath::{InnerSpace, Point2, Vector3};
 
 use crate::{
-    light::{Light, Wavelengths},
+    light::{CoherentLight, DispersedLight, Wavelengths},
+    pooling::PooledSlice,
     program::{
         ExecutionContext, NumberInput, Program, ProgramCompiler, ProgramFor, ProgramInput,
         VectorInput,
@@ -52,21 +53,21 @@ impl<'a> Material<'a> {
         })
     }
 
-    /// Corresponds to Sample_f in the PBR book.
-    pub(crate) fn sample_reflection<'t>(
+    /// Corresponds to Sample_f in the PBR book, for coherent light.
+    pub(crate) fn sample_reflection_coherent<'t>(
         &self,
         out_direction: Vector3<f32>,
         texture_coordinate: Point2<f32>,
         normal: Normal,
         wavelengths: &Wavelengths,
         tools: &mut Tools<'t, 'a>,
-    ) -> Option<SurfaceInteraction<'t>> {
+    ) -> Option<SurfaceInteraction<InteractionOutput<'t>>> {
         let components = self.surface.components;
         let num_components = components.len();
         let component_index = tools.sampler.gen_index(num_components)?;
         let component = components[component_index];
 
-        let mut interaction = component.sample_reflection(
+        let mut interaction = component.sample_reflection_coherent(
             out_direction,
             texture_coordinate,
             normal,
@@ -74,16 +75,13 @@ impl<'a> Material<'a> {
             tools,
         );
 
-        if interaction.pdf == 0.0 {
-            interaction.reflectivity.set_all(0.0);
+        if interaction.output.pdf_eq(0.0) {
+            interaction.output.reflectivity_set_all(0.0);
             return Some(interaction);
         }
 
-        let in_direction = interaction.in_direction;
         if num_components > 1 {
             let input = MaterialInput {
-                wavelength: wavelengths.hero(),
-                wavelength_used: false.into(),
                 normal: normal.vector(),
                 ray_direction: -out_direction,
                 texture_coordinate,
@@ -92,10 +90,141 @@ impl<'a> Material<'a> {
             if interaction.diffuse {
                 for (i, component) in components.iter().enumerate() {
                     if i != component_index {
-                        interaction.pdf += component.pdf(
+                        match &mut interaction.output {
+                            InteractionOutput::Coherent(output) => {
+                                output.pdf += component.pdf(
+                                    out_direction,
+                                    normal,
+                                    output.in_direction,
+                                    &input,
+                                    tools.execution_context,
+                                );
+                            }
+                            InteractionOutput::Dispersed(dispersed) => {
+                                for output in dispersed.iter_mut() {
+                                    output.pdf += component.pdf(
+                                        out_direction,
+                                        normal,
+                                        output.in_direction,
+                                        &input,
+                                        tools.execution_context,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                for (i, component) in components.iter().enumerate() {
+                    if i != component_index {
+                        interaction
+                            .output
+                            .pdf_add(component.get_probability(tools.execution_context, &input));
+                    }
+                }
+            }
+
+            interaction.output.pdf_div(num_components as f32);
+
+            if interaction.diffuse {
+                match &mut interaction.output {
+                    InteractionOutput::Coherent(output) => {
+                        let reflected = output.in_direction.dot(normal.vector())
+                            * out_direction.dot(normal.vector())
+                            > 0.0;
+                        output.reflectivity.set_all(0.0);
+
+                        for component in components {
+                            if (reflected && component.has_reflection())
+                                || (!reflected && component.has_transmission())
+                            {
+                                output.reflectivity += component.evaluate_coherent(
+                                    out_direction,
+                                    normal,
+                                    output.in_direction,
+                                    texture_coordinate,
+                                    wavelengths,
+                                    &input,
+                                    tools,
+                                );
+                            }
+                        }
+                    }
+                    InteractionOutput::Dispersed(dispersed) => {
+                        for (wavelength_index, output) in dispersed.iter_mut().enumerate() {
+                            let reflected = output.in_direction.dot(normal.vector())
+                                * out_direction.dot(normal.vector())
+                                > 0.0;
+                            output.reflectivity.set(0.0);
+
+                            for component in components {
+                                if (reflected && component.has_reflection())
+                                    || (!reflected && component.has_transmission())
+                                {
+                                    output.reflectivity += component.evaluate_dispersed(
+                                        out_direction,
+                                        normal,
+                                        output.in_direction,
+                                        texture_coordinate,
+                                        wavelength_index,
+                                        wavelengths,
+                                        &input,
+                                        tools,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Some(interaction)
+    }
+
+    /// Corresponds to Sample_f in the PBR book, for dispersed light.
+    pub(crate) fn sample_reflection_dispersed<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        normal: Normal,
+        wavelength_index: usize,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> Option<SurfaceInteraction<DispersedOutput>> {
+        let components = self.surface.components;
+        let num_components = components.len();
+        let component_index = tools.sampler.gen_index(num_components)?;
+        let component = components[component_index];
+
+        let mut interaction = component.sample_reflection_dispersed(
+            out_direction,
+            texture_coordinate,
+            normal,
+            wavelength_index,
+            wavelengths,
+            tools,
+        );
+
+        if interaction.output.pdf == 0.0 {
+            interaction.output.reflectivity.set(0.0);
+            return Some(interaction);
+        }
+
+        if num_components > 1 {
+            let input = MaterialInput {
+                normal: normal.vector(),
+                ray_direction: -out_direction,
+                texture_coordinate,
+            };
+
+            if interaction.diffuse {
+                for (i, component) in components.iter().enumerate() {
+                    if i != component_index {
+                        interaction.output.pdf += component.pdf(
                             out_direction,
                             normal,
-                            in_direction,
+                            interaction.output.in_direction,
                             &input,
                             tools.execution_context,
                         );
@@ -104,28 +233,30 @@ impl<'a> Material<'a> {
             } else {
                 for (i, component) in components.iter().enumerate() {
                     if i != component_index {
-                        interaction.pdf +=
+                        interaction.output.pdf +=
                             component.get_probability(tools.execution_context, &input);
                     }
                 }
             }
 
-            interaction.pdf /= num_components as f32;
+            interaction.output.pdf /= num_components as f32;
 
             if interaction.diffuse {
-                let reflected =
-                    in_direction.dot(normal.vector()) * out_direction.dot(normal.vector()) > 0.0;
-                interaction.reflectivity.set_all(0.0);
+                let reflected = interaction.output.in_direction.dot(normal.vector())
+                    * out_direction.dot(normal.vector())
+                    > 0.0;
+                interaction.output.reflectivity.set(0.0);
 
                 for component in components {
                     if (reflected && component.has_reflection())
                         || (!reflected && component.has_transmission())
                     {
-                        interaction.reflectivity += component.evaluate(
+                        interaction.output.reflectivity += component.evaluate_dispersed(
                             out_direction,
                             normal,
-                            in_direction,
+                            interaction.output.in_direction,
                             texture_coordinate,
+                            wavelength_index,
                             wavelengths,
                             &input,
                             tools,
@@ -133,17 +264,13 @@ impl<'a> Material<'a> {
                     }
                 }
             }
-
-            if input.wavelength_used.get() {
-                interaction.reflectivity.set_single_wavelength();
-            }
         }
 
         Some(interaction)
     }
 
-    // Corresponds to f in the PBR book.
-    pub(crate) fn evaluate<'t>(
+    // Corresponds to f in the PBR book, for coherent light.
+    pub(crate) fn evaluate_coherent<'t>(
         &self,
         out_direction: Vector3<f32>,
         normal: Normal,
@@ -151,14 +278,12 @@ impl<'a> Material<'a> {
         texture_coordinate: Point2<f32>,
         wavelengths: &Wavelengths,
         tools: &mut Tools<'t, 'a>,
-    ) -> Light<'t> {
+    ) -> CoherentLight<'t> {
         let mut reflectivity = tools.light_pool.get();
         let reflected =
             in_direction.dot(normal.vector()) * out_direction.dot(normal.vector()) > 0.0;
 
         let input = MaterialInput {
-            wavelength: wavelengths.hero(),
-            wavelength_used: false.into(),
             normal: normal.vector(),
             ray_direction: -out_direction,
             texture_coordinate,
@@ -168,7 +293,7 @@ impl<'a> Material<'a> {
             if (reflected && component.has_reflection())
                 || (!reflected && component.has_transmission())
             {
-                reflectivity += component.evaluate(
+                reflectivity += component.evaluate_coherent(
                     out_direction,
                     normal,
                     in_direction,
@@ -180,8 +305,45 @@ impl<'a> Material<'a> {
             }
         }
 
-        if input.wavelength_used.get() {
-            reflectivity.set_single_wavelength();
+        reflectivity
+    }
+
+    // Corresponds to f in the PBR book, for dispersed light.
+    pub(crate) fn evaluate_dispersed<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        in_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        wavelength_index: usize,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> DispersedLight {
+        let mut reflectivity = DispersedLight::new(wavelength_index, 0.0);
+        let reflected =
+            in_direction.dot(normal.vector()) * out_direction.dot(normal.vector()) > 0.0;
+
+        let input = MaterialInput {
+            normal: normal.vector(),
+            ray_direction: -out_direction,
+            texture_coordinate,
+        };
+
+        for component in self.surface.components {
+            if (reflected && component.has_reflection())
+                || (!reflected && component.has_transmission())
+            {
+                reflectivity += component.evaluate_dispersed(
+                    out_direction,
+                    normal,
+                    in_direction,
+                    texture_coordinate,
+                    wavelength_index,
+                    wavelengths,
+                    &input,
+                    tools,
+                );
+            }
         }
 
         reflectivity
@@ -220,7 +382,7 @@ impl<'a> Material<'a> {
         texture_coordingate: Point2<f32>,
         wavelengths: &Wavelengths,
         tools: &mut Tools<'t, 'a>,
-    ) -> Option<Light<'t>> {
+    ) -> Option<CoherentLight<'t>> {
         let input = RenderContext {
             wavelength: wavelengths.hero(),
             normal,
@@ -386,16 +548,16 @@ pub(crate) struct MaterialComponent<'a> {
 }
 
 impl<'a> MaterialComponent<'a> {
-    /// Corresponds to Sample_f in the PBR book.
-    fn sample_reflection<'t>(
+    /// Corresponds to Sample_f in the PBR book, for coherent light.
+    fn sample_reflection_coherent<'t>(
         &self,
         out_direction: Vector3<f32>,
         texture_coordinate: Point2<f32>,
         normal: Normal,
         wavelengths: &Wavelengths,
         tools: &mut Tools<'t, 'a>,
-    ) -> SurfaceInteraction<'t> {
-        let mut interaction = self.bsdf.sample_reflection(
+    ) -> SurfaceInteraction<InteractionOutput<'t>> {
+        let mut interaction = self.bsdf.sample_reflection_coherent(
             out_direction,
             normal,
             texture_coordinate,
@@ -404,20 +566,45 @@ impl<'a> MaterialComponent<'a> {
         );
 
         let input = MaterialInput {
-            wavelength: wavelengths.hero(),
-            wavelength_used: false.into(),
             normal: normal.vector(),
             ray_direction: -out_direction,
             texture_coordinate,
         };
 
         let selection_probability = self.get_probability(tools.execution_context, &input);
-        interaction.reflectivity *= selection_probability;
-        interaction.pdf *= selection_probability;
+        interaction.output.reflectivity_mul(selection_probability);
+        interaction.output.pdf_mul(selection_probability);
 
-        if input.wavelength_used.get() {
-            interaction.reflectivity.set_single_wavelength();
-        }
+        interaction
+    }
+    /// Corresponds to Sample_f in the PBR book, for dispersed light.
+    fn sample_reflection_dispersed<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        normal: Normal,
+        wavelength_index: usize,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> SurfaceInteraction<DispersedOutput> {
+        let mut interaction = self.bsdf.sample_reflection_dispersed(
+            out_direction,
+            normal,
+            texture_coordinate,
+            wavelength_index,
+            wavelengths,
+            tools,
+        );
+
+        let input = MaterialInput {
+            normal: normal.vector(),
+            ray_direction: -out_direction,
+            texture_coordinate,
+        };
+
+        let selection_probability = self.get_probability(tools.execution_context, &input);
+        interaction.output.reflectivity *= selection_probability;
+        interaction.output.pdf *= selection_probability;
 
         interaction
     }
@@ -435,7 +622,7 @@ impl<'a> MaterialComponent<'a> {
     }
 
     // Corresponds to f in the PBR book.
-    fn evaluate<'t>(
+    fn evaluate_coherent<'t>(
         &self,
         out_direction: Vector3<f32>,
         normal: Normal,
@@ -444,12 +631,35 @@ impl<'a> MaterialComponent<'a> {
         wavelengths: &Wavelengths,
         input: &MaterialInput,
         tools: &mut Tools<'t, 'a>,
-    ) -> Light<'t> {
-        self.bsdf.evaluate(
+    ) -> CoherentLight<'t> {
+        self.bsdf.evaluate_coherent(
             out_direction,
             normal,
             in_direction,
             texture_coordinate,
+            wavelengths,
+            tools,
+        ) * self.get_probability(tools.execution_context, input)
+    }
+
+    // Corresponds to f in the PBR book.
+    fn evaluate_dispersed<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        in_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        wavelength_index: usize,
+        wavelengths: &Wavelengths,
+        input: &MaterialInput,
+        tools: &mut Tools<'t, 'a>,
+    ) -> DispersedLight {
+        self.bsdf.evaluate_dispersed(
+            out_direction,
+            normal,
+            in_direction,
+            texture_coordinate,
+            wavelength_index,
             wavelengths,
             tools,
         ) * self.get_probability(tools.execution_context, input)
@@ -473,8 +683,8 @@ impl<'a> MaterialComponent<'a> {
 }
 
 pub(crate) struct MaterialInput {
-    pub(crate) wavelength: f32,
-    pub(crate) wavelength_used: Cell<bool>,
+    //pub(crate) wavelength: f32,
+    //pub(crate) wavelength_used: Cell<bool>,
     pub(crate) normal: Vector3<f32>,
     pub(crate) ray_direction: Vector3<f32>,
     pub(crate) texture_coordinate: Point2<f32>,
@@ -485,12 +695,7 @@ impl ProgramInput for MaterialInput {
     type VectorInput = MaterialVectorInput;
 
     fn get_number_input(&self, input: Self::NumberInput) -> f32 {
-        match input {
-            MaterialNumberInput::Wavelength => {
-                self.wavelength_used.set(true);
-                self.wavelength
-            }
-        }
+        match input {}
     }
 
     fn get_vector_input(&self, input: Self::VectorInput) -> Vector {
@@ -504,7 +709,7 @@ impl ProgramInput for MaterialInput {
 
 #[derive(Copy, Clone)]
 pub(crate) enum MaterialNumberInput {
-    Wavelength,
+    //Wavelength,
 }
 
 impl TryFrom<NumberInput> for MaterialNumberInput {
@@ -512,7 +717,9 @@ impl TryFrom<NumberInput> for MaterialNumberInput {
 
     fn try_from(value: NumberInput) -> Result<Self, Self::Error> {
         match value {
-            NumberInput::Wavelength => Ok(MaterialNumberInput::Wavelength),
+            NumberInput::Wavelength => {
+                Err("wavelengths are not available when selecting material".into())
+            }
         }
     }
 }
@@ -543,16 +750,16 @@ pub(crate) struct SurfaceBsdf<'a> {
 }
 
 impl<'a> SurfaceBsdf<'a> {
-    /// Corresponds to Sample_f in the PBR book.
-    fn sample_reflection<'t>(
+    /// Corresponds to Sample_f in the PBR book, for coherent light.
+    fn sample_reflection_coherent<'t>(
         &self,
         out_direction: Vector3<f32>,
         normal: Normal,
         texture_coordinate: Point2<f32>,
         wavelengths: &Wavelengths,
         tools: &mut Tools<'t, 'a>,
-    ) -> SurfaceInteraction<'t> {
-        self.bsdf_type.sample_reflection(
+    ) -> SurfaceInteraction<InteractionOutput<'t>> {
+        self.bsdf_type.sample_reflection_coherent(
             out_direction,
             normal,
             texture_coordinate,
@@ -561,9 +768,29 @@ impl<'a> SurfaceBsdf<'a> {
             tools,
         )
     }
+    /// Corresponds to Sample_f in the PBR book, for dispersed light.
+    fn sample_reflection_dispersed<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        texture_coordinate: Point2<f32>,
+        wavelength_index: usize,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> SurfaceInteraction<DispersedOutput> {
+        self.bsdf_type.sample_reflection_dispersed(
+            out_direction,
+            normal,
+            texture_coordinate,
+            self.color,
+            wavelength_index,
+            wavelengths,
+            tools,
+        )
+    }
 
     /// Corresponds to f in the PBR book.
-    fn evaluate<'t>(
+    fn evaluate_coherent<'t>(
         &self,
         out_direction: Vector3<f32>,
         normal: Normal,
@@ -571,13 +798,36 @@ impl<'a> SurfaceBsdf<'a> {
         texture_coordinate: Point2<f32>,
         wavelengths: &Wavelengths,
         tools: &mut Tools<'t, 'a>,
-    ) -> Light<'t> {
-        self.bsdf_type.evaluate(
+    ) -> CoherentLight<'t> {
+        self.bsdf_type.evaluate_coherent(
             out_direction,
             normal,
             in_direction,
             texture_coordinate,
             self.color,
+            wavelengths,
+            tools,
+        )
+    }
+
+    /// Corresponds to f in the PBR book.
+    fn evaluate_dispersed<'t>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        in_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        wavelength_index: usize,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> DispersedLight {
+        self.bsdf_type.evaluate_dispersed(
+            out_direction,
+            normal,
+            in_direction,
+            texture_coordinate,
+            self.color,
+            wavelength_index,
             wavelengths,
             tools,
         )
@@ -604,7 +854,7 @@ enum SurfaceBsdfType {
 }
 
 impl SurfaceBsdfType {
-    pub(crate) fn sample_reflection<'t, 'a>(
+    pub(crate) fn sample_reflection_coherent<'t, 'a>(
         &self,
         out_direction: Vector3<f32>,
         normal: Normal,
@@ -612,25 +862,25 @@ impl SurfaceBsdfType {
         color: LightProgram<'a>,
         wavelengths: &Wavelengths,
         tools: &mut Tools<'t, 'a>,
-    ) -> SurfaceInteraction<'t> {
+    ) -> SurfaceInteraction<InteractionOutput<'t>> {
         let out_direction = normal.into_space(out_direction);
 
         let mut interaction = match self {
-            SurfaceBsdfType::Diffuse => diffuse::sample_reflection(
+            SurfaceBsdfType::Diffuse => diffuse::sample_reflection_coherent(
                 out_direction,
                 texture_coordinate,
                 color,
                 wavelengths,
                 tools,
             ),
-            SurfaceBsdfType::Mirror => mirror::sample_reflection(
+            SurfaceBsdfType::Mirror => mirror::sample_reflection_coherent(
                 out_direction,
                 texture_coordinate,
                 color,
                 wavelengths,
                 tools,
             ),
-            SurfaceBsdfType::Refractive { properties } => refractive::sample_reflection(
+            SurfaceBsdfType::Refractive { properties } => refractive::sample_reflection_coherent(
                 properties,
                 out_direction,
                 texture_coordinate,
@@ -640,11 +890,54 @@ impl SurfaceBsdfType {
             ),
         };
 
-        interaction.in_direction = normal.from_space(interaction.in_direction);
+        interaction.output.in_direction_from_normal_space(normal);
+        interaction
+    }
+    pub(crate) fn sample_reflection_dispersed<'t, 'a>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        texture_coordinate: Point2<f32>,
+        color: LightProgram<'a>,
+        wavelength_index: usize,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> SurfaceInteraction<DispersedOutput> {
+        let out_direction = normal.into_space(out_direction);
+
+        let mut interaction = match self {
+            SurfaceBsdfType::Diffuse => diffuse::sample_reflection_dispersed(
+                out_direction,
+                texture_coordinate,
+                color,
+                wavelength_index,
+                wavelengths,
+                tools,
+            ),
+            SurfaceBsdfType::Mirror => mirror::sample_reflection_dispersed(
+                out_direction,
+                texture_coordinate,
+                color,
+                wavelength_index,
+                wavelengths,
+                tools,
+            ),
+            SurfaceBsdfType::Refractive { properties } => refractive::sample_reflection_dispersed(
+                properties,
+                out_direction,
+                texture_coordinate,
+                color,
+                wavelength_index,
+                wavelengths,
+                tools,
+            ),
+        };
+
+        interaction.output.in_direction = normal.from_space(interaction.output.in_direction);
         interaction
     }
 
-    fn evaluate<'t, 'a>(
+    fn evaluate_coherent<'t, 'a>(
         &self,
         out_direction: Vector3<f32>,
         normal: Normal,
@@ -653,15 +946,48 @@ impl SurfaceBsdfType {
         color: LightProgram<'a>,
         wavelengths: &Wavelengths,
         tools: &mut Tools<'t, 'a>,
-    ) -> Light<'t> {
+    ) -> CoherentLight<'t> {
         let out_direction = normal.into_space(out_direction);
         let _in_direction = normal.into_space(in_direction);
 
         match self {
-            SurfaceBsdfType::Diffuse => {
-                diffuse::evaluate(out_direction, texture_coordinate, color, wavelengths, tools)
-            }
+            SurfaceBsdfType::Diffuse => diffuse::evaluate_coherent(
+                out_direction,
+                texture_coordinate,
+                color,
+                wavelengths,
+                tools,
+            ),
             SurfaceBsdfType::Mirror | SurfaceBsdfType::Refractive { .. } => tools.light_pool.get(),
+        }
+    }
+
+    fn evaluate_dispersed<'t, 'a>(
+        &self,
+        out_direction: Vector3<f32>,
+        normal: Normal,
+        in_direction: Vector3<f32>,
+        texture_coordinate: Point2<f32>,
+        color: LightProgram<'a>,
+        wavelength_index: usize,
+        wavelengths: &Wavelengths,
+        tools: &mut Tools<'t, 'a>,
+    ) -> DispersedLight {
+        let out_direction = normal.into_space(out_direction);
+        let _in_direction = normal.into_space(in_direction);
+
+        match self {
+            SurfaceBsdfType::Diffuse => diffuse::evaluate_dispersed(
+                out_direction,
+                texture_coordinate,
+                color,
+                wavelength_index,
+                wavelengths,
+                tools,
+            ),
+            SurfaceBsdfType::Mirror | SurfaceBsdfType::Refractive { .. } => {
+                DispersedLight::new(wavelength_index, 0.0)
+            }
         }
     }
 
@@ -693,9 +1019,115 @@ impl SurfaceBsdfType {
     }
 }
 
-pub(crate) struct SurfaceInteraction<'a> {
-    pub reflectivity: Light<'a>,
-    pub pdf: f32,
+pub(crate) struct SurfaceInteraction<T> {
     pub diffuse: bool,
+    pub glossy: bool,
+    pub output: T,
+}
+
+pub(crate) enum InteractionOutput<'a> {
+    Coherent(CoherentOutput<'a>),
+    Dispersed(PooledSlice<'a, DispersedOutput>),
+}
+
+impl<'a> InteractionOutput<'a> {
+    pub fn in_direction_from_normal_space(&mut self, normal: Normal) {
+        match self {
+            InteractionOutput::Coherent(output) => {
+                output.in_direction = normal.from_space(output.in_direction);
+            }
+            InteractionOutput::Dispersed(dispersed) => {
+                for output in &mut **dispersed {
+                    output.in_direction = normal.from_space(output.in_direction);
+                }
+            }
+        }
+    }
+
+    pub fn pdf_add(&mut self, rhs: f32) {
+        match self {
+            InteractionOutput::Coherent(output) => {
+                output.pdf += rhs;
+            }
+            InteractionOutput::Dispersed(dispersed) => {
+                for output in &mut **dispersed {
+                    output.pdf += rhs;
+                }
+            }
+        }
+    }
+
+    pub fn pdf_mul(&mut self, rhs: f32) {
+        match self {
+            InteractionOutput::Coherent(output) => {
+                output.pdf *= rhs;
+            }
+            InteractionOutput::Dispersed(dispersed) => {
+                for output in &mut **dispersed {
+                    output.pdf *= rhs;
+                }
+            }
+        }
+    }
+
+    pub fn pdf_div(&mut self, rhs: f32) {
+        match self {
+            InteractionOutput::Coherent(output) => {
+                output.pdf /= rhs;
+            }
+            InteractionOutput::Dispersed(dispersed) => {
+                for output in &mut **dispersed {
+                    output.pdf /= rhs;
+                }
+            }
+        }
+    }
+
+    pub fn pdf_eq(&mut self, rhs: f32) -> bool {
+        match self {
+            InteractionOutput::Coherent(output) => output.pdf == rhs,
+            InteractionOutput::Dispersed(dispersed) => {
+                dispersed.iter().all(|output| output.pdf == rhs)
+            }
+        }
+    }
+
+    pub fn reflectivity_set_all(&mut self, value: f32) {
+        match self {
+            InteractionOutput::Coherent(output) => {
+                output.reflectivity.set_all(value);
+            }
+            InteractionOutput::Dispersed(dispersed) => {
+                for output in &mut **dispersed {
+                    output.reflectivity.set(value);
+                }
+            }
+        }
+    }
+
+    pub fn reflectivity_mul(&mut self, rhs: f32) {
+        match self {
+            InteractionOutput::Coherent(output) => {
+                output.reflectivity *= rhs;
+            }
+            InteractionOutput::Dispersed(dispersed) => {
+                for output in &mut **dispersed {
+                    output.reflectivity *= rhs;
+                }
+            }
+        }
+    }
+}
+
+pub(crate) struct CoherentOutput<'a> {
     pub in_direction: Vector3<f32>,
+    pub pdf: f32,
+    pub reflectivity: CoherentLight<'a>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct DispersedOutput {
+    pub in_direction: Vector3<f32>,
+    pub pdf: f32,
+    pub reflectivity: DispersedLight,
 }
