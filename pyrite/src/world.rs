@@ -2,7 +2,6 @@ use std::error::Error;
 
 use rand::Rng;
 
-use genmesh;
 use obj;
 
 use cgmath::{
@@ -209,7 +208,7 @@ impl<'p> World<'p> {
                     transform,
                 } => {
                     let obj = meshes.get(file);
-                    for object in &obj.objects {
+                    for object in &obj.data.objects {
                         println!("Adding object '{}'.", object.name);
 
                         let (object_material, emissive) = match mesh_materials.remove(&object.name)
@@ -241,8 +240,8 @@ impl<'p> World<'p> {
 
                         for group in &object.groups {
                             for shape in &group.polys {
-                                match *shape {
-                                    genmesh::Polygon::PolyTri(genmesh::Triangle { x, y, z }) => {
+                                match *shape.0 {
+                                    [x, y, z] => {
                                         let mut triangle =
                                             make_triangle(obj, x, y, z, object_material.clone());
                                         triangle.scale(scale);
@@ -326,27 +325,27 @@ impl<'p> World<'p> {
 
     pub fn pick_lamp(&self, rng: &mut impl Rng) -> Option<(&Lamp, f32)> {
         self.lights
-            .get(rng.gen_range(0, self.lights.len()))
+            .get(rng.gen_range(0..self.lights.len()))
             .map(|l| (l, 1.0 / self.lights.len() as f32))
     }
 }
 
-fn make_triangle<'p, M: obj::GenPolygon>(
-    obj: &obj::Obj<'_, M>,
+fn make_triangle<'p>(
+    obj: &obj::Obj,
     obj::IndexTuple(v1, t1, n1): obj::IndexTuple,
     obj::IndexTuple(v2, t2, n2): obj::IndexTuple,
     obj::IndexTuple(v3, t3, n3): obj::IndexTuple,
     material: Material<'p>,
 ) -> Shape<'p> {
-    let v1 = obj.position[v1].into();
-    let v2 = obj.position[v2].into();
-    let v3 = obj.position[v3].into();
+    let v1 = obj.data.position[v1].into();
+    let v2 = obj.data.position[v2].into();
+    let v3 = obj.data.position[v3].into();
 
     let (n1, n2, n3) = match (n1, n2, n3) {
         (Some(n1), Some(n2), Some(n3)) => {
-            let n1 = obj.normal[n1].into();
-            let n2 = obj.normal[n2].into();
-            let n3 = obj.normal[n3].into();
+            let n1 = obj.data.normal[n1].into();
+            let n2 = obj.data.normal[n2].into();
+            let n3 = obj.data.normal[n3].into();
             (n1, n2, n3)
         }
         _ => {
@@ -358,13 +357,13 @@ fn make_triangle<'p, M: obj::GenPolygon>(
     };
 
     let t1 = t1
-        .map(|t1| obj.texture[t1].into())
+        .map(|t1| obj.data.texture[t1].into())
         .unwrap_or(Point2::origin());
     let t2 = t2
-        .map(|t2| obj.texture[t2].into())
+        .map(|t2| obj.data.texture[t2].into())
         .unwrap_or(Point2::origin());
     let t3 = t3
-        .map(|t3| obj.texture[t3].into())
+        .map(|t3| obj.data.texture[t3].into())
         .unwrap_or(Point2::origin());
 
     let delta_position1 = v2 - v1;

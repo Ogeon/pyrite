@@ -4,11 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use genmesh::Polygon;
-use obj::{GenPolygon, Group, IndexTuple, Obj, Object};
+use obj::{Group, Obj, ObjData, Object};
 
 pub struct Meshes {
-    meshes: Vec<Obj<'static, Polygon<IndexTuple>>>,
+    meshes: Vec<Obj>,
 }
 
 impl Meshes {
@@ -16,13 +15,13 @@ impl Meshes {
         Meshes { meshes: Vec::new() }
     }
 
-    fn insert(&mut self, mesh: Obj<'static, Polygon<IndexTuple>>) -> MeshId {
+    fn insert(&mut self, mesh: Obj) -> MeshId {
         let id = MeshId(self.meshes.len());
         self.meshes.push(mesh);
         id
     }
 
-    pub fn get(&self, id: MeshId) -> &Obj<'static, Polygon<IndexTuple>> {
+    pub fn get(&self, id: MeshId) -> &Obj {
         self.meshes.get(id.0).expect("missing mesh")
     }
 }
@@ -66,44 +65,49 @@ impl MeshLoader {
     }
 }
 
-fn remove_materials<'a, T: GenPolygon>(obj: Obj<'a, T>) -> Obj<'static, T> {
+fn remove_materials(obj: Obj) -> Obj {
     let Obj {
-        position,
-        texture,
-        normal,
-        objects,
-        material_libs,
+        data:
+            ObjData {
+                position,
+                texture,
+                normal,
+                objects,
+                material_libs,
+            },
         path,
     } = obj;
 
     Obj {
-        position,
-        texture,
-        normal,
-        objects: objects
-            .into_iter()
-            .map(|object| {
-                let Object { name, groups } = object;
-                Object {
-                    name,
-                    groups: groups
-                        .into_iter()
-                        .map(|group| {
-                            let Group {
-                                name, index, polys, ..
-                            } = group;
-                            Group {
-                                name,
-                                index,
-                                material: None,
-                                polys,
-                            }
-                        })
-                        .collect(),
-                }
-            })
-            .collect(),
-        material_libs,
+        data: ObjData {
+            position,
+            texture,
+            normal,
+            objects: objects
+                .into_iter()
+                .map(|object| {
+                    let Object { name, groups } = object;
+                    Object {
+                        name,
+                        groups: groups
+                            .into_iter()
+                            .map(|group| {
+                                let Group {
+                                    name, index, polys, ..
+                                } = group;
+                                Group {
+                                    name,
+                                    index,
+                                    material: None,
+                                    polys,
+                                }
+                            })
+                            .collect(),
+                    }
+                })
+                .collect(),
+            material_libs,
+        },
         path,
     }
 }

@@ -11,24 +11,23 @@ path = "src/main.rs"
 
 [dependencies]
 cgmath = "0.17"
-image = "0.23"
-obj = { version = "0.9", features = ["genmesh"] }
-genmesh = "0.6"
-rand = "0.7"
+image = "0.24.6"
+obj = { version = "0.10.2" }
+rand = "0.8.5"
 num_cpus = "1"
-crossbeam = "0.7"
+crossbeam = "0.8.2"
 collision = "0.20"
-rand_xorshift = "0.2"
+rand_xorshift = "0.3.0"
 palette = { git = "https://github.com/Ogeon/palette", default-features = false, features = [
 	"std"
 ] }
-noisy_float = "0.1"
+noisy_float = "0.2.0"
 rlua = "0.17"
 rlua_serde = "0.4"
 bumpalo = "^3.4"
-path-slash = "0.1"
-indicatif = "0.15"
-bitflags = "^1.2"
+path-slash = "0.2.1"
+indicatif = "0.17.3"
+bitflags = "2.1.0"
 
 [build-dependencies]
 csv = "^1.1"

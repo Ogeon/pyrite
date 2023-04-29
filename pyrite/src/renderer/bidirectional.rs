@@ -90,7 +90,7 @@ fn render_tile<R: Rng>(
     let iterations = tile.area() as u64 * renderer.pixel_samples as u64;
     let message = format!("Tile {}", index);
     let mut last_progress = Instant::now();
-    progress.show(&message, iterations);
+    progress.show(message, iterations);
 
     for i in 0..iterations {
         if Instant::now() - last_progress > Duration::from_millis(100) {
@@ -118,7 +118,7 @@ fn render_tile<R: Rng>(
         );
 
         let mut main_sample =
-            additional_samples.swap_remove(rng.gen_range(0, additional_samples.len()));
+            additional_samples.swap_remove(rng.gen_range(0..additional_samples.len()));
         let wavelength = main_sample.0.wavelength;
 
         let camera_ray = camera.ray_towards(&position, &mut rng);

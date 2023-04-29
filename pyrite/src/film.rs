@@ -62,10 +62,7 @@ impl Film {
     }
 
     pub fn sample_wavelength<R: Rng>(&self, rng: &mut R) -> f32 {
-        rng.gen_range(
-            self.wavelength_start,
-            self.wavelength_start + self.wavelength_width,
-        )
+        rng.gen_range(self.wavelength_start..self.wavelength_start + self.wavelength_width)
     }
 
     pub fn sample_many_wavelengths<'a>(
@@ -78,7 +75,7 @@ impl Film {
 
         std::iter::repeat_with(move || {
             let to = from + step_size;
-            let wavelength = rng.gen_range(from, to);
+            let wavelength = rng.gen_range(from..to);
             from = to;
             wavelength
         })

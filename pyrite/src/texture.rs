@@ -7,8 +7,11 @@ use std::{
 
 use cgmath::Point2;
 use palette::{
-    white_point::D65, Alpha, Component, FromColor, IntoComponent, LinLuma, LinLumaa, LinSrgb,
-    LinSrgba, Pixel, Srgb, SrgbLuma, SrgbLumaa, Srgba,
+    cast::{self, ArrayCast},
+    stimulus::IntoStimulus,
+    white_point::D65,
+    Alpha, ArrayExt, FromColor, LinLuma, LinLumaa, LinSrgb, LinSrgba, Srgb, SrgbLuma, SrgbLumaa,
+    Srgba,
 };
 
 /// Linearized image data.
@@ -45,12 +48,6 @@ impl<T> Texture<T> {
             image::DynamicImage::ImageRgba8(image) => {
                 convert_pixels::<Srgba<u8>, _, _>(&image.into_raw(), linear)
             }
-            image::DynamicImage::ImageBgr8(image) => {
-                convert_pixels::<Bgr, _, _>(&image.into_raw(), linear)
-            }
-            image::DynamicImage::ImageBgra8(image) => {
-                convert_pixels::<Alpha<Bgr, _>, _, _>(&image.into_raw(), linear)
-            }
             image::DynamicImage::ImageLuma16(image) => {
                 convert_pixels::<SrgbLuma<u16>, _, _>(&image.into_raw(), linear)
             }
@@ -62,6 +59,22 @@ impl<T> Texture<T> {
             }
             image::DynamicImage::ImageRgba16(image) => {
                 convert_pixels::<Srgba<u16>, _, _>(&image.into_raw(), linear)
+            }
+            image::DynamicImage::ImageRgb32F(image) => {
+                convert_pixels::<Srgb<f32>, _, _>(&image.into_raw(), linear)
+            }
+            image::DynamicImage::ImageRgba32F(image) => {
+                convert_pixels::<Srgba<f32>, _, _>(&image.into_raw(), linear)
+            }
+            _ => {
+                return Err(image::ImageError::Unsupported(
+                    image::error::UnsupportedError::from_format_and_kind(
+                        image::error::ImageFormatHint::Unknown,
+                        image::error::UnsupportedErrorKind::GenericFeature(format!(
+                            "unexpected color format"
+                        )),
+                    ),
+                ))
             }
         };
 
@@ -161,20 +174,21 @@ impl<T> Texture<T> {
 
 fn convert_pixels<A, B, T>(pixels: &[T], linear: bool) -> Vec<B>
 where
-    A: SourceColor + Pixel<T> + Copy,
-    A::LinearSourceColor: Pixel<T> + Copy,
-    T: Component,
+    A: SourceColor + ArrayCast + Copy,
+    A::Array: ArrayExt<Item = T>,
+    A::LinearSourceColor: ArrayCast + Copy,
+    <A::LinearSourceColor as ArrayCast>::Array: ArrayExt<Item = T>,
     B: FromColor<A::LinearFloats>,
 {
     if linear {
-        let pixels = A::LinearSourceColor::from_raw_slice(pixels);
+        let pixels = cast::from_component_slice::<A::LinearSourceColor>(pixels);
         pixels
             .into_iter()
             .map(|&pixel| pixel.into_linear_floats())
             .map(B::from_color)
             .collect::<Vec<_>>()
     } else {
-        let pixels = A::from_raw_slice(pixels);
+        let pixels = cast::from_component_slice::<A>(pixels);
         pixels
             .into_iter()
             .map(|&pixel| pixel.into_linear_floats())
@@ -188,24 +202,24 @@ trait SourceColor: IntoLinearFloats {
 }
 
 trait IntoLinearFloats {
-    type LinearFloats: Pixel<f32>;
+    type LinearFloats: ArrayCast;
 
     fn into_linear_floats(self) -> Self::LinearFloats;
 }
 
-impl<T: Component + IntoComponent<f32>> SourceColor for Srgb<T> {
+impl<T: IntoStimulus<f32>> SourceColor for Srgb<T> {
     type LinearSourceColor = LinSrgb<T>;
 }
 
-impl<T: Component + IntoComponent<f32>> IntoLinearFloats for Srgb<T> {
+impl<T: IntoStimulus<f32>> IntoLinearFloats for Srgb<T> {
     type LinearFloats = LinSrgb;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
-        self.into_format().into_linear()
+        self.into_format::<f32>().into_linear()
     }
 }
 
-impl<T: Component + IntoComponent<f32>> IntoLinearFloats for LinSrgb<T> {
+impl<T: IntoStimulus<f32>> IntoLinearFloats for LinSrgb<T> {
     type LinearFloats = LinSrgb;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
@@ -213,19 +227,19 @@ impl<T: Component + IntoComponent<f32>> IntoLinearFloats for LinSrgb<T> {
     }
 }
 
-impl<T: Component + IntoComponent<f32>> SourceColor for SrgbLuma<T> {
+impl<T: IntoStimulus<f32>> SourceColor for SrgbLuma<T> {
     type LinearSourceColor = LinLuma<D65, T>;
 }
 
-impl<T: Component + IntoComponent<f32>> IntoLinearFloats for SrgbLuma<T> {
+impl<T: IntoStimulus<f32>> IntoLinearFloats for SrgbLuma<T> {
     type LinearFloats = LinLuma;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
-        self.into_format().into_linear()
+        self.into_format::<f32>().into_linear()
     }
 }
 
-impl<T: Component + IntoComponent<f32>> IntoLinearFloats for LinLuma<D65, T> {
+impl<T: IntoStimulus<f32>> IntoLinearFloats for LinLuma<D65, T> {
     type LinearFloats = LinLuma;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
@@ -233,54 +247,24 @@ impl<T: Component + IntoComponent<f32>> IntoLinearFloats for LinLuma<D65, T> {
     }
 }
 
-impl<C: SourceColor, T: Component + IntoComponent<f32>> SourceColor for Alpha<C, T> {
+impl<C: SourceColor, T: IntoStimulus<f32>> SourceColor for Alpha<C, T>
+where
+    Alpha<C::LinearFloats, f32>: ArrayCast,
+{
     type LinearSourceColor = Alpha<C::LinearSourceColor, T>;
 }
 
-impl<C: IntoLinearFloats, T: Component + IntoComponent<f32>> IntoLinearFloats for Alpha<C, T> {
+impl<C: IntoLinearFloats, T: IntoStimulus<f32>> IntoLinearFloats for Alpha<C, T>
+where
+    Alpha<C::LinearFloats, f32>: ArrayCast,
+{
     type LinearFloats = Alpha<C::LinearFloats, f32>;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
         Alpha {
             color: self.color.into_linear_floats(),
-            alpha: self.alpha.into_component(),
+            alpha: self.alpha.into_stimulus(),
         }
-    }
-}
-
-#[derive(Pixel, Clone, Copy)]
-#[repr(C)]
-struct Bgr {
-    blue: u8,
-    green: u8,
-    red: u8,
-}
-
-impl SourceColor for Bgr {
-    type LinearSourceColor = LinBgr;
-}
-
-impl IntoLinearFloats for Bgr {
-    type LinearFloats = LinSrgb;
-
-    fn into_linear_floats(self) -> Self::LinearFloats {
-        Srgb::new(self.red, self.green, self.blue).into_linear_floats()
-    }
-}
-
-#[derive(Pixel, Clone, Copy)]
-#[repr(C)]
-struct LinBgr {
-    blue: u8,
-    green: u8,
-    red: u8,
-}
-
-impl IntoLinearFloats for LinBgr {
-    type LinearFloats = LinSrgb;
-
-    fn into_linear_floats(self) -> Self::LinearFloats {
-        LinSrgb::new(self.red, self.green, self.blue).into_linear_floats()
     }
 }
 

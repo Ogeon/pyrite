@@ -14,7 +14,10 @@ use std::{
 
 use cgmath::Vector2;
 
-use palette::{ComponentWise, FromColor, LinSrgb, Pixel, Srgb, Xyz};
+use palette::{
+    cast::{self, ArrayCast},
+    FromColor, LinSrgb, Srgb, Xyz,
+};
 
 use bumpalo::Bump;
 
@@ -155,15 +158,16 @@ fn render<P: AsRef<Path>>(
 
     let progress = MultiProgress::new();
 
-    let progress_style =
-        ProgressStyle::default_bar().template("[Thread {prefix:>3}] {bar} {percent:>3}% {msg:!}");
+    let progress_style = ProgressStyle::default_bar()
+        .template("[Thread {prefix:>3}] {bar} {percent:>3}% {msg:!}")
+        .expect("progress template should be valid");
     let task_runner = renderer::TaskRunner {
         threads: config.renderer.threads,
         progress: ProgressIndicator {
             bars: (1..)
                 .map(|id| {
                     let bar = progress.add(ProgressBar::new(0).with_style(progress_style.clone()));
-                    bar.set_prefix(&id.to_string());
+                    bar.set_prefix(id.to_string());
                     bar
                 })
                 .take(config.renderer.threads)
@@ -173,7 +177,8 @@ fn render<P: AsRef<Path>>(
 
     let global_progress = progress.add(ProgressBar::new(100)).with_style(
         ProgressStyle::default_bar()
-            .template("\n{msg} {wide_bar} {percent:>3}% [{elapsed_precise}]"),
+            .template("\n{msg} {wide_bar} {percent:>3}% [{elapsed_precise}]")
+            .expect("progress template should be valid"),
     );
 
     let preview_progress = progress.add(ProgressBar::new_spinner());
@@ -264,7 +269,7 @@ fn render<P: AsRef<Path>>(
                         .unwrap_or(true);
 
                     if should_print {
-                        global_progress.set_message(status.message);
+                        global_progress.set_message(status.message.to_owned());
                         global_progress.set_position(status.progress as u64);
 
                         last_print = Some(Instant::now());
@@ -280,7 +285,7 @@ fn render<P: AsRef<Path>>(
                                 let rgb: Srgb<u8> = if let Some((red, green, blue)) = &rgb_curves {
                                     let color =
                                         spectrum_to_rgb(30.0, spectrum, &red, &green, &blue);
-                                    Srgb::from_linear(color).into_format()
+                                    Srgb::from_linear(color)
                                 } else {
                                     let color = spectrum_to_xyz(
                                         spectrum.spectrum_width(),
@@ -288,20 +293,20 @@ fn render<P: AsRef<Path>>(
                                         spectrum,
                                         |s, w| spectrum_get(s, w),
                                     );
-                                    Srgb::from_color(color).into_format()
+                                    LinSrgb::from_color(color).into_encoding()
                                 };
 
-                                *pixel = image::Rgb(rgb.into_raw());
+                                *pixel = image::Rgb(rgb.into());
                             }
                             let diff = (Instant::now() - begin_iter).as_millis() as f64 / 1000.0;
 
                             if let Err(e) = pixels.save(&render_path) {
-                                preview_progress.finish_with_message(&format!(
+                                preview_progress.finish_with_message(format!(
                                     "Error while writing preview: {}",
                                     e
                                 ));
                             } else {
-                                preview_progress.finish_with_message(&format!(
+                                preview_progress.finish_with_message(format!(
                                     "Preview updated ({} seconds)",
                                     diff
                                 ));
@@ -317,7 +322,7 @@ fn render<P: AsRef<Path>>(
             global_progress.finish_and_clear();
         });
 
-        progress.join_and_clear().unwrap();
+        progress.clear().unwrap();
     })
     .unwrap();
 
@@ -326,15 +331,15 @@ fn render<P: AsRef<Path>>(
     for (spectrum, pixel) in film.developed_pixels().zip(pixels.pixels_mut()) {
         let rgb: Srgb<u8> = if let Some((red, green, blue)) = &rgb_curves {
             let color = spectrum_to_rgb(2.0, spectrum, &red, &green, &blue);
-            Srgb::from_linear(color).into_format()
+            Srgb::from_linear(color)
         } else {
             let color = spectrum_to_xyz(spectrum.spectrum_width(), 2.0, spectrum, |s, w| {
                 spectrum_get(s, w)
             });
-            Srgb::from_color(color).into_format()
+            LinSrgb::from_color(color).into_encoding()
         };
 
-        *pixel = image::Rgb(rgb.into_raw());
+        *pixel = image::Rgb(rgb.into());
     }
 
     if let Err(e) = pixels.save(&render_path) {
@@ -389,9 +394,7 @@ fn spectrum_to_tristimulus<T, S>(
     third: &project::spectra::Spectrum<f32>,
 ) -> T
 where
-    T: ComponentWise<Scalar = f32>
-        + From<(f32, f32, f32)>
-        + Into<(f32, f32, f32)>
+    T: ArrayCast<Array = [f32; 3]>
         + Add<Output = T>
         + Mul<Output = T>
         + Mul<f32, Output = T>
@@ -399,7 +402,7 @@ where
         + AddAssign
         + Copy,
 {
-    let mut sum = T::from((0.0, 0.0, 0.0));
+    let mut sum: T = cast::from_array([0.0, 0.0, 0.0]);
     let mut weight = 0.0;
 
     let mut wl_min = min;
@@ -413,8 +416,8 @@ where
         let (second_min, second_max) = (second.get(wl_min), second.get(wl_max));
         let (third_min, third_max) = (third.get(wl_min), third.get(wl_max));
 
-        let start_resp = T::from((first_min, second_min, third_min));
-        let end_resp = T::from((first_max, second_max, third_max));
+        let start_resp: T = cast::from_array([first_min, second_min, third_min]);
+        let end_resp: T = cast::from_array([first_max, second_max, third_max]);
 
         let w = wl_max - wl_min;
         sum += (start_resp * spectrum_min + end_resp * spectrum_max) * 0.5 * w;

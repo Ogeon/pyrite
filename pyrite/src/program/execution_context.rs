@@ -221,7 +221,7 @@ impl<'p> ExecutionContext<'p> {
                             let lhs = self.registers.get_rgb(RgbRegister(lhs));
                             let rhs = self.registers.get_rgb(RgbRegister(rhs));
                             self.registers
-                                .set_rgb(lhs.mix(&rhs, amount), RgbRegister(output));
+                                .set_rgb(lhs.mix(rhs, amount), RgbRegister(output));
                         }
                     }
                 }

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use num_cpus;
 
 use crate::cameras;
@@ -214,7 +216,7 @@ pub(crate) struct LocalProgress {
 }
 
 impl LocalProgress {
-    pub fn show(&self, message: &str, length: u64) {
+    pub fn show(&self, message: impl Into<Cow<'static, str>>, length: u64) {
         self.bar.set_message(message);
         self.bar.set_length(length);
     }

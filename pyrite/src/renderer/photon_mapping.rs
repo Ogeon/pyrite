@@ -89,7 +89,7 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
                     );
 
                     let mut main_sample =
-                        additional_samples.swap_remove(rng.gen_range(0, additional_samples.len()));
+                        additional_samples.swap_remove(rng.gen_range(0..additional_samples.len()));
                     let wavelength = main_sample.0.wavelength;
 
                     trace(

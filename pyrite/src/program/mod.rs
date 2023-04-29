@@ -148,6 +148,7 @@ pub(crate) struct Resources<'a> {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub(crate) struct Inputs: u8 {
         const WAVELENGTH = 0b0000_0001;
 
