@@ -407,17 +407,15 @@ where
 
     let mut wl_min = min;
     let mut spectrum_min = sample(&spectrum, wl_min);
+    let mut start_resp: T =
+        cast::from_array([first.get(wl_min), second.get(wl_min), third.get(wl_min)]);
 
     while wl_min < max {
         let wl_max = wl_min + step_size;
 
         let spectrum_max = sample(&spectrum, wl_max);
-        let (first_min, first_max) = (first.get(wl_min), first.get(wl_max));
-        let (second_min, second_max) = (second.get(wl_min), second.get(wl_max));
-        let (third_min, third_max) = (third.get(wl_min), third.get(wl_max));
-
-        let start_resp: T = cast::from_array([first_min, second_min, third_min]);
-        let end_resp: T = cast::from_array([first_max, second_max, third_max]);
+        let end_resp: T =
+            cast::from_array([first.get(wl_max), second.get(wl_max), third.get(wl_max)]);
 
         let w = wl_max - wl_min;
         sum += (start_resp * spectrum_min + end_resp * spectrum_max) * 0.5 * w;
@@ -425,6 +423,7 @@ where
 
         wl_min = wl_max;
         spectrum_min = spectrum_max;
+        start_resp = end_resp;
     }
 
     if weight == 0.0 {

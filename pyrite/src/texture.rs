@@ -202,20 +202,40 @@ trait SourceColor: IntoLinearFloats {
 }
 
 trait IntoLinearFloats {
-    type LinearFloats: ArrayCast;
+    type LinearFloats;
 
     fn into_linear_floats(self) -> Self::LinearFloats;
 }
 
-impl<T: IntoStimulus<f32>> SourceColor for Srgb<T> {
+impl<T> SourceColor for Srgb<T>
+where
+    Self: IntoLinearFloats,
+    LinSrgb<T>: IntoLinearFloats<LinearFloats = Self::LinearFloats>,
+{
     type LinearSourceColor = LinSrgb<T>;
 }
 
-impl<T: IntoStimulus<f32>> IntoLinearFloats for Srgb<T> {
+impl IntoLinearFloats for Srgb<u8> {
+    type LinearFloats = LinSrgb;
+
+    fn into_linear_floats(self) -> Self::LinearFloats {
+        self.into_linear()
+    }
+}
+
+impl IntoLinearFloats for Srgb<u16> {
     type LinearFloats = LinSrgb;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
         self.into_format::<f32>().into_linear()
+    }
+}
+
+impl IntoLinearFloats for Srgb<f32> {
+    type LinearFloats = LinSrgb;
+
+    fn into_linear_floats(self) -> Self::LinearFloats {
+        self.into_linear()
     }
 }
 
@@ -227,11 +247,23 @@ impl<T: IntoStimulus<f32>> IntoLinearFloats for LinSrgb<T> {
     }
 }
 
-impl<T: IntoStimulus<f32>> SourceColor for SrgbLuma<T> {
+impl<T> SourceColor for SrgbLuma<T>
+where
+    Self: IntoLinearFloats,
+    LinLuma<D65, T>: IntoLinearFloats<LinearFloats = Self::LinearFloats>,
+{
     type LinearSourceColor = LinLuma<D65, T>;
 }
 
-impl<T: IntoStimulus<f32>> IntoLinearFloats for SrgbLuma<T> {
+impl IntoLinearFloats for SrgbLuma<u8> {
+    type LinearFloats = LinLuma;
+
+    fn into_linear_floats(self) -> Self::LinearFloats {
+        self.into_linear()
+    }
+}
+
+impl IntoLinearFloats for SrgbLuma<u16> {
     type LinearFloats = LinLuma;
 
     fn into_linear_floats(self) -> Self::LinearFloats {
