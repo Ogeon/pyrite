@@ -2,7 +2,7 @@ use std::{borrow::Cow, convert::TryFrom, error::Error};
 
 use bitflags::bitflags;
 
-use crate::project::{expressions::Vector, spectra::Spectra, textures::Textures};
+use crate::project::{expressions::Vector, spectra::Spectra, textures::Textures, Nodes};
 
 use instruction::Instruction;
 use memoized::MemoizedProgram;
@@ -141,10 +141,10 @@ impl Into<Inputs> for VectorInput {
     }
 }
 
-#[derive(Copy, Clone)]
-pub(crate) struct Resources<'a> {
-    pub spectra: &'a Spectra,
-    pub textures: &'a Textures,
+pub(crate) struct Resources {
+    pub textures: Textures,
+    pub spectra: Spectra,
+    pub nodes: Nodes,
 }
 
 bitflags! {

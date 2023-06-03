@@ -1,5 +1,4 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
     error::Error,
     ops::{Add, Div, Mul, Sub},
 };
@@ -7,188 +6,79 @@ use std::{
 use cgmath::{
     ElementWise, EuclideanSpace, Point2, Point3, Quaternion, Vector2, Vector3, Vector4, VectorSpace,
 };
+use typed_nodes::Key;
 
-use crate::{
-    light_source,
-    program::{FromValue, ProgramOutputType},
-};
+use crate::program::{FromValue, ProgramOutputType};
 
 use super::{
     eval_context::{EvalContext, Evaluate},
-    parse_context::{Parse, ParseContext},
-    spectra::{Spectrum, SpectrumId},
-    tables::{TableExt, TableId},
+    spectra::SpectrumId,
     textures::{ColorTextureId, MonoTextureId},
+    Nodes,
 };
 
-pub struct Expressions {
-    expressions: Vec<ComplexExpression>,
+pub(crate) fn insert_sub(nodes: &mut Nodes, lhs: Expression, rhs: Expression) -> Expression {
+    if let (Expression::Number(lhs), Expression::Number(rhs)) = (lhs, rhs) {
+        return Expression::Number(lhs - rhs);
+    }
+
+    let id = nodes.insert(ComplexExpression::Binary {
+        operator: BinaryOperator::Sub,
+        lhs,
+        rhs,
+    });
+
+    Expression::Complex(id)
 }
 
-impl Expressions {
-    pub fn get(&self, id: ExpressionId) -> &ComplexExpression {
-        self.expressions.get(id.0).expect("missing expression")
+pub(crate) fn insert_mul(nodes: &mut Nodes, lhs: Expression, rhs: Expression) -> Expression {
+    if let (Expression::Number(lhs), Expression::Number(rhs)) = (lhs, rhs) {
+        return Expression::Number(lhs * rhs);
     }
 
-    pub(crate) fn insert_sub(&mut self, lhs: Expression, rhs: Expression) -> Expression {
-        if let (Expression::Number(lhs), Expression::Number(rhs)) = (lhs, rhs) {
-            return Expression::Number(lhs - rhs);
-        }
+    let id = nodes.insert(ComplexExpression::Binary {
+        operator: BinaryOperator::Mul,
+        lhs,
+        rhs,
+    });
 
-        let id = ExpressionId(self.expressions.len());
-        self.expressions.push(ComplexExpression::Binary {
-            operator: BinaryOperator::Sub,
-            lhs,
-            rhs,
-        });
-
-        Expression::Complex(id)
-    }
-
-    pub(crate) fn insert_mul(&mut self, lhs: Expression, rhs: Expression) -> Expression {
-        if let (Expression::Number(lhs), Expression::Number(rhs)) = (lhs, rhs) {
-            return Expression::Number(lhs * rhs);
-        }
-
-        let id = ExpressionId(self.expressions.len());
-        self.expressions.push(ComplexExpression::Binary {
-            operator: BinaryOperator::Mul,
-            lhs,
-            rhs,
-        });
-
-        Expression::Complex(id)
-    }
-
-    pub(crate) fn insert_clamp(
-        &mut self,
-        value: Expression,
-        min: Expression,
-        max: Expression,
-    ) -> Expression {
-        if let (Expression::Number(value), Expression::Number(min), Expression::Number(max)) =
-            (value, min, max)
-        {
-            return Expression::Number(value.min(max).max(min));
-        }
-
-        let id = ExpressionId(self.expressions.len());
-        self.expressions
-            .push(ComplexExpression::Clamp { value, min, max });
-
-        Expression::Complex(id)
-    }
+    Expression::Complex(id)
 }
 
-pub struct ExpressionLoader<'lua> {
-    expressions: Vec<ExpressionEntry<'lua>>,
-    table_map: HashMap<TableId, ExpressionId>,
-    pending: Vec<ExpressionId>,
+pub(crate) fn insert_clamp(
+    nodes: &mut Nodes,
+    value: Expression,
+    min: Expression,
+    max: Expression,
+) -> Expression {
+    if let (Expression::Number(value), Expression::Number(min), Expression::Number(max)) =
+        (value, min, max)
+    {
+        return Expression::Number(value.min(max).max(min));
+    }
+
+    let id = nodes.insert(ComplexExpression::Clamp { value, min, max });
+
+    Expression::Complex(id)
 }
 
-impl<'lua> ExpressionLoader<'lua> {
-    pub fn new() -> Self {
-        ExpressionLoader {
-            expressions: Vec::new(),
-            table_map: HashMap::new(),
-            pending: Vec::new(),
-        }
-    }
-
-    pub fn insert(&mut self, table: rlua::Table<'lua>) -> Result<ExpressionId, Box<dyn Error>> {
-        let table_id = table.get_id()?;
-
-        match self.table_map.entry(table_id) {
-            Entry::Occupied(entry) => Ok(*entry.get()),
-            Entry::Vacant(entry) => {
-                let id = ExpressionId(self.expressions.len());
-                self.expressions.push(ExpressionEntry::Pending(table));
-                entry.insert(id);
-                self.pending.push(id);
-                Ok(id)
-            }
-        }
-    }
-
-    pub fn next_pending(&mut self) -> Option<(ExpressionId, rlua::Table<'lua>)> {
-        self.pending.pop().map(|id| {
-            let table = self.expressions[id.0].expect_pending();
-            (id, table.clone())
-        })
-    }
-
-    pub fn replace_pending(&mut self, id: ExpressionId, expression: ComplexExpression) {
-        self.expressions[id.0] = ExpressionEntry::Parsed(expression);
-    }
-
-    pub fn into_expressions(self) -> Expressions {
-        Expressions {
-            expressions: self
-                .expressions
-                .into_iter()
-                .map(ExpressionEntry::into_parsed)
-                .collect(),
-        }
-    }
-}
-
-enum ExpressionEntry<'lua> {
-    Parsed(ComplexExpression),
-    Pending(rlua::Table<'lua>),
-}
-
-impl<'lua> ExpressionEntry<'lua> {
-    fn into_parsed(self) -> ComplexExpression {
-        if let ExpressionEntry::Parsed(expression) = self {
-            expression
-        } else {
-            panic!("some expressions were not parsed")
-        }
-    }
-
-    fn expect_pending(&self) -> &rlua::Table<'lua> {
-        if let ExpressionEntry::Pending(table) = self {
-            table
-        } else {
-            panic!("expected expression to still be unparsed")
-        }
-    }
-}
-
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, typed_nodes::FromLua)]
 pub enum Expression {
+    #[typed_nodes(untagged(number, integer))]
     Number(f64),
-    Complex(ExpressionId),
-}
-
-impl<'lua> Parse<'lua> for Expression {
-    type Input = rlua::Value<'lua>;
-
-    fn parse<'a>(context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        if let Ok(number) = context.expect_number() {
-            return Ok(Expression::Number(number));
-        }
-
-        let table = if let Ok(table) = context.expect_table() {
-            table
-        } else {
-            return Err(format!(
-                "expected a number or a table but found {:?}",
-                context.value()
-            )
-            .into());
-        };
-
-        let id = context.expressions.insert(table)?;
-        Ok(Expression::Complex(id))
-    }
+    #[typed_nodes(untagged(table))]
+    Complex(Key<ComplexExpression>),
 }
 
 impl<T: ExpressionValue> Evaluate<T> for Expression {
     fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<T, Box<dyn Error>> {
         match *self {
             Expression::Number(number) => T::from_number(number),
-            Expression::Complex(id) => context.expressions.get(id).evaluate(context),
+            Expression::Complex(id) => context
+                .nodes
+                .get(id)
+                .expect("missing expression")
+                .evaluate(context),
         }
     }
 }
@@ -197,7 +87,11 @@ impl Evaluate<Point3<f32>> for Expression {
     fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<Point3<f32>, Box<dyn Error>> {
         let vector = match *self {
             Expression::Number(number) => <Vector as ExpressionValue>::from_number(number),
-            Expression::Complex(id) => context.expressions.get(id).evaluate(context),
+            Expression::Complex(id) => context
+                .nodes
+                .get(id)
+                .expect("missing expression")
+                .evaluate(context),
         };
 
         Ok(vector?.into())
@@ -208,7 +102,11 @@ impl Evaluate<Vector3<f32>> for Expression {
     fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<Vector3<f32>, Box<dyn Error>> {
         let vector = match *self {
             Expression::Number(number) => <Vector as ExpressionValue>::from_number(number),
-            Expression::Complex(id) => context.expressions.get(id).evaluate(context),
+            Expression::Complex(id) => context
+                .nodes
+                .get(id)
+                .expect("missing expression")
+                .evaluate(context),
         };
 
         Ok(vector?.into())
@@ -219,7 +117,11 @@ impl Evaluate<Vector2<f32>> for Expression {
     fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<Vector2<f32>, Box<dyn Error>> {
         let vector = match *self {
             Expression::Number(number) => <Vector as ExpressionValue>::from_number(number),
-            Expression::Complex(id) => context.expressions.get(id).evaluate(context),
+            Expression::Complex(id) => context
+                .nodes
+                .get(id)
+                .expect("missing expression")
+                .evaluate(context),
         };
 
         Ok(vector?.into())
@@ -230,7 +132,11 @@ impl Evaluate<Quaternion<f32>> for Expression {
     fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<Quaternion<f32>, Box<dyn Error>> {
         let vector = match *self {
             Expression::Number(number) => <Vector as ExpressionValue>::from_number(number),
-            Expression::Complex(id) => context.expressions.get(id).evaluate(context),
+            Expression::Complex(id) => context
+                .nodes
+                .get(id)
+                .expect("missing expression")
+                .evaluate(context),
         };
 
         Ok(vector?.into())
@@ -243,8 +149,11 @@ impl From<f64> for Expression {
     }
 }
 
+#[derive(typed_nodes::FromLua)]
+#[typed_nodes(is_node)]
 pub enum ComplexExpression {
     Vector {
+        #[typed_nodes(recursive)]
         x: Expression,
         y: Expression,
         z: Expression,
@@ -278,99 +187,17 @@ pub enum ComplexExpression {
         temperature: Expression,
     },
     Spectrum {
+        #[typed_nodes(flatten)]
         points: SpectrumId,
     },
     ColorTexture {
+        #[typed_nodes(flatten)]
         texture: ColorTextureId,
     },
     MonoTexture {
+        #[typed_nodes(flatten)]
         texture: MonoTextureId,
     },
-}
-
-impl<'lua> Parse<'lua> for ComplexExpression {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        let expression_type = context.expect_field::<String>("type")?;
-
-        match &*expression_type {
-            "vector" => Ok(ComplexExpression::Vector {
-                x: context.parse_field("x")?,
-                y: context.parse_field("y")?,
-                z: context.parse_field("z")?,
-                w: context.parse_field("w")?,
-            }),
-            "rgb" => Ok(ComplexExpression::Rgb {
-                red: context.parse_field("red")?,
-                green: context.parse_field("green")?,
-                blue: context.parse_field("blue")?,
-            }),
-            "binary" => Ok(ComplexExpression::Binary {
-                operator: context.parse_field("operator")?,
-                lhs: context.parse_field("lhs")?,
-                rhs: context.parse_field("rhs")?,
-            }),
-            "mix" => Ok(ComplexExpression::Mix {
-                amount: context.parse_field("amount")?,
-                lhs: context.parse_field("lhs")?,
-                rhs: context.parse_field("rhs")?,
-            }),
-            "fresnel" => Ok(ComplexExpression::Fresnel {
-                ior: context.parse_field("ior")?,
-                env_ior: context.parse_field("env_ior")?,
-            }),
-            "blackbody" => Ok(ComplexExpression::Blackbody {
-                temperature: context.parse_field("temperature")?,
-            }),
-            "spectrum" => {
-                let id = context.value().get_id()?;
-                let points = if let Some(points) = context.spectra.get(id) {
-                    points
-                } else {
-                    let spectrum = Spectrum::parse(context.clone())?;
-                    context.spectra.insert(id, spectrum)
-                };
-
-                Ok(ComplexExpression::Spectrum { points })
-            }
-            "light_source" => {
-                let id = context.value().get_id()?;
-                let points = if let Some(points) = context.spectra.get(id) {
-                    points
-                } else {
-                    let name: String = context.expect_field("name")?;
-                    let spectrum = match &*name {
-                        "a" => light_source::A,
-                        "d65" => light_source::D65,
-                        _ => return Err(format!("unknown builtin spectrum: {}", name).into()),
-                    };
-                    context.spectra.insert(id, spectrum)
-                };
-
-                Ok(ComplexExpression::Spectrum { points })
-            }
-            "texture" => {
-                let linear = context.expect_field::<bool>("linear")?;
-                let mono = context.expect_field::<bool>("mono")?;
-
-                if mono {
-                    Ok(ComplexExpression::MonoTexture {
-                        texture: context
-                            .textures
-                            .load_mono(context.expect_field::<String>("path")?, linear)?,
-                    })
-                } else {
-                    Ok(ComplexExpression::ColorTexture {
-                        texture: context
-                            .textures
-                            .load_color(context.expect_field::<String>("path")?, linear)?,
-                    })
-                }
-            }
-            name => Err(format!("unexpected expression type: '{}'", name).into()),
-        }
-    }
 }
 
 impl<T: ExpressionValue> Evaluate<T> for ComplexExpression {
@@ -430,28 +257,12 @@ impl<T: ExpressionValue> Evaluate<T> for ComplexExpression {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, typed_nodes::FromLua)]
 pub enum BinaryOperator {
     Add,
     Sub,
     Mul,
     Div,
-}
-
-impl<'lua> Parse<'lua> for BinaryOperator {
-    type Input = String;
-
-    fn parse<'a>(context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        let operator = context.value();
-
-        match &**operator {
-            "add" => Ok(BinaryOperator::Add),
-            "sub" => Ok(BinaryOperator::Sub),
-            "mul" => Ok(BinaryOperator::Mul),
-            "div" => Ok(BinaryOperator::Div),
-            name => Err(format!("unexpected binary operator: '{}'", name).into()),
-        }
-    }
 }
 
 pub trait ExpressionValue:

@@ -172,7 +172,7 @@ end
 
 function texture(path, ...)
     local properties = {
-        type = "texture",
+        type = "color_texture",
         path = path,
         linear = false,
         mono = false,
@@ -181,6 +181,8 @@ function texture(path, ...)
     for _, modifier in ipairs({...}) do
         if type(modifier) == "string" then properties[modifier] = true end
     end
+
+    if properties.mono then properties.type = "mono_texture" end
 
     _pyrite.make_expression(properties)
 
@@ -259,9 +261,9 @@ material = {
 }
 
 light_source = {}
-light_source.d65 = {type = "light_source", name = "d65"}
+light_source.d65 = {type = "spectrum", name = "d65"}
 _pyrite.make_expression(light_source.d65)
-light_source.a = {type = "light_source", name = "a"}
+light_source.a = {type = "spectrum", name = "a"}
 _pyrite.make_expression(light_source.a)
 
 transform = {

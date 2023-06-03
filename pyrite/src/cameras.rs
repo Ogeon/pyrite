@@ -10,12 +10,10 @@ use collision::{Ray, Ray3};
 
 use crate::film::Area;
 
+use crate::project::Nodes;
 use crate::{
     math::DIST_EPSILON,
-    project::{
-        eval_context::{EvalContext, Evaluate, EvaluateOr},
-        expressions::Expressions,
-    },
+    project::eval_context::{EvalContext, Evaluate, EvaluateOr},
     world::World,
 };
 
@@ -31,9 +29,9 @@ pub(crate) enum Camera {
 impl Camera {
     pub fn from_project(
         project_camera: crate::project::Camera,
-        expressions: &Expressions,
+        nodes: &Nodes,
     ) -> Result<Self, Box<dyn Error>> {
-        let eval_context = EvalContext { expressions };
+        let eval_context = EvalContext { nodes };
 
         match project_camera {
             crate::project::Camera::Perspective {

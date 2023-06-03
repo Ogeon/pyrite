@@ -1,21 +1,21 @@
 use std::{collections::HashMap, error::Error, path::Path};
 
-use rlua::{FromLua, Lua};
+use mlua::Lua;
 
 use cgmath::{Matrix4, SquareMatrix, Vector3};
 
 use path_slash::PathBufExt;
-
-use crate::parse_enum;
+use typed_nodes::Key;
 
 use eval_context::{EvalContext, Evaluate};
-use expressions::{ExpressionLoader, Expressions};
-use materials::{MaterialId, MaterialLoader, Materials};
 use meshes::{MeshId, MeshLoader, Meshes};
-use parse_context::{Parse, ParseContext};
-use spectra::{Spectra, SpectrumLoader};
 use tables::Tables;
 use textures::{TextureLoader, Textures};
+
+use self::{
+    parse_context::ParseContext,
+    spectra::{Spectra, SpectrumLoader},
+};
 
 pub(crate) mod eval_context;
 pub(crate) mod expressions;
@@ -34,119 +34,73 @@ pub(crate) fn load_project<'p, P: AsRef<Path>>(path: P) -> Result<ProjectData, B
 
     let lua = Lua::new();
 
-    lua.context(|context| {
-        // Set up the preferred require path
-        context
-            .load(&format!(
-                r#"package.path = "{};" .. package.path"#,
-                project_dir
-                    .join("?.lua")
-                    .to_slash()
-                    .expect("could not convert project path to UTF8")
-            ))
-            .set_name("<pyrite>")?
-            .exec()?;
+    // Set up the preferred require path
+    lua.load(&format!(
+        r#"package.path = "{};" .. package.path"#,
+        project_dir
+            .join("?.lua")
+            .to_slash()
+            .expect("could not convert project path to UTF8")
+    ))
+    .set_name("<pyrite>")?
+    .exec()?;
 
-        // Register assign_id
-        let tables = std::sync::Arc::new(Tables::new());
-        let lua_tables = tables.clone();
-        let assign_id = context
-            .create_function(move |_context, table: rlua::Table| lua_tables.assign_id(&table))?;
-        context.globals().set("assign_id", assign_id)?;
+    // Register assign_id
+    let tables = std::sync::Arc::new(Tables::new());
+    let lua_tables = tables.clone();
+    let assign_id =
+        lua.create_function(move |_context, table: mlua::Table| lua_tables.assign_id(&table))?;
+    lua.globals().set("assign_id", assign_id)?;
 
-        // Load project building library
-        context
-            .load(include_str!("lib.lua"))
-            .set_name("<pyrite>/lib.lua")?
-            .exec()?;
+    // Load project building library
+    lua.load(include_str!("lib.lua"))
+        .set_name("<pyrite>/lib.lua")?
+        .exec()?;
 
-        // Run project file
-        let project_file = std::fs::read_to_string(&path)?;
-        let project = context
-            .load(&project_file)
-            .set_name(
-                path.as_ref()
-                    .file_name()
-                    .and_then(std::ffi::OsStr::to_str)
-                    .unwrap_or_else(|| "<project file>"),
-            )?
-            .eval()?;
+    // Run project file
+    let project_file = std::fs::read_to_string(&path)?;
+    let project = lua
+        .load(&project_file)
+        .set_name(
+            path.as_ref()
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or_else(|| "<project file>"),
+        )?
+        .eval()?;
 
-        // Parse project config
-        let mut expressions = ExpressionLoader::new();
-        let mut meshes = MeshLoader::new(project_dir);
-        let mut spectra = SpectrumLoader::new();
-        let mut textures = TextureLoader::new(project_dir);
-        let mut materials = MaterialLoader::new();
-        let parse_context = ParseContext::new(
-            &mut expressions,
-            &mut meshes,
-            &mut spectra,
-            &mut textures,
-            &mut materials,
-            &tables,
-            rlua::Table::from_lua(project, context.clone())?,
-            &context,
-        );
+    // Parse project config
+    let mut nodes = Nodes::new();
+    let mut meshes = MeshLoader::new(project_dir);
+    let mut spectra = SpectrumLoader::new();
+    let mut textures = TextureLoader::new(project_dir);
+    let mut parse_context =
+        ParseContext::new(&lua, &mut nodes, &mut textures, &mut meshes, &mut spectra);
 
-        let project = parse_context.parse()?;
+    let project = typed_nodes::FromLua::from_lua(project, &mut parse_context)?;
 
-        while let Some((id, table)) = materials.next_pending() {
-            let expression = ParseContext::new(
-                &mut expressions,
-                &mut meshes,
-                &mut spectra,
-                &mut textures,
-                &mut materials,
-                &tables,
-                table,
-                &context,
-            )
-            .parse()?;
-            materials.replace_pending(id, expression);
-        }
+    let meshes = meshes.into_meshes();
+    let spectra = spectra.into_spectra();
+    let textures = textures.into_textures();
 
-        while let Some((id, table)) = expressions.next_pending() {
-            let expression = ParseContext::new(
-                &mut expressions,
-                &mut meshes,
-                &mut spectra,
-                &mut textures,
-                &mut materials,
-                &tables,
-                table,
-                &context,
-            )
-            .parse()?;
-            expressions.replace_pending(id, expression);
-        }
-
-        let expressions = expressions.into_expressions();
-        let meshes = meshes.into_meshes();
-        let spectra = spectra.into_spectra();
-        let textures = textures.into_textures();
-        let materials = materials.into_materials();
-
-        Ok(ProjectData {
-            expressions,
-            meshes,
-            spectra,
-            textures,
-            materials,
-            project,
-        })
+    Ok(ProjectData {
+        nodes,
+        meshes,
+        spectra,
+        textures,
+        project,
     })
 }
 
 pub(crate) struct ProjectData {
-    pub expressions: Expressions,
+    pub nodes: Nodes,
     pub meshes: Meshes,
     pub spectra: Spectra,
     pub textures: Textures,
-    pub materials: Materials,
     pub project: Project,
 }
 
+#[derive(typed_nodes::FromLua)]
 pub(crate) struct Project {
     pub(crate) image: Image,
     pub(crate) camera: Camera,
@@ -154,19 +108,7 @@ pub(crate) struct Project {
     pub(crate) world: World,
 }
 
-impl<'lua> Parse<'lua> for Project {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        Ok(Project {
-            image: context.parse_field("image")?,
-            camera: context.parse_field("camera")?,
-            renderer: context.parse_field("renderer")?,
-            world: context.parse_field("world")?,
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub struct Image {
     pub width: u32,
     pub height: u32,
@@ -175,53 +117,30 @@ pub struct Image {
     pub white: Option<expressions::Expression>,
 }
 
-impl<'lua> Parse<'lua> for Image {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        Ok(Image {
-            width: context.expect_field("width")?,
-            height: context.expect_field("height")?,
-            file: context.expect_field("file")?,
-            filter: context.parse_field("filter")?,
-            white: context.parse_field("white")?,
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub enum Camera {
     Perspective {
         transform: Transform,
+
         fov: self::expressions::Expression,
         focus_distance: Option<self::expressions::Expression>,
         aperture: Option<self::expressions::Expression>,
     },
 }
 
-impl<'lua> Parse<'lua> for Camera {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        parse_enum!(context {
-            "perspective" => Ok(Camera::Perspective {
-                transform: context.parse_field("transform")?,
-                fov: context.parse_field("fov")?,
-                focus_distance: context.parse_field("focus_distance")?,
-                aperture: context.parse_field("aperture")?,
-            }),
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub enum Renderer {
     Simple {
+        #[typed_nodes(flatten)]
         shared: RendererShared,
     },
     Bidirectional {
+        #[typed_nodes(flatten)]
         shared: RendererShared,
         light_bounces: Option<u32>,
     },
     PhotonMapping {
+        #[typed_nodes(flatten)]
         shared: RendererShared,
         radius: Option<f32>,
         photon_bounces: Option<u32>,
@@ -230,31 +149,7 @@ pub enum Renderer {
     },
 }
 
-impl<'lua> Parse<'lua> for Renderer {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        let shared = RendererShared::parse(&mut context)?;
-
-        parse_enum!(context {
-            "simple" => Ok(Renderer::Simple {
-                shared,
-            }),
-            "bidirectional" => Ok(Renderer::Bidirectional {
-                shared,
-                light_bounces: context.expect_field("light_bounces")?,
-            }),
-            "photon_mapping" => Ok(Renderer::PhotonMapping {
-                shared,
-                radius: context.expect_field("radius")?,
-                photon_bounces: context.expect_field("photon_bounces")?,
-                photons: context.expect_field("photons")?,
-                photon_passes: context.expect_field("photon_passes")?,
-            })
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub struct RendererShared {
     pub threads: Option<usize>,
     pub bounces: Option<u32>,
@@ -265,38 +160,13 @@ pub struct RendererShared {
     pub tile_size: Option<usize>,
 }
 
-impl RendererShared {
-    fn parse<'a, 'lua>(
-        context: &mut ParseContext<'a, 'lua, rlua::Table<'lua>>,
-    ) -> Result<Self, Box<dyn Error>> {
-        Ok(RendererShared {
-            threads: context.expect_field("threads")?,
-            bounces: context.expect_field("bounces")?,
-            pixel_samples: context.expect_field("pixel_samples")?,
-            light_samples: context.expect_field("light_samples")?,
-            spectrum_samples: context.expect_field("spectrum_samples")?,
-            spectrum_resolution: context.expect_field("spectrum_resolution")?,
-            tile_size: context.expect_field("tile_size")?,
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub(crate) struct World {
     pub(crate) sky: Option<self::expressions::Expression>,
     pub(crate) objects: Vec<WorldObject>,
 }
 
-impl<'lua> Parse<'lua> for World {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        Ok(World {
-            sky: context.parse_field("sky")?,
-            objects: context.parse_array_field("objects")?,
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub(crate) enum WorldObject {
     Sphere {
         position: self::expressions::Expression,
@@ -332,47 +202,7 @@ pub(crate) enum WorldObject {
     },
 }
 
-impl<'lua> Parse<'lua> for WorldObject {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        parse_enum!(context {
-            "sphere" => Ok(WorldObject::Sphere {
-                position: context.parse_field("position")?,
-                radius: context.parse_field("radius")?,
-                texture_scale: context.parse_field("texture_scale")?,
-                material: context.parse_field("material")?,
-            }),
-            "plane" => Ok(WorldObject::Plane {
-                origin: context.parse_field("origin")?,
-                normal: context.parse_field("normal")?,
-                texture_scale: context.parse_field("texture_scale")?,
-                material: context.parse_field("material")?,
-            }),
-            "ray_marched" => Ok(WorldObject::RayMarched {
-                shape: context.parse_field("shape")?,
-                bounds: context.parse_field("bounds")?,
-                material: context.parse_field("material")?,
-            }),
-            "mesh" => Ok(WorldObject::Mesh {
-                file: context.meshes.load(context.expect_field::<String>("file")?)?,
-                materials: context.parse_map_field("materials")?,
-                scale: context.parse_field("scale")?,
-                transform: context.parse_field("transform")?,
-            }),
-            "directional_light" => Ok(WorldObject::DirectionalLight {
-                direction: context.parse_field("direction")?,
-                width: context.parse_field("width")?,
-                color: context.parse_field("color")?,
-            }),
-            "point_light" => Ok(WorldObject::PointLight {
-                position: context.parse_field("position")?,
-                color: context.parse_field("color")?,
-            }),
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub enum BoundingVolume {
     Box {
         min: self::expressions::Expression,
@@ -384,23 +214,7 @@ pub enum BoundingVolume {
     },
 }
 
-impl<'lua> Parse<'lua> for BoundingVolume {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        parse_enum!(context {
-            "box" => Ok(BoundingVolume::Box {
-                min: context.parse_field("min")?,
-                max: context.parse_field("max")?,
-            }),
-            "sphere" => Ok(BoundingVolume::Sphere {
-                position: context.parse_field("position")?,
-                radius: context.parse_field("radius")?,
-            }),
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub enum Estimator {
     Mandelbulb {
         iterations: self::expressions::Expression,
@@ -417,148 +231,24 @@ pub enum Estimator {
     },
 }
 
-impl<'lua> Parse<'lua> for Estimator {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        parse_enum!(context {
-            "mandelbulb" => Ok(Estimator::Mandelbulb {
-                iterations: context.parse_field("iterations")?,
-                threshold: context.parse_field("threshold")?,
-                power: context.parse_field("power")?,
-                constant: context.parse_field("constant")?,
-            }),
-            "quaternion_julia" => Ok(Estimator::QuaternionJulia {
-                iterations: context.parse_field("iterations")?,
-                threshold: context.parse_field("threshold")?,
-                constant: context.parse_field("constant")?,
-                slice_plane: context.parse_field("slice_plane")?,
-                variant: context.parse_field("variant")?,
-            }),
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub struct JuliaType {
     pub name: String,
 }
 
-impl<'lua> Parse<'lua> for JuliaType {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        Ok(JuliaType {
-            name: context.expect_field("name")?,
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub(crate) struct Material {
-    pub surface: MaterialId,
+    pub surface: Key<self::materials::SurfaceMaterial>,
     pub normal_map: Option<expressions::Expression>,
 }
 
-impl<'lua> Parse<'lua> for Material {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        Ok(Material {
-            surface: context.materials.insert(context.expect_field("surface")?)?,
-            normal_map: context.parse_field("normal_map")?,
-        })
-    }
-}
-
-pub enum SurfaceMaterial {
-    Diffuse {
-        color: self::expressions::Expression,
-    },
-    Emission {
-        color: self::expressions::Expression,
-    },
-    Mirror {
-        color: self::expressions::Expression,
-    },
-    Refractive {
-        color: self::expressions::Expression,
-        ior: self::expressions::Expression,
-        dispersion: Option<self::expressions::Expression>,
-        env_ior: Option<self::expressions::Expression>,
-        env_dispersion: Option<self::expressions::Expression>,
-    },
-    Mix {
-        amount: self::expressions::Expression,
-        lhs: Box<SurfaceMaterial>,
-        rhs: Box<SurfaceMaterial>,
-    },
-    FresnelMix {
-        ior: self::expressions::Expression,
-        dispersion: Option<self::expressions::Expression>,
-        env_ior: Option<self::expressions::Expression>,
-        env_dispersion: Option<self::expressions::Expression>,
-        reflect: Box<SurfaceMaterial>,
-        refract: Box<SurfaceMaterial>,
-    },
-}
-
-impl<'lua> Parse<'lua> for SurfaceMaterial {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        parse_enum!(context {
-            "diffuse" => Ok(SurfaceMaterial::Diffuse {
-                color: context.parse_field("color")?,
-            }),
-            "emission" => Ok(SurfaceMaterial::Emission {
-                color: context.parse_field("color")?,
-            }),
-            "mirror" => Ok(SurfaceMaterial::Mirror {
-                color: context.parse_field("color")?,
-            }),
-            "refractive" => Ok(SurfaceMaterial::Refractive {
-                color: context.parse_field("color")?,
-                ior: context.parse_field("ior")?,
-                env_ior: context.parse_field("env_ior")?,
-                dispersion: context.parse_field("dispersion")?,
-                env_dispersion: context.parse_field("env_dispersion")?,
-            }),
-            "mix" => Ok(SurfaceMaterial::Mix {
-                amount: context.parse_field("amount")?,
-                lhs: Box::new(context.parse_field("lhs")?),
-                rhs: Box::new(context.parse_field("rhs")?),
-            }),
-            "fresnel_mix" => Ok(SurfaceMaterial::FresnelMix {
-                ior: context.parse_field("ior")?,
-                env_ior: context.parse_field("env_ior")?,
-                dispersion: context.parse_field("dispersion")?,
-                env_dispersion: context.parse_field("env_dispersion")?,
-                reflect: Box::new(context.parse_field("reflect")?),
-                refract: Box::new(context.parse_field("refract")?),
-            }),
-        })
-    }
-}
-
+#[derive(typed_nodes::FromLua)]
 pub enum Transform {
     LookAt {
         from: self::expressions::Expression,
         to: self::expressions::Expression,
         up: Option<self::expressions::Expression>,
     },
-}
-
-impl<'lua> Parse<'lua> for Transform {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        parse_enum!(context {
-            "look_at" => Ok(Transform::LookAt {
-                from: context.parse_field("from")?,
-                to: context.parse_field("to")?,
-                up: context.parse_field("up")?,
-            })
-        })
-    }
 }
 
 impl Evaluate<Matrix4<f32>> for Transform {
@@ -575,5 +265,16 @@ impl Evaluate<Matrix4<f32>> for Transform {
                     .ok_or("could not invert view matrix")?
             }
         })
+    }
+}
+
+pub(crate) type Nodes = typed_nodes::Nodes<NodeId, typed_nodes::bounds::SendSyncBounds>;
+
+#[derive(Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct NodeId(typed_nodes::TableId);
+
+impl From<typed_nodes::TableId> for NodeId {
+    fn from(value: typed_nodes::TableId) -> Self {
+        Self(value)
     }
 }

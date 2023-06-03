@@ -14,11 +14,11 @@ use palette::{LinSrgba, Mix};
 
 pub struct ExecutionContext<'p> {
     registers: Registers,
-    resources: Resources<'p>,
+    resources: &'p Resources,
 }
 
 impl<'p> ExecutionContext<'p> {
-    pub(crate) fn new(resources: Resources<'p>) -> Self {
+    pub(crate) fn new(resources: &'p Resources) -> Self {
         ExecutionContext {
             registers: Registers::new(),
             resources,

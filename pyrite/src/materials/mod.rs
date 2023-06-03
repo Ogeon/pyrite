@@ -1,6 +1,7 @@
 use std::{borrow::Cow, cell::Cell, convert::TryFrom, error::Error};
 
 use cgmath::{InnerSpace, Point2, Vector3};
+use typed_nodes::Key;
 
 use crate::{
     program::{
@@ -9,8 +10,9 @@ use crate::{
     },
     project::{
         eval_context::{EvalContext, Evaluate, EvaluateOr},
-        expressions::{Expression, Expressions, Vector},
-        materials::{MaterialId, Materials, SurfaceMaterial as MaterialNode},
+        expressions::{self, Expression, Vector},
+        materials::{BinaryOperator, SurfaceMaterial as MaterialNode},
+        Nodes,
     },
     shapes::Normal,
     tracer::{Brdf, LightProgram, NormalInput},
@@ -31,21 +33,14 @@ impl<'a> Material<'a> {
     pub(crate) fn from_project(
         material: crate::project::Material,
         programs: ProgramCompiler<'a>,
-        expressions: &mut Expressions,
-        materials: &Materials,
+        nodes: &mut Nodes,
         allocator: &'a bumpalo::Bump,
     ) -> Result<Self, Box<dyn Error>> {
         Ok(Material {
-            surface: SurfaceMaterial::from_project(
-                material.surface,
-                programs,
-                expressions,
-                materials,
-                allocator,
-            )?,
+            surface: SurfaceMaterial::from_project(material.surface, programs, nodes, allocator)?,
             normal_map: material
                 .normal_map
-                .map(|program| programs.compile(&program, expressions))
+                .map(|program| programs.compile(&program, nodes))
                 .transpose()?,
         })
     }
@@ -93,14 +88,13 @@ pub(crate) struct SurfaceMaterial<'a> {
 
 impl<'a> SurfaceMaterial<'a> {
     pub(crate) fn from_project(
-        material: MaterialId,
+        material: Key<MaterialNode>,
         programs: ProgramCompiler<'a>,
-        expressions: &mut Expressions,
-        materials: &Materials,
+        nodes: &mut Nodes,
         allocator: &'a bumpalo::Bump,
     ) -> Result<Self, Box<dyn Error>> {
         struct StackEntry {
-            material: MaterialId,
+            material: Key<MaterialNode>,
             probability: Option<Expression>,
         }
 
@@ -113,16 +107,16 @@ impl<'a> SurfaceMaterial<'a> {
         let mut emissive = Vec::new();
 
         while let Some(entry) = stack.pop() {
-            match materials.get(entry.material) {
+            match nodes.get(entry.material).expect("missing material") {
                 MaterialNode::Emissive { color } => {
                     let component = MaterialComponent {
                         selection_compensation: 1.0,
                         probability: entry
                             .probability
-                            .map(|expression| programs.compile(&expression, expressions))
+                            .map(|expression| programs.compile(&expression, nodes))
                             .transpose()?,
                         bsdf: SurfaceBsdf {
-                            color: programs.compile(color, expressions)?,
+                            color: programs.compile(color, nodes)?,
                             bsdf_type: SurfaceBsdfType::Emissive,
                         },
                     };
@@ -133,10 +127,10 @@ impl<'a> SurfaceMaterial<'a> {
                     selection_compensation: 1.0,
                     probability: entry
                         .probability
-                        .map(|expression| programs.compile(&expression, expressions))
+                        .map(|expression| programs.compile(&expression, nodes))
                         .transpose()?,
                     bsdf: SurfaceBsdf {
-                        color: programs.compile(color, expressions)?,
+                        color: programs.compile(color, nodes)?,
                         bsdf_type: SurfaceBsdfType::Diffuse,
                     },
                 }),
@@ -144,10 +138,10 @@ impl<'a> SurfaceMaterial<'a> {
                     selection_compensation: 1.0,
                     probability: entry
                         .probability
-                        .map(|expression| programs.compile(&expression, expressions))
+                        .map(|expression| programs.compile(&expression, nodes))
                         .transpose()?,
                     bsdf: SurfaceBsdf {
-                        color: programs.compile(color, expressions)?,
+                        color: programs.compile(color, nodes)?,
                         bsdf_type: SurfaceBsdfType::Mirror,
                     },
                 }),
@@ -158,15 +152,15 @@ impl<'a> SurfaceMaterial<'a> {
                     env_ior,
                     env_dispersion,
                 } => {
-                    let eval_context = EvalContext { expressions };
+                    let eval_context = EvalContext { nodes };
                     components.push(MaterialComponent {
                         selection_compensation: 1.0,
                         probability: entry
                             .probability
-                            .map(|expression| programs.compile(&expression, expressions))
+                            .map(|expression| programs.compile(&expression, nodes))
                             .transpose()?,
                         bsdf: SurfaceBsdf {
-                            color: programs.compile(color, expressions)?,
+                            color: programs.compile(color, nodes)?,
                             bsdf_type: SurfaceBsdfType::Refractive {
                                 properties: refractive::Properties {
                                     ior: ior.evaluate(eval_context)?,
@@ -180,9 +174,9 @@ impl<'a> SurfaceMaterial<'a> {
                     })
                 }
                 &MaterialNode::Mix { lhs, rhs, amount } => {
-                    let amount = expressions.insert_clamp(amount, 0.0.into(), 1.0.into());
+                    let amount = expressions::insert_clamp(nodes, amount, 0.0.into(), 1.0.into());
                     let lhs_probability = match entry.probability {
-                        Some(probability) => expressions.insert_mul(probability, amount),
+                        Some(probability) => expressions::insert_mul(nodes, probability, amount),
                         None => amount,
                     };
 
@@ -192,10 +186,18 @@ impl<'a> SurfaceMaterial<'a> {
                     });
                     stack.push(StackEntry {
                         material: rhs,
-                        probability: Some(expressions.insert_sub(1.0.into(), lhs_probability)),
+                        probability: Some(expressions::insert_sub(
+                            nodes,
+                            1.0.into(),
+                            lhs_probability,
+                        )),
                     });
                 }
-                &MaterialNode::Add { lhs, rhs } => {
+                &MaterialNode::Binary {
+                    operator: BinaryOperator::Add,
+                    lhs,
+                    rhs,
+                } => {
                     stack.push(StackEntry {
                         material: lhs,
                         probability: entry.probability,

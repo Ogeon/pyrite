@@ -6,8 +6,12 @@ use std::{
 };
 
 use bumpalo::Bump;
+use typed_nodes::Key;
 
-use crate::project::expressions::{ComplexExpression, Expression, ExpressionId, Expressions};
+use crate::project::{
+    expressions::{ComplexExpression, Expression},
+    Nodes,
+};
 
 use super::{
     instruction::{
@@ -44,7 +48,7 @@ impl<'p> ProgramCompiler<'p> {
     pub(crate) fn compile<N, V, T>(
         &self,
         expression: &Expression,
-        expressions: &Expressions,
+        nodes: &Nodes,
     ) -> Result<Program<'p, N, V, T>, Box<dyn Error>>
     where
         N: Copy + TryFrom<NumberInput, Error = Cow<'static, str>>,
@@ -66,7 +70,9 @@ impl<'p> ProgramCompiler<'p> {
             Expression::Complex(expression_id) => {
                 status.insert(
                     expression_id,
-                    ExpressionStatus::Pending(expressions.get(expression_id)),
+                    ExpressionStatus::Pending(
+                        nodes.get(expression_id).expect("missing expression"),
+                    ),
                 );
                 pending.push(expression_id);
                 expression_id
@@ -84,7 +90,7 @@ impl<'p> ProgramCompiler<'p> {
                     let x = try_get_number_value(
                         x,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -93,7 +99,7 @@ impl<'p> ProgramCompiler<'p> {
                     let y = try_get_number_value(
                         y,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -102,7 +108,7 @@ impl<'p> ProgramCompiler<'p> {
                     let z = try_get_number_value(
                         z,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -111,7 +117,7 @@ impl<'p> ProgramCompiler<'p> {
                     let w = try_get_number_value(
                         w,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -135,7 +141,7 @@ impl<'p> ProgramCompiler<'p> {
                     let red = try_get_number_value(
                         red,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -144,7 +150,7 @@ impl<'p> ProgramCompiler<'p> {
                     let green = try_get_number_value(
                         green,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -153,7 +159,7 @@ impl<'p> ProgramCompiler<'p> {
                     let blue = try_get_number_value(
                         blue,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -186,7 +192,7 @@ impl<'p> ProgramCompiler<'p> {
                     let ior = try_get_number_value(
                         ior,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -195,7 +201,7 @@ impl<'p> ProgramCompiler<'p> {
                     let env_ior = try_get_number_value(
                         env_ior,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -227,7 +233,7 @@ impl<'p> ProgramCompiler<'p> {
                     let temperature = try_get_number_value(
                         temperature,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -319,20 +325,20 @@ impl<'p> ProgramCompiler<'p> {
                     let amount = try_get_number_value(
                         amount,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
                     let (amount, amount_deps) = unwrap_or_push!(amount, expression_id, pending);
 
                     let lhs = unwrap_or_push!(
-                        try_get_register(lhs, &mut status, expressions),
+                        try_get_register(lhs, &mut status, nodes),
                         expression_id,
                         pending
                     );
 
                     let rhs = unwrap_or_push!(
-                        try_get_register(rhs, &mut status, expressions),
+                        try_get_register(rhs, &mut status, nodes),
                         expression_id,
                         pending
                     );
@@ -395,13 +401,13 @@ impl<'p> ProgramCompiler<'p> {
                 }
                 ExpressionStatus::Pending(&ComplexExpression::Binary { operator, lhs, rhs }) => {
                     let lhs = unwrap_or_push!(
-                        try_get_register(lhs, &mut status, expressions),
+                        try_get_register(lhs, &mut status, nodes),
                         expression_id,
                         pending
                     );
 
                     let rhs = unwrap_or_push!(
-                        try_get_register(rhs, &mut status, expressions),
+                        try_get_register(rhs, &mut status, nodes),
                         expression_id,
                         pending
                     );
@@ -466,7 +472,7 @@ impl<'p> ProgramCompiler<'p> {
                     let value = try_get_number_value(
                         value,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -475,7 +481,7 @@ impl<'p> ProgramCompiler<'p> {
                     let min = try_get_number_value(
                         min,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -484,7 +490,7 @@ impl<'p> ProgramCompiler<'p> {
                     let max = try_get_number_value(
                         max,
                         &mut status,
-                        expressions,
+                        nodes,
                         &mut instructions,
                         &mut number_registers,
                     )?;
@@ -605,15 +611,15 @@ enum NumberOrRegister {
 
 fn try_get_register<'a>(
     expression: Expression,
-    status: &mut HashMap<ExpressionId, ExpressionStatus<'a>>,
-    expressions: &'a Expressions,
-) -> Result<NumberOrRegister, ExpressionId> {
+    status: &mut HashMap<Key<ComplexExpression>, ExpressionStatus<'a>>,
+    nodes: &'a Nodes,
+) -> Result<NumberOrRegister, Key<ComplexExpression>> {
     match expression {
         Expression::Number(number) => Ok(NumberOrRegister::Number(number as f32)),
         Expression::Complex(expression_id) => {
-            let status = status
-                .entry(expression_id)
-                .or_insert_with(|| ExpressionStatus::Pending(expressions.get(expression_id)));
+            let status = status.entry(expression_id).or_insert_with(|| {
+                ExpressionStatus::Pending(nodes.get(expression_id).expect("missing expression"))
+            });
 
             match *status {
                 ExpressionStatus::Done {
@@ -631,15 +637,15 @@ fn try_get_register<'a>(
 
 fn try_get_number_value<'a, N, V>(
     expression: Expression,
-    status: &mut HashMap<ExpressionId, ExpressionStatus<'a>>,
-    expressions: &'a Expressions,
+    status: &mut HashMap<Key<ComplexExpression>, ExpressionStatus<'a>>,
+    nodes: &'a Nodes,
     instructions: &mut Vec<Instruction<N, V>>,
     number_registers: &mut RegisterCounter<NumberRegister>,
-) -> Result<Result<(NumberValue<N>, Inputs), ExpressionId>, Box<dyn Error>>
+) -> Result<Result<(NumberValue<N>, Inputs), Key<ComplexExpression>>, Box<dyn Error>>
 where
     N: TryFrom<NumberInput, Error = Cow<'static, str>>,
 {
-    match try_get_register(expression, status, expressions) {
+    match try_get_register(expression, status, nodes) {
         Ok(NumberOrRegister::Number(number)) => {
             Ok(Ok((NumberValue::Constant(number), Inputs::empty())))
         }

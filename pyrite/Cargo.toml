@@ -3,7 +3,7 @@ name = "pyrite"
 version = "0.0.0"
 authors = ["Erik Hedvall <hello@erikhedvall.nu>"]
 license = "MIT OR Apache-2.0"
-edition = "2018"
+edition = "2021"
 
 [[bin]]
 name = "pyrite"
@@ -22,12 +22,12 @@ palette = { git = "https://github.com/Ogeon/palette", default-features = false, 
 	"std"
 ] }
 noisy_float = "0.2.0"
-rlua = "0.17"
-rlua_serde = "0.4"
+mlua = "0.8.8"
 bumpalo = "^3.4"
 path-slash = "0.2.1"
 indicatif = "0.17.3"
 bitflags = "2.1.0"
+typed_nodes = { git = "https://github.com/Ogeon/typed_nodes" }
 
 [build-dependencies]
 csv = "^1.1"

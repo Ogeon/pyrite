@@ -81,7 +81,7 @@ impl Renderer {
         on_status: F,
         camera: &cameras::Camera,
         world: &world::World,
-        resources: Resources,
+        resources: &Resources,
     ) {
         match self.algorithm {
             Algorithm::Simple => {

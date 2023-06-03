@@ -16,10 +16,9 @@ use crate::{
     program::ProgramCompiler,
     project::{
         eval_context::{EvalContext, Evaluate, EvaluateOr},
-        expressions::{Expression, Expressions},
-        materials::Materials,
+        expressions::Expression,
         meshes::Meshes,
-        WorldObject,
+        Nodes, WorldObject,
     },
     shapes::{
         distance_estimators::QuatMul, BoundingVolume, Intersection, Normal, Plane, Shape, Triangle,
@@ -40,12 +39,11 @@ impl<'p> World<'p> {
     pub fn from_project(
         project: crate::project::World,
         programs: ProgramCompiler<'p>,
-        expressions: &mut Expressions,
-        materials: &Materials,
         meshes: &Meshes,
+        nodes: &mut Nodes,
         allocator: &'p bumpalo::Bump,
     ) -> Result<Self, Box<dyn Error>> {
-        let sky = programs.compile(&project.sky.unwrap_or(Expression::Number(0.0)), expressions)?;
+        let sky = programs.compile(&project.sky.unwrap_or(Expression::Number(0.0)), nodes)?;
 
         let mut objects: Vec<&Shape> = Vec::new();
         let mut planes = Vec::new();
@@ -59,15 +57,9 @@ impl<'p> World<'p> {
                     texture_scale,
                     material,
                 } => {
-                    let material = Material::from_project(
-                        material,
-                        programs,
-                        expressions,
-                        materials,
-                        allocator,
-                    )?;
+                    let material = Material::from_project(material, programs, nodes, allocator)?;
                     let emissive = material.is_emissive();
-                    let eval_context = EvalContext { expressions };
+                    let eval_context = EvalContext { nodes };
                     let texture_scale: Option<_> = texture_scale.evaluate(eval_context)?;
 
                     let shape = allocator.alloc(Shape::Sphere {
@@ -88,16 +80,10 @@ impl<'p> World<'p> {
                     texture_scale,
                     material,
                 } => {
-                    let material = Material::from_project(
-                        material,
-                        programs,
-                        expressions,
-                        materials,
-                        allocator,
-                    )?;
+                    let material = Material::from_project(material, programs, nodes, allocator)?;
                     let emissive = material.is_emissive();
 
-                    let eval_context = EvalContext { expressions };
+                    let eval_context = EvalContext { nodes };
                     let normal: Vector3<f32> = normal.evaluate(eval_context)?;
                     let normal = normal.normalize();
                     let (binormal, tangent) = crate::math::utils::basis(normal);
@@ -129,16 +115,10 @@ impl<'p> World<'p> {
                     bounds,
                     material,
                 } => {
-                    let material = Material::from_project(
-                        material,
-                        programs,
-                        expressions,
-                        materials,
-                        allocator,
-                    )?;
+                    let material = Material::from_project(material, programs, nodes, allocator)?;
                     let emissive = material.is_emissive();
 
-                    let eval_context = EvalContext { expressions };
+                    let eval_context = EvalContext { nodes };
                     let bounds = match bounds {
                         crate::project::BoundingVolume::Box { min, max } => BoundingVolume::Box(
                             min.evaluate(eval_context)?,
@@ -214,13 +194,8 @@ impl<'p> World<'p> {
                         let (object_material, emissive) = match mesh_materials.remove(&object.name)
                         {
                             Some(material) => {
-                                let material = Material::from_project(
-                                    material,
-                                    programs,
-                                    expressions,
-                                    materials,
-                                    allocator,
-                                )?;
+                                let material =
+                                    Material::from_project(material, programs, nodes, allocator)?;
                                 let emissive = material.is_emissive();
                                 (material, emissive)
                             }
@@ -233,7 +208,7 @@ impl<'p> World<'p> {
                             }
                         };
 
-                        let eval_context = EvalContext { expressions };
+                        let eval_context = EvalContext { nodes };
                         let transform =
                             transform.evaluate_or_else(eval_context, || Matrix4::identity())?;
                         let scale = scale.evaluate_or(eval_context, 1.0)?;
@@ -264,17 +239,17 @@ impl<'p> World<'p> {
                     width,
                     color,
                 } => {
-                    let eval_context = EvalContext { expressions };
+                    let eval_context = EvalContext { nodes };
 
                     lights.push(Lamp::Directional {
                         direction: direction.evaluate(eval_context)?,
                         width: width.evaluate(eval_context)?,
-                        color: programs.compile(&color, expressions)?,
+                        color: programs.compile(&color, nodes)?,
                     })
                 }
                 WorldObject::PointLight { position, color } => lights.push(Lamp::Point(
-                    position.evaluate(EvalContext { expressions })?,
-                    programs.compile(&color, expressions)?,
+                    position.evaluate(EvalContext { nodes })?,
+                    programs.compile(&color, nodes)?,
                 )),
             }
         }

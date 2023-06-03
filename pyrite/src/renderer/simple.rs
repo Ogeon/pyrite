@@ -21,7 +21,7 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
     renderer: &Renderer,
     world: &World,
     camera: &Camera,
-    resources: Resources,
+    resources: &Resources,
 ) {
     fn gen_rng() -> XorShiftRng {
         XorShiftRng::from_rng(rand::thread_rng()).expect("could not generate RNG")
@@ -62,7 +62,7 @@ fn render_tile<R: Rng>(
     film: &Film,
     camera: &Camera,
     world: &World,
-    resources: Resources,
+    resources: &Resources,
     renderer: &Renderer,
     progress: LocalProgress,
 ) {

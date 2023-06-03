@@ -11,7 +11,7 @@ impl Tables {
         }
     }
 
-    pub fn assign_id(&self, table: &rlua::Table) -> rlua::Result<()> {
+    pub fn assign_id(&self, table: &mlua::Table) -> mlua::Result<()> {
         table.set("_id", self.next_id.fetch_add(1))?;
 
         Ok(())
@@ -23,7 +23,7 @@ pub trait TableExt {
     fn get_or_assign_id(&self, tables: &Tables) -> Result<TableId, Box<dyn Error>>;
 }
 
-impl<'lua> TableExt for rlua::Table<'lua> {
+impl<'lua> TableExt for mlua::Table<'lua> {
     fn get_id(&self) -> Result<TableId, Box<dyn Error>> {
         Ok(TableId(self.get("_id").map_err(|error| {
             format!("could not get table ID: {}", error)
@@ -31,7 +31,7 @@ impl<'lua> TableExt for rlua::Table<'lua> {
     }
 
     fn get_or_assign_id(&self, tables: &Tables) -> Result<TableId, Box<dyn Error>> {
-        if let rlua::Value::Nil = self.get("_id")? {
+        if let mlua::Value::Nil = self.get("_id")? {
             tables.assign_id(self)?;
         }
 

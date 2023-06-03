@@ -1,7 +1,9 @@
 [workspace]
-members = [
-    "pyrite"
-]
+members = ["pyrite"]
+
+[profile.dev]
+opt-level = 3
+panic = "abort"
 
 [profile.release]
 lto = true

@@ -5,13 +5,13 @@ use std::{
     ops::{Add, Mul, Sub},
 };
 
-use super::{
-    parse_context::{Parse, ParseContext},
-    tables::TableId,
-};
-use crate::{math::utils::Interpolated, parse_enum};
+use typed_nodes::TableId;
 
-#[derive(Clone)]
+use super::parse_context::ParseContext;
+use crate::{light_source, math::utils::Interpolated};
+
+#[derive(Clone, typed_nodes::FromLua)]
+#[typed_nodes(tag = format)]
 pub enum Spectrum<T: Clone + 'static> {
     Array {
         min: f32,
@@ -21,27 +21,6 @@ pub enum Spectrum<T: Clone + 'static> {
     Curve {
         points: Vec<(f32, T)>,
     },
-}
-
-impl<'lua> Parse<'lua> for Spectrum<f32> {
-    type Input = rlua::Table<'lua>;
-
-    fn parse<'a>(mut context: ParseContext<'a, 'lua, Self::Input>) -> Result<Self, Box<dyn Error>> {
-        parse_enum!(context["format"] {
-            "array" => Ok(Spectrum::Array {
-                min: context.expect_field("min")?,
-                max: context.expect_field("max")?,
-                points: Cow::Owned(context.with_field("points", |points: ParseContext<rlua::Value>| {
-                    Ok(rlua_serde::from_value(points.value().clone())?)
-                })?)
-            }),
-            "curve" => Ok(Spectrum::Curve {
-                points: context.with_field("points", |points: ParseContext<rlua::Value>| {
-                    Ok(rlua_serde::from_value(points.value().clone())?)
-                })?
-            }),
-        })
-    }
 }
 
 impl<T> Spectrum<T>
@@ -114,12 +93,12 @@ impl SpectrumLoader {
         }
     }
 
-    pub fn get(&self, table_id: TableId) -> Option<SpectrumId> {
-        self.table_map.get(&table_id).cloned()
+    pub fn get(&self, id: TableId) -> Option<SpectrumId> {
+        self.table_map.get(&id).cloned()
     }
 
-    pub fn insert<'lua>(&mut self, table_id: TableId, spectrum: Spectrum<f32>) -> SpectrumId {
-        match self.table_map.entry(table_id) {
+    pub fn insert<'lua>(&mut self, id: TableId, spectrum: Spectrum<f32>) -> SpectrumId {
+        match self.table_map.entry(id) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
                 let id = self.spectra.insert(spectrum);
@@ -137,3 +116,30 @@ impl SpectrumLoader {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub struct SpectrumId(usize);
+
+impl<'a, 'lua> typed_nodes::FromLua<'lua, ParseContext<'a, 'lua>> for SpectrumId {
+    fn from_lua(
+        value: mlua::Value<'lua>,
+        context: &mut ParseContext<'a, 'lua>,
+    ) -> Result<Self, Box<dyn Error>> {
+        typed_nodes::VisitTable::visit(value, context, |value, context| {
+            let id = TableId::get_or_assign(&value, context)?;
+
+            if let Some(spectrum) = context.get_spectrum_loader().get(id) {
+                return Ok(spectrum);
+            }
+
+            let spectrum = if let Ok(name) = value.get::<_, String>("name") {
+                match &*name {
+                    "a" => light_source::A,
+                    "d65" => light_source::D65,
+                    _ => Err(format!("unknown builtin spectrum: {}", name))?,
+                }
+            } else {
+                Spectrum::from_lua(mlua::Value::Table(value), context)?
+            };
+
+            Ok(context.get_spectrum_loader().insert(id, spectrum))
+        })
+    }
+}

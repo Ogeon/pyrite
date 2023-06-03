@@ -1,17 +1,17 @@
 use std::error::Error;
 
-use super::expressions::Expressions;
+use super::Nodes;
 
 #[derive(Clone, Copy)]
-pub struct EvalContext<'a> {
-    pub expressions: &'a Expressions,
+pub(crate) struct EvalContext<'a> {
+    pub nodes: &'a Nodes,
 }
 
-pub trait Evaluate<T> {
+pub(crate) trait Evaluate<T> {
     fn evaluate<'a>(&self, context: EvalContext<'a>) -> Result<T, Box<dyn Error>>;
 }
 
-pub trait EvaluateOr<T> {
+pub(crate) trait EvaluateOr<T> {
     fn evaluate_or<'a>(&self, context: EvalContext<'a>, default: T) -> Result<T, Box<dyn Error>>;
 
     fn evaluate_or_else<'a>(

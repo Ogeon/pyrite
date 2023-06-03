@@ -28,12 +28,7 @@ use program::{
     ExecutionContext, NumberInput, ProgramCompiler, ProgramFor, ProgramInput, Resources,
     VectorInput,
 };
-use project::{
-    expressions::{Expressions, Vector},
-    materials::Materials,
-    meshes::Meshes,
-    ProjectData,
-};
+use project::{expressions::Vector, meshes::Meshes, Nodes, ProjectData};
 use renderer::ProgressIndicator;
 
 mod cameras;
@@ -63,11 +58,10 @@ fn main() {
         let loading_started = Instant::now();
 
         let ProjectData {
-            mut expressions,
+            nodes,
             meshes,
             spectra,
             textures,
-            materials,
             project,
         } = match project::load_project(&project_path) {
             Ok(project) => project,
@@ -78,20 +72,13 @@ fn main() {
         };
 
         let programs = ProgramCompiler::new(&arena);
-        let resources = Resources {
-            spectra: &spectra,
-            textures: &textures,
+        let mut resources = Resources {
+            textures,
+            spectra,
+            nodes,
         };
 
-        let parse_result = parse_project(
-            project,
-            programs,
-            &mut expressions,
-            &meshes,
-            &materials,
-            resources,
-            &arena,
-        );
+        let parse_result = parse_project(project, programs, &meshes, &mut resources, &arena);
         let loading_ended = Instant::now();
 
         match parse_result {
@@ -124,27 +111,24 @@ fn main() {
 fn parse_project<'p>(
     project: project::Project,
     programs: ProgramCompiler<'p>,
-    expressions: &mut Expressions,
     meshes: &Meshes,
-    materials: &Materials,
-    resources: Resources<'p>,
+    resources: &'p mut Resources,
     arena: &'p Bump,
 ) -> Result<(ImageSettings<'p>, RenderContext<'p>), Box<dyn Error>> {
+    let image = ImageSettings::from_project(project.image, programs, &mut resources.nodes)?;
+
     let config = RenderContext {
-        camera: cameras::Camera::from_project(project.camera, expressions)?,
+        camera: cameras::Camera::from_project(project.camera, &resources.nodes)?,
         renderer: renderer::Renderer::from_project(project.renderer),
         world: world::World::from_project(
             project.world,
             programs,
-            expressions,
-            materials,
             meshes,
+            &mut resources.nodes,
             &arena,
         )?,
         resources,
     };
-
-    let image = ImageSettings::from_project(project.image, programs, expressions)?;
 
     Ok((image, config))
 }
@@ -437,7 +421,7 @@ struct RenderContext<'p> {
     camera: cameras::Camera,
     world: world::World<'p>,
     renderer: renderer::Renderer,
-    resources: Resources<'p>,
+    resources: &'p Resources,
 }
 
 struct ImageSettings<'a> {
@@ -452,7 +436,7 @@ impl<'a> ImageSettings<'a> {
     fn from_project(
         project: project::Image,
         programs: ProgramCompiler<'a>,
-        expressions: &Expressions,
+        nodes: &mut Nodes,
     ) -> Result<Self, Box<dyn Error>> {
         let project::Image {
             width,
@@ -467,10 +451,10 @@ impl<'a> ImageSettings<'a> {
             height,
             file,
             filter: filter
-                .map(|filter| programs.compile(&filter, expressions))
+                .map(|filter| programs.compile(&filter, nodes))
                 .transpose()?,
             white: white
-                .map(|white| programs.compile(&white, expressions))
+                .map(|white| programs.compile(&white, nodes))
                 .transpose()?,
         })
     }

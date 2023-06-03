@@ -8,6 +8,8 @@ use palette::{LinLuma, LinSrgba};
 
 use crate::texture::Texture;
 
+use super::parse_context::ParseContext;
+
 pub struct Textures {
     color_textures: Vec<Texture<LinSrgba>>,
     mono_textures: Vec<Texture<LinLuma>>,
@@ -123,3 +125,29 @@ pub struct ColorTextureId(usize);
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub struct MonoTextureId(usize);
+
+impl<'a, 'lua> typed_nodes::FromLua<'lua, ParseContext<'a, 'lua>> for ColorTextureId {
+    fn from_lua(
+        value: mlua::Value<'lua>,
+        context: &mut ParseContext<'a, 'lua>,
+    ) -> Result<Self, Box<dyn Error>> {
+        typed_nodes::VisitTable::visit(value, context, |value, context| {
+            context
+                .get_texture_loader()
+                .load_color(value.get::<_, String>("path")?, value.get("linear")?)
+        })
+    }
+}
+
+impl<'a, 'lua> typed_nodes::FromLua<'lua, ParseContext<'a, 'lua>> for MonoTextureId {
+    fn from_lua(
+        value: mlua::Value<'lua>,
+        context: &mut ParseContext<'a, 'lua>,
+    ) -> Result<Self, Box<dyn Error>> {
+        typed_nodes::VisitTable::visit(value, context, |value, context| {
+            context
+                .get_texture_loader()
+                .load_mono(value.get::<_, String>("path")?, value.get("linear")?)
+        })
+    }
+}

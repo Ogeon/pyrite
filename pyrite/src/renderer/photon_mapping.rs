@@ -31,7 +31,7 @@ pub(crate) fn render<F: FnMut(Progress<'_>)>(
     config: &Config,
     world: &World,
     camera: &Camera,
-    resources: Resources,
+    resources: &Resources,
 ) {
     fn gen_rng() -> XorShiftRng {
         XorShiftRng::from_rng(rand::thread_rng()).expect("could not generate RNG")

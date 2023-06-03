@@ -6,6 +6,8 @@ use std::{
 
 use obj::{Group, Obj, ObjData, Object};
 
+use super::parse_context::ParseContext;
+
 pub struct Meshes {
     meshes: Vec<Obj>,
 }
@@ -115,3 +117,15 @@ fn remove_materials(obj: Obj) -> Obj {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub struct MeshId(usize);
+
+impl<'a, 'lua> typed_nodes::FromLua<'lua, ParseContext<'a, 'lua>> for MeshId {
+    fn from_lua(
+        value: mlua::Value<'lua>,
+        context: &mut ParseContext<'a, 'lua>,
+    ) -> Result<Self, Box<dyn Error>> {
+        let mlua::Value::String(value) = value else {
+            return Err(typed_nodes::Error::invalid_type(&value, "a file path"));
+        };
+        context.get_mesh_loader().load(&*value.to_string_lossy())
+    }
+}
